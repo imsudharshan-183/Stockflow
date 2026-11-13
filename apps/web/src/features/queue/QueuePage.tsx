@@ -6,7 +6,6 @@ import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ButtonGroup } from "@/components/ui/button-group";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
 import { priorityOf, QUEUE_PAGE_SIZE } from "@/config";
@@ -119,7 +118,7 @@ export function QueuePage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <ButtonGroup>
+        <div className="flex items-center gap-2">
           {canDecide ? (
             <Button
               size="sm"
@@ -138,7 +137,7 @@ export function QueuePage() {
           <Button size="sm" variant="outline" onClick={() => setShowAll((current) => !current)}>
             {showAll ? "Show top 50" : "Show all"}
           </Button>
-        </ButtonGroup>
+        </div>
         <p className="text-sm text-muted-foreground">
           {list.data ? `${formatNumber(list.data.total)} actions` : "Loading actions"}
         </p>

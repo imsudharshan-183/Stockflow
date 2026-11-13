@@ -27,22 +27,25 @@ const badgeVariants = cva(
 )
 
 const toneClass = {
-  transfer: "border-transparent bg-violet-100 text-violet-800",
-  reorder: "border-transparent bg-blue-100 text-blue-800",
-  markdown: "border-transparent bg-amber-100 text-amber-800",
-  risk: "border-transparent bg-red-100 text-red-700",
-  over: "border-transparent bg-amber-100 text-amber-800",
-  ok: "border-transparent bg-emerald-100 text-emerald-800",
-  fresh: "border-transparent bg-slate-100 text-slate-700",
-  approved: "border-transparent bg-emerald-100 text-emerald-800",
-  rejected: "border-transparent bg-red-100 text-red-700",
-  pending: "border-transparent bg-violet-50 text-violet-700",
-  high: "border-transparent bg-violet-600 text-white",
-  med: "border-transparent bg-violet-100 text-violet-800",
-  low: "border-transparent bg-slate-100 text-slate-600",
+  transfer: "border-violet-200 bg-violet-100 text-violet-900",
+  reorder: "border-sky-200 bg-sky-100 text-sky-900",
+  markdown: "border-amber-200 bg-amber-100 text-amber-900",
+  risk: "border-red-200 bg-red-100 text-red-800",
+  over: "border-amber-200 bg-amber-100 text-amber-900",
+  ok: "border-emerald-200 bg-emerald-100 text-emerald-900",
+  fresh: "border-slate-200 bg-slate-100 text-slate-800",
+  approved: "border-emerald-200 bg-emerald-100 text-emerald-900",
+  rejected: "border-red-200 bg-red-100 text-red-800",
+  pending: "border-slate-200 bg-slate-100 text-slate-700",
+  high: "border-violet-700 bg-violet-700 text-white",
+  med: "border-violet-200 bg-violet-100 text-violet-900",
+  low: "border-slate-200 bg-slate-100 text-slate-700",
+  confHigh: "border-emerald-200 bg-emerald-50 text-emerald-900",
+  confMed: "border-amber-200 bg-amber-50 text-amber-900",
+  confLow: "border-rose-200 bg-rose-50 text-rose-900",
 } as const
 
-type BadgeTone = keyof typeof toneClass
+export type BadgeTone = keyof typeof toneClass
 
 function Badge({
   className,
