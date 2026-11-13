@@ -1,9 +1,12 @@
 import type { Policy, PositionView, SeriesPoint } from "@stockflow/core";
 import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
+  Bar,
   CartesianGrid,
+  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -13,14 +16,33 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { Bar } from "recharts";
-import { ComposedChart } from "recharts";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCard,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableToolbar,
+} from "@/components/ui/table";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
-import { actionLabel, formatCover, formatDate, formatMoneyFull, formatNumber, statusLabel } from "@/lib/format";
+import {
+  actionLabel,
+  formatCover,
+  formatDate,
+  formatMoneyFull,
+  formatNumber,
+  statusLabel,
+} from "@/lib/format";
+import { TOKENS } from "@/lib/tokens";
+import { cn } from "@/lib/utils";
 
 const STATUS_ORDER = { AT_RISK: 0, OVERSTOCK: 1, HEALTHY: 2, NEW: 3 } as const;
 
@@ -35,7 +57,9 @@ export function ProductPage() {
 
   if (!sku) return <EmptyBlock title="Missing SKU" body="Open a product from the queue." />;
   if (product.isPending) return <LoadingBlock />;
-  if (product.isError) return <ErrorBlock message={product.error.message} onRetry={() => void product.refetch()} />;
+  if (product.isError) {
+    return <ErrorBlock message={product.error.message} onRetry={() => void product.refetch()} />;
+  }
 
   const detail = product.data;
   const positions = [...detail.positions].sort(
@@ -51,14 +75,19 @@ export function ProductPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <p className="text-sm text-muted-foreground">{detail.product.category}</p>
-        <h1 className="text-2xl font-semibold tracking-tight">{detail.product.name}</h1>
-        <p className="text-sm text-muted-foreground">
-          {detail.product.sku} · price {formatMoneyFull(detail.product.price)} · cost {formatMoneyFull(detail.product.cost)} · lead
-          time {detail.product.leadTimeDays} days
-        </p>
-      </div>
+      <PageHeader
+        title={detail.product.name}
+        subtitle={`${detail.product.sku} · ${detail.product.category} · Retail ${formatMoneyFull(detail.product.price)} · Cost ${formatMoneyFull(detail.product.cost)} · Lead time ${formatNumber(detail.product.leadTimeDays)} days`}
+        actions={
+          <Link
+            to="/queue"
+            className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+          >
+            <ArrowLeft className="size-3.5" aria-hidden="true" />
+            Back to queue
+          </Link>
+        }
+      />
 
       {position && series ? (
         <Logic
@@ -72,51 +101,118 @@ export function ProductPage() {
         <EmptyBlock title="No branches" body="This SKU has no stock positions." />
       )}
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-[720px] text-sm">
-          <thead className="bg-muted/60 text-left text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 font-medium">Branch</th>
-              <th className="px-3 py-2 font-medium">Status</th>
-              <th className="px-3 py-2 font-medium">On hand</th>
-              <th className="px-3 py-2 font-medium">Cover</th>
-              <th className="px-3 py-2 font-medium">Reorder point</th>
-              <th className="px-3 py-2 font-medium">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {positions.map((item) => (
-              <tr
-                key={item.branch.id}
-                className={item.branch.id === selectedId ? "border-t bg-accent/60" : "border-t"}
-              >
-                <td className="px-3 py-2">
-                  <button className="hover:underline" type="button" onClick={() => setPicked(item.branch.id)}>
-                    {item.branch.name}
-                  </button>
-                </td>
-                <td className="px-3 py-2">
-                  <Badge tone={item.status === "AT_RISK" ? "risk" : item.status === "OVERSTOCK" ? "over" : item.status === "HEALTHY" ? "ok" : "fresh"}>
-                    {item.status === "AT_RISK" ? "At risk" : item.status === "OVERSTOCK" ? "Overstock" : item.status === "HEALTHY" ? "Healthy" : "New"}
-                  </Badge>
-                </td>
-                <td className="px-3 py-2">{formatNumber(item.onHand)}</td>
-                <td className="px-3 py-2">{formatCover(item.coverDays)}</td>
-                <td className="px-3 py-2">{formatNumber(item.reorderPoint)}</td>
-                <td className="px-3 py-2">
-                  {item.recommendation ? (
-                    <Link className="hover:underline" to={`/queue?branch=${item.branch.id}`}>
-                      {actionLabel(item.recommendation.action)} {formatNumber(item.recommendation.quantity)}
-                    </Link>
-                  ) : (
-                    <span className="text-muted-foreground">None</span>
-                  )}
-                </td>
+      <TableCard>
+        <TableToolbar>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">
+              Network positions across branches
+            </h2>
+            <p className="text-xs text-muted-foreground">
+              Select a branch row to inspect its 90-day demand, stock, and cover charts above
+            </p>
+          </div>
+        </TableToolbar>
+
+        <div className="overflow-x-auto">
+          <Table className="min-w-[720px]">
+            <TableHeader>
+              <tr className="border-b border-border">
+                <TableHead className="w-[26%]">Branch</TableHead>
+                <TableHead className="w-[120px]">Health</TableHead>
+                <TableHead className="w-[100px] text-right">On hand</TableHead>
+                <TableHead className="w-[120px] text-right">Cover</TableHead>
+                <TableHead className="w-[120px] text-right">Reorder point</TableHead>
+                <TableHead className="w-auto">Recommended action</TableHead>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </TableHeader>
+            <TableBody>
+              {positions.map((item) => {
+                const isPicked = item.branch.id === selectedId;
+                return (
+                  <TableRow
+                    key={item.branch.id}
+                    data-state={isPicked ? "selected" : undefined}
+                    onClick={() => setPicked(item.branch.id)}
+                    className="cursor-pointer"
+                  >
+                    <TableCell>
+                      <Button
+                        variant="link"
+                        size="sm"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setPicked(item.branch.id);
+                        }}
+                        className="h-auto p-0 font-semibold text-foreground hover:text-primary"
+                      >
+                        {item.branch.name}
+                      </Button>
+                      <div className="text-xs text-muted-foreground">{item.branch.id}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge
+                        tone={
+                          item.status === "AT_RISK"
+                            ? "risk"
+                            : item.status === "OVERSTOCK"
+                              ? "over"
+                              : item.status === "HEALTHY"
+                                ? "ok"
+                                : "fresh"
+                        }
+                        dot
+                      >
+                        {item.status === "AT_RISK"
+                          ? "At risk"
+                          : item.status === "OVERSTOCK"
+                            ? "Overstock"
+                            : item.status === "HEALTHY"
+                              ? "Healthy"
+                              : "New"}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right font-medium text-foreground tabular-nums">
+                      {formatNumber(item.onHand)}
+                    </TableCell>
+                    <TableCell className="text-right text-foreground tabular-nums">
+                      {formatCover(item.coverDays)}
+                    </TableCell>
+                    <TableCell className="text-right text-muted-foreground tabular-nums">
+                      {formatNumber(item.reorderPoint)}
+                    </TableCell>
+                    <TableCell onClick={(event) => event.stopPropagation()}>
+                      {item.recommendation ? (
+                        <Link
+                          className="inline-flex items-center gap-2 font-medium text-primary hover:underline"
+                          to={`/queue?branch=${item.branch.id}`}
+                        >
+                          <Badge
+                            tone={
+                              item.recommendation.action === "TRANSFER"
+                                ? "transfer"
+                                : item.recommendation.action === "REORDER"
+                                  ? "reorder"
+                                  : "markdown"
+                            }
+                          >
+                            {actionLabel(item.recommendation.action)}
+                          </Badge>
+                          <span className="tabular-nums">
+                            {formatNumber(item.recommendation.quantity)} units (
+                            {formatMoneyFull(item.recommendation.netBenefit)})
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">None</span>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
+      </TableCard>
     </div>
   );
 }
@@ -145,16 +241,16 @@ function Logic({
   }));
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-      <Card>
+    <div className="grid gap-5 lg:grid-cols-[310px_1fr]">
+      <Card className="rounded-2xl border border-border shadow-card">
         <CardHeader>
-          <CardTitle>Why this branch</CardTitle>
+          <CardTitle>Branch position details</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3 text-sm">
-          <label className="block text-xs text-muted-foreground">
-            Branch
+        <CardContent className="space-y-4 text-sm">
+          <label className="block text-xs font-medium text-muted-foreground">
+            Inspect branch
             <select
-              className="mt-1 h-9 w-full rounded-md border border-input bg-background px-2 text-sm text-foreground"
+              className="mt-1.5 h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
               value={position.branch.id}
               onChange={(event) => onBranch(event.target.value)}
             >
@@ -165,41 +261,73 @@ function Logic({
               ))}
             </select>
           </label>
-          <p>
-            <Link className="hover:underline" to={`/branches/${position.branch.id}`}>
-              {position.branch.name}
+
+          <div>
+            <Link
+              className="text-sm font-semibold text-primary hover:underline"
+              to={`/branches/${position.branch.id}`}
+            >
+              Open {position.branch.name} branch page →
             </Link>
+          </div>
+
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            Safety stock is {policy.serviceZ} × demand standard deviation × √lead time. Reorder
+            point is daily demand × lead time + safety stock. At risk means on hand is below that
+            point. Overstock means cover is above {policy.overstockCoverDays} days.
           </p>
-          <p className="text-muted-foreground">
-            Safety stock is {policy.serviceZ} × demand standard deviation × square root of lead time. Reorder point is
-            daily demand × lead time + safety stock. At risk means on hand is below that point. Overstock means cover
-            is above {policy.overstockCoverDays} days.
-          </p>
-          <dl className="grid grid-cols-2 gap-2">
-            <Mini label="On hand" value={formatNumber(position.onHand)} />
-            <Mini label="Daily demand" value={formatNumber(position.velocity)} />
+
+          <dl className="grid grid-cols-2 gap-2.5 rounded-xl border border-border bg-secondary/30 p-3">
+            <Mini label="On hand" value={`${formatNumber(position.onHand)} units`} />
+            <Mini label="Daily demand" value={`${formatNumber(position.velocity)} / day`} />
             <Mini label="Std. dev." value={formatNumber(position.sigmaDemand)} />
-            <Mini label="Lead time" value={`${position.leadTimeDays} days`} />
-            <Mini label="Safety stock" value={formatNumber(position.safetyStock)} />
-            <Mini label="Reorder point" value={formatNumber(position.reorderPoint)} />
+            <Mini label="Lead time" value={`${formatNumber(position.leadTimeDays)} days`} />
+            <Mini label="Safety stock" value={`${formatNumber(position.safetyStock)} units`} />
+            <Mini label="Reorder point" value={`${formatNumber(position.reorderPoint)} units`} />
             <Mini label="Cover" value={formatCover(position.coverDays)} />
             <Mini label="In-stock days" value={formatNumber(position.inStockDays)} />
           </dl>
+
           {position.recommendation ? (
-            <div className="rounded-md bg-muted p-2">
-              <p className="font-medium">
-                {actionLabel(position.recommendation.action)} {formatNumber(position.recommendation.quantity)} ·{" "}
-                {statusLabel(position.recommendation.status)}
+            <div className="rounded-xl border border-primary-ring bg-primary-soft p-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <Badge
+                  tone={
+                    position.recommendation.action === "TRANSFER"
+                      ? "transfer"
+                      : position.recommendation.action === "REORDER"
+                        ? "reorder"
+                        : "markdown"
+                  }
+                >
+                  {actionLabel(position.recommendation.action)}{" "}
+                  {formatNumber(position.recommendation.quantity)}
+                </Badge>
+                <Badge
+                  tone={
+                    position.recommendation.status === "APPROVED"
+                      ? "approved"
+                      : position.recommendation.status === "REJECTED"
+                        ? "rejected"
+                        : "pending"
+                  }
+                  dot
+                >
+                  {statusLabel(position.recommendation.status)}
+                </Badge>
+              </div>
+              <p className="mt-2 leading-relaxed text-foreground">
+                {position.recommendation.reason}
               </p>
-              <p className="mt-1">{position.recommendation.reason}</p>
             </div>
           ) : (
-            <p className="text-muted-foreground">No action for this branch today.</p>
+            <p className="text-xs text-muted-foreground">No action for this branch today.</p>
           )}
         </CardContent>
       </Card>
-      <div className="space-y-4">
-        <Card>
+
+      <div className="space-y-5">
+        <Card className="rounded-2xl border border-border shadow-card">
           <CardHeader>
             <CardTitle>Sales and stock</CardTitle>
           </CardHeader>
@@ -207,39 +335,110 @@ function Logic({
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={salesRows}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.4} />
-                  <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 12 }} />
-                  <YAxis yAxisId="sales" tick={{ fontSize: 12 }} width={36} />
-                  <YAxis yAxisId="stock" orientation="right" tick={{ fontSize: 12 }} width={40} />
+                  <CartesianGrid
+                    strokeDasharray="3 3"
+                    stroke={TOKENS.chart.grid}
+                    strokeOpacity={0.6}
+                  />
+                  <XAxis
+                    dataKey="date"
+                    tickFormatter={formatDate}
+                    minTickGap={28}
+                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                  />
+                  <YAxis
+                    yAxisId="sales"
+                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                    width={36}
+                  />
+                  <YAxis
+                    yAxisId="stock"
+                    orientation="right"
+                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                    width={40}
+                  />
                   <Tooltip content={<UnitTip />} />
                   <Legend />
-                  <Bar yAxisId="sales" dataKey="sales" name="Sales" fill="#b45309" />
-                  <Line yAxisId="stock" type="monotone" dataKey="stock" name="On hand" stroke="#0f766e" dot={false} strokeWidth={2} />
-                  <ReferenceLine yAxisId="stock" y={position.reorderPoint} stroke="#0369a1" strokeDasharray="4 4" label="Reorder" />
+                  <Bar
+                    yAxisId="sales"
+                    dataKey="sales"
+                    name="Sales"
+                    fill={TOKENS.chart.markdown}
+                  />
+                  <Line
+                    yAxisId="stock"
+                    type="monotone"
+                    dataKey="stock"
+                    name="On hand"
+                    stroke={TOKENS.chart.inventoryValue}
+                    dot={false}
+                    strokeWidth={2}
+                  />
+                  <ReferenceLine
+                    yAxisId="stock"
+                    y={position.reorderPoint}
+                    stroke={TOKENS.chart.reorder}
+                    strokeDasharray="4 4"
+                    label="Reorder"
+                  />
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card className="rounded-2xl border border-border shadow-card">
           <CardHeader>
-            <CardTitle>Cover</CardTitle>
+            <CardTitle>Cover days trajectory</CardTitle>
           </CardHeader>
           <CardContent>
             {position.velocity <= 0 ? (
-              <p className="text-sm text-muted-foreground">No in-stock demand, so cover is not a number of days.</p>
+              <p className="text-sm text-muted-foreground">
+                No in-stock demand, so cover is not a number of days.
+              </p>
             ) : (
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart data={coverRows}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#94a3b8" strokeOpacity={0.4} />
-                    <XAxis dataKey="date" tickFormatter={formatDate} minTickGap={28} tick={{ fontSize: 12 }} />
-                    <YAxis tick={{ fontSize: 12 }} width={36} />
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={TOKENS.chart.grid}
+                      strokeOpacity={0.6}
+                    />
+                    <XAxis
+                      dataKey="date"
+                      tickFormatter={formatDate}
+                      minTickGap={28}
+                      tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                    />
+                    <YAxis tick={{ fontSize: 11, fill: TOKENS.chart.axis }} width={36} />
                     <Tooltip content={<CoverTip />} />
-                    <Line type="monotone" dataKey="cover" name="Cover days" stroke="#0f766e" dot={false} strokeWidth={2} />
-                    <ReferenceLine y={policy.receiverCoverDays} stroke="#0369a1" strokeDasharray="4 4" label="14-day target" />
-                    <ReferenceLine y={policy.donorCoverDays} stroke="#a16207" strokeDasharray="4 4" label="Donor floor" />
-                    <ReferenceLine y={policy.overstockCoverDays} stroke="#be123c" strokeDasharray="4 4" label="Overstock" />
+                    <Line
+                      type="monotone"
+                      dataKey="cover"
+                      name="Cover days"
+                      stroke={TOKENS.chart.netBenefit}
+                      dot={false}
+                      strokeWidth={2}
+                    />
+                    <ReferenceLine
+                      y={policy.receiverCoverDays}
+                      stroke={TOKENS.chart.reorder}
+                      strokeDasharray="4 4"
+                      label="14d target"
+                    />
+                    <ReferenceLine
+                      y={policy.donorCoverDays}
+                      stroke={TOKENS.chart.markdown}
+                      strokeDasharray="4 4"
+                      label="30d donor floor"
+                    />
+                    <ReferenceLine
+                      y={policy.overstockCoverDays}
+                      stroke={TOKENS.chart.stockoutRate}
+                      strokeDasharray="4 4"
+                      label="60d overstock"
+                    />
                   </LineChart>
                 </ResponsiveContainer>
               </div>
@@ -254,8 +453,8 @@ function Logic({
 function Mini({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd>{value}</dd>
+      <dt className="text-[11px] text-muted-foreground">{label}</dt>
+      <dd className="font-semibold text-foreground tabular-nums">{value}</dd>
     </div>
   );
 }
@@ -270,10 +469,10 @@ function UnitTip({
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <div className="rounded-md border bg-card px-3 py-2 text-xs shadow-sm">
-      <p className="font-medium">{formatDate(point.date)}</p>
-      <p>Sales {formatNumber(point.sales)}</p>
-      <p>On hand {formatNumber(point.stock)}</p>
+    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-card tabular-nums">
+      <p className="font-semibold">{formatDate(point.date)}</p>
+      <p className="mt-0.5">Sales: {formatNumber(point.sales)} units</p>
+      <p>On hand: {formatNumber(point.stock)} units</p>
     </div>
   );
 }
@@ -288,9 +487,9 @@ function CoverTip({
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <div className="rounded-md border bg-card px-3 py-2 text-xs shadow-sm">
-      <p className="font-medium">{formatDate(point.date)}</p>
-      <p>Cover {formatCover(point.cover)}</p>
+    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-card tabular-nums">
+      <p className="font-semibold">{formatDate(point.date)}</p>
+      <p className="mt-0.5">Cover: {formatCover(point.cover)}</p>
     </div>
   );
 }

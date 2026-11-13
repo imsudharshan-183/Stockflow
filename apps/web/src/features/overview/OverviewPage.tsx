@@ -1,7 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { Boxes, CircleDollarSign, Link2, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, TrendingUp, TriangleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
-import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { ErrorBlock, LoadingBlock } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -10,7 +20,15 @@ import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
-import { actionLabel, formatCover, formatDate, formatMoney, formatMoneyFull, formatNumber, formatPct } from "@/lib/format";
+import {
+  formatDate,
+  formatMoney,
+  formatMoneyFull,
+  formatNumber,
+  formatPct,
+} from "@/lib/format";
+import { TOKENS } from "@/lib/tokens";
+import { cn } from "@/lib/utils";
 import type { TrendPoint } from "@stockflow/core";
 
 interface WeekPoint {
@@ -21,10 +39,15 @@ interface WeekPoint {
 
 export function OverviewPage() {
   const kpis = useQuery({ queryKey: queryKeys.kpis, queryFn: api.kpis });
-  const queue = useQuery({ queryKey: queryKeys.recommendations({}), queryFn: () => api.recommendations({}) });
+  const queue = useQuery({
+    queryKey: queryKeys.recommendations({}),
+    queryFn: () => api.recommendations({}),
+  });
 
   if (kpis.isPending) return <LoadingBlock />;
-  if (kpis.isError) return <ErrorBlock message={kpis.error.message} onRetry={() => void kpis.refetch()} />;
+  if (kpis.isError) {
+    return <ErrorBlock message={kpis.error.message} onRetry={() => void kpis.refetch()} />;
+  }
 
   const report = kpis.data;
   const weeks = weeklyPoints(report.trend);
@@ -33,135 +56,149 @@ export function OverviewPage() {
     avoided >= 0
       ? `${formatNumber(avoided)} fewer stockout days`
       : `${formatNumber(Math.abs(avoided))} more stockout days`;
-  const projected = queue.data?.recommendations.reduce((sum, row) => sum + row.netBenefit, 0) ?? 0;
+  const recommendations = queue.data?.recommendations ?? [];
+  const totalActions = queue.data?.total ?? 0;
+  const projected = recommendations.reduce((sum, row) => sum + row.netBenefit, 0);
+  const pendingCount = recommendations.filter((row) => row.status === "PENDING").length;
 
   return (
     <div className="space-y-6">
-      <div className="rounded-2xl border bg-card px-6 py-4 shadow-card">
-        {queue.data ? (
-          <p className="text-sm">
-            <span className="font-semibold">{formatNumber(queue.data.total)} actions today</span>
-            <span className="text-muted-foreground">, projected net benefit </span>
-            <span className="font-semibold">{formatMoney(projected)}</span>
+      <PageHeader
+        title="Network overview"
+        subtitle={`As of ${formatDate(report.asOf)} · ${formatNumber(report.branches.length)} branches monitored`}
+      />
+
+      {/* Single Unified Hero Panel */}
+      <section className="hero-surface flex flex-col justify-between gap-4 rounded-2xl border border-border p-6 shadow-card lg:flex-row lg:items-center">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="transfer">Backtest verified</Badge>
+            <span className="text-xs font-medium text-muted-foreground">
+              {report.backtest.windowDays}-day replay window
+            </span>
+          </div>
+          <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
+            {queue.data
+              ? `${formatNumber(totalActions)} ranked actions worth ${formatMoney(projected)} in projected net benefit`
+              : "Evaluating today's network recommendations..."}
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            With StockFlow:{" "}
+            <span className="font-medium text-foreground">{avoidedText}</span> and{" "}
+            <span className="font-medium text-foreground">
+              {formatMoney(report.backtest.cashReleased)}
+            </span>{" "}
+            capital released over the last {report.backtest.windowDays} days.
           </p>
-        ) : (
-          <p className="text-sm text-muted-foreground">Loading today's actions</p>
-        )}
-      </div>
+        </div>
 
-      <div className="brand-gradient rounded-xl px-6 py-5 text-white">
-        <h1 className="text-2xl font-semibold tracking-tight">Today's network</h1>
-        <p className="text-sm text-white/80">As of {formatDate(report.asOf)}. Ranked moves for 15 branches.</p>
-      </div>
+        <div className="shrink-0">
+          <span className="hero-cta-glow inline-block rounded-xl">
+            <Link
+              to="/queue"
+              className={cn(
+                buttonVariants({ variant: "primary", size: "lg" }),
+                "rounded-xl px-5 font-semibold",
+              )}
+            >
+              {queue.data
+                ? `Review ${formatNumber(totalActions)} actions`
+                : "Open action queue"}
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </Link>
+          </span>
+        </div>
+      </section>
 
-      <div className="rounded-2xl border border-[var(--lavender-200)] bg-[var(--lavender-50)] px-6 py-4 text-sm">
-        With StockFlow: {avoidedText}, {formatMoney(report.backtest.cashReleased)} capital released over the last{" "}
-        {report.backtest.windowDays} days.
-      </div>
-
-      <section className="grid gap-6 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 4 Distinct KPI Cards */}
+      <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           label="Stockout rate"
           value={formatPct(report.stockoutRate)}
           note="Share of recent selling days with demand and an empty shelf."
           formula="Stockout branch-SKU days ÷ (branches × SKUs × 28)"
           icon={TriangleAlert}
-          accent="#D4566B"
+          tone="risk"
           series={report.trend.map((point) => point.stockoutRate)}
           money={false}
+          invertDelta
         />
         <KpiCard
           label="Excess inventory value"
           value={formatMoney(report.cashReleasable)}
-          note={`of which dead stock ${formatMoney(report.deadStockValue)}`}
-          formula="Stock above the 30-day floor × cost. Dead stock is the part selling under one unit a week."
+          note={`Includes ${formatMoney(report.deadStockValue)} dead stock (<1 unit/wk)`}
+          formula="Stock above the 30-day donor floor × unit cost. Dead stock is the portion selling under one unit per week."
           icon={Boxes}
-          accent="#D9962B"
-          series={report.trend.map((point) => point.inventoryValue)}
-          money
+          tone="warn"
+          footerLabel="Surplus above 30-day donor floor"
         />
         <KpiCard
           label="Revenue at risk"
           value={formatMoney(report.lostSalesAtRisk)}
-          note="Shelf price a short branch may miss before the next delivery."
-          formula="Lost units × price for positions below the reorder point"
+          note="Shelf revenue a short branch may miss before next delivery."
+          formula="Expected lost units × retail price for positions below their reorder point."
           icon={CircleDollarSign}
-          accent="#6D5BD0"
-          series={report.trend.map((point) => point.inventoryValue)}
-          money
+          tone="info"
+          footerLabel="Positions below reorder point"
         />
         <KpiCard
-          label="Capital releasable"
-          value={formatMoney(report.cashReleasable)}
-          note="Same figure as excess inventory value."
-          formula="Surplus units above the 30-day donor floor × cost"
-          icon={Link2}
-          accent="#4F86E8"
-          series={report.trend.map((point) => point.inventoryValue)}
-          money
+          label="Projected net benefit"
+          value={formatMoney(projected)}
+          note={
+            queue.data
+              ? `Across ${formatNumber(pendingCount)} pending / ${formatNumber(totalActions)} total actions`
+              : "Loading queue summary..."
+          }
+          formula="Sum of projected net benefit across today's ranked transfers, reorders, and markdowns."
+          icon={TrendingUp}
+          tone="gain"
+          footerLabel="Net of freight, purchase, and markdown costs"
         />
       </section>
 
-      {queue.data ? <Analytics report={report} rows={queue.data.recommendations} /> : null}
+      {/* Analytics + Semantic Cover-Days Heatmap */}
+      {queue.data ? <Analytics report={report} rows={recommendations} /> : null}
 
+      {/* 90-Day Network Trend Charts */}
       <section className="grid gap-6 lg:grid-cols-2">
-        <ChartCard title="Stockout rate" data={weeks} dataKey="stockoutRate" color="#7C6FD6" kind="rate" />
-        <ChartCard title="Inventory value" data={weeks} dataKey="inventoryValue" color="#4FB3A9" kind="money" />
+        <ChartCard
+          title="Stockout rate trend"
+          data={weeks}
+          dataKey="stockoutRate"
+          color={TOKENS.chart.stockoutRate}
+          kind="rate"
+        />
+        <ChartCard
+          title="Inventory value trend"
+          data={weeks}
+          dataKey="inventoryValue"
+          color={TOKENS.chart.inventoryValue}
+          kind="money"
+        />
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h2 className="text-lg font-semibold">Highest-benefit actions</h2>
-          <Link className={buttonVariants({ variant: "link" })} to="/queue">
-            Open the queue
-          </Link>
-        </div>
-        {queue.isPending ? <LoadingBlock /> : null}
-        {queue.isError ? <ErrorBlock message={queue.error.message} onRetry={() => void queue.refetch()} /> : null}
-        {queue.data && queue.data.recommendations.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No actions today.</p>
-        ) : null}
-        {queue.data ? (
-          <div className="overflow-x-auto rounded-2xl border bg-card shadow-card">
-            <table className="w-full min-w-[640px] text-sm">
-              <thead className="bg-[var(--lavender-50)] text-left text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">Rank</th>
-                  <th className="px-3 py-2 font-medium">Action</th>
-                  <th className="px-3 py-2 font-medium">SKU</th>
-                  <th className="px-3 py-2 font-medium">Branch</th>
-                  <th className="px-3 py-2 font-medium">Cover</th>
-                  <th className="px-3 py-2 text-right font-medium">Net benefit</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queue.data.recommendations.slice(0, 5).map((recommendation) => (
-                  <tr key={recommendation.id} className="border-t">
-                    <td className="px-3 py-2">{recommendation.rank}</td>
-                    <td className="px-3 py-2">
-                      <Badge tone={recommendation.action === "TRANSFER" ? "transfer" : recommendation.action === "REORDER" ? "reorder" : "markdown"}>
-                        {actionLabel(recommendation.action)}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Link className="hover:underline" to={`/products/${recommendation.sku}`}>
-                        {recommendation.productName}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">
-                      <Link className="hover:underline" to={`/branches/${recommendation.branchId}`}>
-                        {recommendation.branchName}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{formatCover(recommendation.metrics.coverDays)}</td>
-                    <td className="px-3 py-2 text-right">{formatMoneyFull(recommendation.netBenefit)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {/* Full Queue Callout Card (replaces duplicate mini-table) */}
+      <Card className="rounded-2xl border border-border bg-card shadow-card">
+        <CardContent className="flex flex-col items-start justify-between gap-4 py-2 sm:flex-row sm:items-center">
+          <div>
+            <h2 className="text-base font-semibold text-foreground">
+              Ready to act on today's recommendations?
+            </h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">
+              {queue.data
+                ? `${formatNumber(pendingCount)} pending actions (${formatMoney(projected)} total net benefit) are ready for review, batch approval, or drilldown in the Action Queue.`
+                : "Inspect rationale, math ledger, and branch/SKU context in the Action Queue."}
+            </p>
           </div>
-        ) : null}
-      </section>
+          <Link
+            to="/queue"
+            className={cn(buttonVariants({ variant: "secondary", size: "default" }), "shrink-0")}
+          >
+            View full queue
+            <ArrowRight className="size-4" aria-hidden="true" />
+          </Link>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -197,7 +234,7 @@ function ChartCard({
   kind: "rate" | "money";
 }) {
   return (
-    <Card>
+    <Card className="rounded-2xl border border-border shadow-card">
       <CardHeader>
         <CardTitle>{title}</CardTitle>
       </CardHeader>
@@ -205,11 +242,17 @@ function ChartCard({
         <div className="h-56 w-full">
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data}>
-              <CartesianGrid stroke="#E7E2F8" strokeDasharray="3 3" />
-              <XAxis dataKey="label" minTickGap={16} tick={{ fontSize: 11, fill: "#6B6785" }} />
+              <CartesianGrid stroke={TOKENS.chart.grid} strokeDasharray="3 3" strokeOpacity={0.6} />
+              <XAxis
+                dataKey="label"
+                minTickGap={16}
+                tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+              />
               <YAxis
-                tickFormatter={(value: number) => (kind === "rate" ? formatPct(value) : formatMoney(value))}
-                tick={{ fontSize: 11, fill: "#6B6785" }}
+                tickFormatter={(value: number) =>
+                  kind === "rate" ? formatPct(value) : formatMoney(value)
+                }
+                tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
                 width={64}
               />
               <Tooltip
@@ -217,19 +260,36 @@ function ChartCard({
                   const point = payload?.[0]?.payload as WeekPoint | undefined;
                   if (!active || !point) return null;
                   return (
-                    <div className="rounded-xl border bg-card px-3 py-2 text-xs shadow-card">
+                    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-card">
                       <p className="font-medium">Week of {point.label}</p>
                       {kind === "rate" ? (
-                        <p>Stockout rate {formatPct(point.stockoutRate)}</p>
+                        <p className="mt-0.5 text-muted-foreground">
+                          Stockout rate:{" "}
+                          <span className="font-semibold text-foreground tabular-nums">
+                            {formatPct(point.stockoutRate)}
+                          </span>
+                        </p>
                       ) : (
-                        <p>Inventory value {formatMoneyFull(point.inventoryValue)}</p>
+                        <p className="mt-0.5 text-muted-foreground">
+                          Inventory value:{" "}
+                          <span className="font-semibold text-foreground tabular-nums">
+                            {formatMoneyFull(point.inventoryValue)}
+                          </span>
+                        </p>
                       )}
                     </div>
                   );
                 }}
               />
               <Legend />
-              <Line type="monotone" dataKey={dataKey} name={title} stroke={color} dot={{ r: 3 }} strokeWidth={2} />
+              <Line
+                type="monotone"
+                dataKey={dataKey}
+                name={title}
+                stroke={color}
+                dot={{ r: 3 }}
+                strokeWidth={2}
+              />
             </LineChart>
           </ResponsiveContainer>
         </div>

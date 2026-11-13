@@ -1,10 +1,38 @@
 import { useState, type FormEvent } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
+import { ModeToggle } from "@/components/mode-toggle";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "./AuthContext";
+
+const DEMO_ACCOUNTS = [
+  {
+    role: "admin" as const,
+    label: "Admin (All 15 branches)",
+    email: "admin@stockflow.dev",
+    pass: "Admin@12345",
+  },
+  {
+    role: "manager" as const,
+    label: "Manager (Midwest — 3 branches)",
+    email: "manager.midwest@stockflow.dev",
+    pass: "Manager@12345",
+  },
+  {
+    role: "staff" as const,
+    label: "Staff (Chicago Loop — read-only)",
+    email: "staff.chicago@stockflow.dev",
+    pass: "Staff@12345",
+  },
+];
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
@@ -16,7 +44,9 @@ export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const from = (location.state as { from?: { pathname?: string } })?.from?.pathname || "/";
+  const from =
+    (location.state as { from?: { pathname?: string } })?.from?.pathname || "/queue";
+  const showDemoAccounts = import.meta.env.VITE_SHOW_DEMO_ACCOUNTS !== "false";
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -34,24 +64,40 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-[80vh] items-center justify-center px-4">
-      <Card className="w-full max-w-md shadow-card">
-        <CardHeader className="text-center">
-          <CardTitle className="brand-gradient bg-clip-text text-2xl font-bold tracking-tight text-transparent">
-            StockFlow
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-background px-4 py-12">
+      <div className="fixed top-4 right-4">
+        <ModeToggle />
+      </div>
+
+      <Card className="w-full max-w-md rounded-2xl border border-border bg-card shadow-card">
+        <CardHeader className="items-center text-center">
+          <div className="brand-gradient mb-2 flex size-10 items-center justify-center rounded-xl text-sm font-bold text-white shadow-xs">
+            SF
+          </div>
+          <CardTitle className="text-xl font-semibold tracking-tight text-foreground">
+            Sign in to StockFlow
           </CardTitle>
-          <CardDescription>Sign in with your role-assigned credentials</CardDescription>
+          <CardDescription>
+            Enter your role-assigned credentials to access the inventory action queue
+          </CardDescription>
         </CardHeader>
+
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             {error ? (
-              <div className="rounded-lg border border-destructive/20 bg-destructive/10 p-3 text-sm text-destructive">
+              <div
+                role="alert"
+                className="rounded-xl border border-risk-ring bg-risk-bg px-3.5 py-2.5 text-xs font-medium text-risk-text"
+              >
                 {error}
               </div>
             ) : null}
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="email">
+              <label
+                className="text-xs font-medium text-muted-foreground"
+                htmlFor="email"
+              >
                 Email address
               </label>
               <Input
@@ -66,7 +112,10 @@ export function LoginPage() {
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground" htmlFor="password">
+              <label
+                className="text-xs font-medium text-muted-foreground"
+                htmlFor="password"
+              >
                 Password
               </label>
               <Input
@@ -79,26 +128,60 @@ export function LoginPage() {
               />
             </div>
 
-            <Button type="submit" className="w-full" disabled={isSubmitting}>
-              {isSubmitting ? <Spinner data-icon="inline-start" /> : null}
-              Sign In
-            </Button>
+            <div className="hero-cta-glow pt-1">
+              <Button
+                type="submit"
+                variant="primary"
+                size="lg"
+                loading={isSubmitting}
+                className="w-full font-semibold"
+              >
+                Sign in
+              </Button>
+            </div>
           </form>
 
-          <div className="mt-6 rounded-lg border bg-[var(--lavender-50)]/50 p-3 text-xs text-muted-foreground">
-            <p className="font-semibold text-foreground">Demo Accounts:</p>
-            <div className="mt-1.5 space-y-1 font-mono text-[11px]">
-              <p>
-                <span className="font-bold">admin:</span> admin@stockflow.dev / Admin@12345
-              </p>
-              <p>
-                <span className="font-bold">manager:</span> manager.midwest@stockflow.dev / Manager@12345
-              </p>
-              <p>
-                <span className="font-bold">staff:</span> staff.chicago@stockflow.dev / Staff@12345
-              </p>
-            </div>
-          </div>
+          {showDemoAccounts ? (
+            <details className="mt-6 rounded-xl border border-border bg-secondary/40 p-3 text-xs">
+              <summary className="cursor-pointer font-medium text-foreground select-none">
+                Demo accounts (click to expand)
+              </summary>
+              <div className="mt-3 space-y-2">
+                {DEMO_ACCOUNTS.map((acct) => (
+                  <div
+                    key={acct.email}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-2"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <Badge tone={acct.role} className="px-2 py-0 text-[10px]">
+                          {acct.role}
+                        </Badge>
+                        <span className="truncate font-medium text-foreground">
+                          {acct.label}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
+                        {acct.email} · {acct.pass}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="xs"
+                      onClick={() => {
+                        setEmail(acct.email);
+                        setPassword(acct.pass);
+                        setError(null);
+                      }}
+                    >
+                      Use
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </details>
+          ) : null}
         </CardContent>
       </Card>
     </div>

@@ -329,18 +329,6 @@ export function QueuePage() {
               ))}
             </ToolbarSelect>
 
-            {/* Action Select */}
-            <ToolbarSelect
-              ariaLabel="Filter by action"
-              value={filters.action}
-              onChange={(action) => writeFilters({ action })}
-            >
-              <option value="">All actions</option>
-              <option value="TRANSFER">Transfer</option>
-              <option value="REORDER">Reorder</option>
-              <option value="MARKDOWN">Markdown</option>
-            </ToolbarSelect>
-
             {/* Category Select */}
             <ToolbarSelect
               ariaLabel="Filter by category"

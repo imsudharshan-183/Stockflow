@@ -1,35 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState, type FormEvent } from "react";
+import { KeyRound, Pencil, Plus, Search, UserX, X } from "lucide-react";
+import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
-import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCard,
+  TableCardFooter,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+  TableToolbar,
+} from "@/components/ui/table";
+import { useAuth } from "@/features/auth/AuthContext";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
-import type { Role, User } from "@stockflow/core";
+import { formatDateTime, formatNumber } from "@/lib/format";
+import { canManageRole, type Role, type UpdateUser, type User } from "@stockflow/core";
 
 export function UsersPage() {
+  const { user: currentUser } = useAuth();
+  const actorRole: Role = currentUser?.role ?? "admin";
   const queryClient = useQueryClient();
+
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: api.listUsers });
   const kpisQuery = useQuery({ queryKey: queryKeys.kpis, queryFn: api.kpis });
 
+  const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState<User | null>(null);
   const [resetTarget, setResetTarget] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState("");
 
   const branches = kpisQuery.data?.branches ?? [];
 
-  // Create User Mutation
   const createMutation = useMutation({
     mutationFn: api.createUser,
     onSuccess: async () => {
@@ -40,7 +58,16 @@ export function UsersPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  // Deactivate Mutation
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: UpdateUser }) => api.updateUser(id, data),
+    onSuccess: async () => {
+      toast.success("User updated successfully");
+      setEditTarget(null);
+      await queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const deactivateMutation = useMutation({
     mutationFn: (id: string) => api.deactivateUser(id),
     onSuccess: async () => {
@@ -50,7 +77,6 @@ export function UsersPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  // Reset Password Mutation
   const resetMutation = useMutation({
     mutationFn: ({ id, pass }: { id: string; pass: string }) => api.resetPassword(id, pass),
     onSuccess: async () => {
@@ -61,127 +87,282 @@ export function UsersPage() {
     onError: (err: Error) => toast.error(err.message),
   });
 
-  if (usersQuery.isPending) return <LoadingBlock />;
-  if (usersQuery.isError) {
-    return <ErrorBlock message={usersQuery.error.message} onRetry={() => void usersQuery.refetch()} />;
-  }
+  const users = useMemo(() => usersQuery.data?.users ?? [], [usersQuery.data]);
 
-  const users = usersQuery.data.users;
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return users;
+    return users.filter(
+      (u) =>
+        u.name.toLowerCase().includes(q) ||
+        u.email.toLowerCase().includes(q) ||
+        u.role.toLowerCase().includes(q) ||
+        u.branchIds.some((b) => b.toLowerCase().includes(q)),
+    );
+  }, [users, search]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">User Management</h1>
-          <p className="text-sm text-muted-foreground">
-            Manage roles and assigned branch scopes (Admin access only).
-          </p>
-        </div>
-        <Button onClick={() => setCreateOpen(true)}>Add User</Button>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        title="User management"
+        subtitle="Manage roles, assigned branch scopes, and account status."
+        actions={
+          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+            <Plus className="size-4" aria-hidden="true" />
+            Add user
+          </Button>
+        }
+      />
 
-      {users.length === 0 ? (
-        <EmptyBlock title="No users found" body="Create a user to get started." />
-      ) : (
-        <div className="overflow-x-auto rounded-2xl border bg-card shadow-card">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-[var(--lavender-50)] text-left text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Email</th>
-                <th className="px-3 py-2 font-medium">Role</th>
-                <th className="px-3 py-2 font-medium">Branch Scope</th>
-                <th className="px-3 py-2 font-medium">Status</th>
-                <th className="px-3 py-2 font-medium">Created</th>
-                <th className="px-3 py-2 text-right font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => {
-                const isDeactivatable = u.role !== "admin" && u.isActive;
-                return (
-                  <tr key={u.id} className="border-t align-top">
-                    <td className="px-3 py-2 font-medium">{u.name}</td>
-                    <td className="px-3 py-2 text-muted-foreground">{u.email}</td>
-                    <td className="px-3 py-2">
-                      <Badge tone={u.role}>
-                        {u.role}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2">
-                      {u.role === "admin" ? (
-                        <span className="text-muted-foreground">All 15 branches</span>
-                      ) : u.branchIds.length > 0 ? (
-                        <span>{u.branchIds.join(", ")}</span>
-                      ) : (
-                        <span className="text-muted-foreground">None</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">
-                      <Badge tone={u.isActive ? "approved" : "rejected"}>
-                        {u.isActive ? "Active" : "Inactive"}
-                      </Badge>
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">{formatDateTime(u.createdAt)}</td>
-                    <td className="px-3 py-2 text-right">
-                      {u.role !== "admin" ? (
-                        <div className="flex justify-end gap-1">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setResetTarget(u);
-                              setResetPassword("");
-                            }}
+      <TableCard>
+        <TableToolbar>
+          <div className="relative min-w-[200px] flex-1 sm:max-w-[280px]">
+            <Search
+              className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <Input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name, email, role, or branch..."
+              aria-label="Search users"
+              className="h-9 rounded-xl border-border bg-card pr-8 pl-8 text-xs shadow-xs"
+            />
+            {search ? (
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                tooltip="Clear search"
+                aria-label="Clear search"
+                onClick={() => setSearch("")}
+                className="absolute top-1/2 right-1 -translate-y-1/2 text-muted-foreground"
+              >
+                <X className="size-3" aria-hidden="true" />
+              </Button>
+            ) : null}
+          </div>
+
+          <div className="text-xs text-muted-foreground tabular-nums">
+            {usersQuery.data ? (
+              <span>
+                Showing <span className="font-medium text-foreground">{formatNumber(filtered.length)}</span>{" "}
+                of <span className="font-medium text-foreground">{formatNumber(users.length)}</span> users
+              </span>
+            ) : (
+              <span>Loading users...</span>
+            )}
+          </div>
+        </TableToolbar>
+
+        {usersQuery.isPending ? (
+          <div className="p-4">
+            <TableSkeleton rows={5} />
+          </div>
+        ) : usersQuery.isError ? (
+          <div className="p-4">
+            <ErrorBlock
+              message={usersQuery.error.message}
+              onRetry={() => void usersQuery.refetch()}
+            />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="p-4">
+            <EmptyBlock
+              title={search ? "No matching users" : "No users found"}
+              body={
+                search
+                  ? "No users match your search query."
+                  : "Create a manager or staff member to get started."
+              }
+              action={
+                search ? (
+                  <Button variant="secondary" size="sm" onClick={() => setSearch("")}>
+                    Clear search
+                  </Button>
+                ) : (
+                  <Button variant="primary" size="sm" onClick={() => setCreateOpen(true)}>
+                    Add user
+                  </Button>
+                )
+              }
+            />
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <Table className="min-w-[860px]">
+              <TableHeader>
+                <tr className="border-b border-border">
+                  <TableHead className="w-[18%]">Name</TableHead>
+                  <TableHead className="w-[22%]">Email</TableHead>
+                  <TableHead className="w-[96px]">Role</TableHead>
+                  <TableHead className="w-[18%]">Branch scope</TableHead>
+                  <TableHead className="w-[96px]">Status</TableHead>
+                  <TableHead className="w-[148px]">Created</TableHead>
+                  <TableHead className="w-[220px] text-right">Actions</TableHead>
+                </tr>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((u) => {
+                  const canManageTarget = canManageRole(actorRole, u.role);
+                  const isDeactivatingThis =
+                    deactivateMutation.isPending && deactivateMutation.variables === u.id;
+
+                  return (
+                    <TableRow key={u.id}>
+                      <TableCell className="truncate font-semibold text-foreground">
+                        {u.name}
+                      </TableCell>
+                      <TableCell className="truncate text-muted-foreground">
+                        {u.email}
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone={u.role}>{u.role}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        {u.role === "admin" ? (
+                          <span className="text-xs text-muted-foreground">All 15 branches</span>
+                        ) : u.branchIds.length > 0 ? (
+                          <span
+                            className="block truncate text-xs font-medium text-foreground"
+                            title={u.branchIds.join(", ")}
                           >
-                            Reset Password
-                          </Button>
-                          {isDeactivatable ? (
+                            {u.branchIds.join(", ")}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">None</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge tone={u.isActive ? "approved" : "rejected"} dot>
+                          {u.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-xs text-muted-foreground tabular-nums">
+                        {formatDateTime(u.createdAt)}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {canManageTarget ? (
+                          <div className="flex items-center justify-end gap-1.5">
                             <Button
-                              size="sm"
-                              variant="destructive"
-                              disabled={deactivateMutation.isPending}
-                              onClick={() => deactivateMutation.mutate(u.id)}
+                              size="xs"
+                              variant="secondary"
+                              onClick={() => setEditTarget(u)}
                             >
-                              Deactivate
+                              <Pencil className="size-3" aria-hidden="true" />
+                              Edit
                             </Button>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                            <Button
+                              size="xs"
+                              variant="ghost"
+                              tooltip="Reset password"
+                              onClick={() => {
+                                setResetTarget(u);
+                                setResetPassword("");
+                              }}
+                            >
+                              <KeyRound className="size-3" aria-hidden="true" />
+                              Password
+                            </Button>
+                            {u.isActive ? (
+                              <Button
+                                size="xs"
+                                variant="soft-danger"
+                                loading={isDeactivatingThis}
+                                disabled={deactivateMutation.isPending}
+                                onClick={() => deactivateMutation.mutate(u.id)}
+                              >
+                                <UserX className="size-3" aria-hidden="true" />
+                                Deactivate
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Protected</span>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {usersQuery.data && filtered.length > 0 ? (
+          <TableCardFooter>
+            <span className="tabular-nums">
+              {formatNumber(filtered.length)} {filtered.length === 1 ? "user" : "users"}
+            </span>
+          </TableCardFooter>
+        ) : null}
+      </TableCard>
 
       {/* Create User Dialog */}
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>Create New User</DialogTitle>
+            <DialogTitle>Create new user</DialogTitle>
             <DialogDescription>
               Add a manager or staff member and configure their branch visibility.
             </DialogDescription>
           </DialogHeader>
           <CreateUserForm
+            actorRole={actorRole}
             branches={branches}
             isSubmitting={createMutation.isPending}
+            errorMessage={createMutation.error?.message ?? null}
+            onCancel={() => setCreateOpen(false)}
             onSubmit={(data) => createMutation.mutate(data)}
           />
         </DialogContent>
       </Dialog>
 
-      {/* Reset Password Dialog */}
-      <Dialog open={resetTarget !== null} onOpenChange={(open) => !open && setResetTarget(null)}>
-        <DialogContent className="max-w-sm">
+      {/* Edit User Dialog */}
+      <Dialog
+        open={editTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditTarget(null);
+            updateMutation.reset();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>Reset Password</DialogTitle>
-            <DialogDescription>Set a new password for {resetTarget?.name}.</DialogDescription>
+            <DialogTitle>Edit user</DialogTitle>
+            <DialogDescription>
+              Update role, assigned branches, or active status for {editTarget?.name}.
+            </DialogDescription>
+          </DialogHeader>
+          {editTarget ? (
+            <EditUserForm
+              key={editTarget.id}
+              actorRole={actorRole}
+              targetUser={editTarget}
+              branches={branches}
+              isSubmitting={updateMutation.isPending}
+              errorMessage={updateMutation.error?.message ?? null}
+              onCancel={() => setEditTarget(null)}
+              onSubmit={(data) => updateMutation.mutate({ id: editTarget.id, data })}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Reset Password Dialog */}
+      <Dialog
+        open={resetTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setResetTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Reset password</DialogTitle>
+            <DialogDescription>
+              Set a new password for {resetTarget?.name} ({resetTarget?.email}).
+            </DialogDescription>
           </DialogHeader>
           <form
             onSubmit={(e) => {
@@ -193,8 +374,14 @@ export function UsersPage() {
             className="space-y-4"
           >
             <div className="space-y-1.5">
-              <label className="text-xs font-medium text-muted-foreground">New Password (min 6 chars)</label>
+              <label
+                htmlFor="reset-password-input"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                New password (min 6 characters)
+              </label>
               <Input
+                id="reset-password-input"
                 type="password"
                 required
                 minLength={6}
@@ -202,10 +389,24 @@ export function UsersPage() {
                 onChange={(e) => setResetPassword(e.target.value)}
               />
             </div>
-            <Button type="submit" className="w-full" disabled={resetMutation.isPending || resetPassword.length < 6}>
-              {resetMutation.isPending ? <Spinner data-icon="inline-start" /> : null}
-              Confirm Password Reset
-            </Button>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={resetMutation.isPending}
+                onClick={() => setResetTarget(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                variant="primary"
+                loading={resetMutation.isPending}
+                disabled={resetPassword.length < 6}
+              >
+                Confirm reset
+              </Button>
+            </DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -214,32 +415,49 @@ export function UsersPage() {
 }
 
 function CreateUserForm({
+  actorRole,
   branches,
   isSubmitting,
+  errorMessage,
+  onCancel,
   onSubmit,
 }: {
-  branches: Array<{ id: string; name: string }>;
+  actorRole: Role;
+  branches: ReadonlyArray<{ id: string; name: string }>;
   isSubmitting: boolean;
-  onSubmit: (data: { name: string; email: string; password: string; role: Role; branchIds: string[] }) => void;
+  errorMessage: string | null;
+  onCancel: () => void;
+  onSubmit: (data: {
+    name: string;
+    email: string;
+    password: string;
+    role: Role;
+    branchIds: string[];
+  }) => void;
 }) {
+  const allowedRoles = (["manager", "staff"] as const).filter((r) =>
+    canManageRole(actorRole, r),
+  );
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [role, setRole] = useState<Role>("staff");
+  const [role, setRole] = useState<Role>(allowedRoles[0] ?? "staff");
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
+  const [localError, setLocalError] = useState<string | null>(null);
 
-  const handleSubmit = (e: FormEvent) => {
-    e.preventDefault();
-    onSubmit({
-      name,
-      email,
-      password,
-      role,
-      branchIds: selectedBranches,
-    });
+  const handleRoleChange = (nextRole: Role) => {
+    setRole(nextRole);
+    if (nextRole === "staff" && selectedBranches.length > 1) {
+      setSelectedBranches(selectedBranches.slice(0, 1));
+    }
   };
 
   const toggleBranch = (bId: string) => {
+    setLocalError(null);
+    if (role === "staff") {
+      setSelectedBranches(selectedBranches.includes(bId) ? [] : [bId]);
+      return;
+    }
     if (selectedBranches.includes(bId)) {
       setSelectedBranches(selectedBranches.filter((id) => id !== bId));
     } else {
@@ -247,11 +465,44 @@ function CreateUserForm({
     }
   };
 
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (selectedBranches.length === 0) {
+      setLocalError("Select at least one branch.");
+      return;
+    }
+    if (role === "staff" && selectedBranches.length !== 1) {
+      setLocalError("Staff accounts must be assigned to exactly 1 branch.");
+      return;
+    }
+    setLocalError(null);
+    onSubmit({
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password,
+      role,
+      branchIds: selectedBranches,
+    });
+  };
+
+  const displayError = localError || errorMessage;
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {displayError ? (
+        <div className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text">
+          {displayError}
+        </div>
+      ) : null}
+
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Full Name</label>
-        <Input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Jane Doe" />
+        <label className="text-xs font-medium text-muted-foreground">Full name</label>
+        <Input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Jane Doe"
+        />
       </div>
 
       <div className="space-y-1.5">
@@ -266,7 +517,9 @@ function CreateUserForm({
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Password (min 6 chars)</label>
+        <label className="text-xs font-medium text-muted-foreground">
+          Password (min 6 characters)
+        </label>
         <Input
           type="password"
           required
@@ -279,39 +532,200 @@ function CreateUserForm({
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">Role</label>
         <select
-          className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none"
+          className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
+          onChange={(e) => handleRoleChange(e.target.value as Role)}
         >
-          <option value="manager">Manager (Assigned branches, Can decide)</option>
-          <option value="staff">Staff (Single branch, Read-only)</option>
+          {allowedRoles.map((r) => (
+            <option key={r} value={r}>
+              {r === "manager"
+                ? "Manager (Assigned branches, can approve/reject)"
+                : "Staff (Single branch, read-only)"}
+            </option>
+          ))}
         </select>
       </div>
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">
-          Assigned Branches ({selectedBranches.length} selected)
+          Assigned branches ({selectedBranches.length} selected
+          {role === "staff" ? " · max 1 for staff" : ""})
         </label>
-        <div className="max-h-36 overflow-y-auto rounded-lg border p-2 text-xs">
+        <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
           {branches.map((b) => (
-            <label key={b.id} className="flex cursor-pointer items-center gap-2 py-0.5 hover:text-foreground">
+            <label
+              key={b.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-card"
+            >
               <input
                 type="checkbox"
                 checked={selectedBranches.includes(b.id)}
                 onChange={() => toggleBranch(b.id)}
+                className="size-3.5 rounded border-input accent-primary"
               />
-              <span>
-                {b.id} — {b.name}
-              </span>
+              <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
+              <span className="truncate text-foreground">{b.name}</span>
             </label>
           ))}
         </div>
       </div>
 
-      <Button type="submit" className="w-full" disabled={isSubmitting}>
-        {isSubmitting ? <Spinner data-icon="inline-start" /> : null}
-        Create User
-      </Button>
+      <DialogFooter>
+        <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={isSubmitting}>
+          Create user
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function EditUserForm({
+  actorRole,
+  targetUser,
+  branches,
+  isSubmitting,
+  errorMessage,
+  onCancel,
+  onSubmit,
+}: {
+  actorRole: Role;
+  targetUser: User;
+  branches: ReadonlyArray<{ id: string; name: string }>;
+  isSubmitting: boolean;
+  errorMessage: string | null;
+  onCancel: () => void;
+  onSubmit: (data: UpdateUser) => void;
+}) {
+  const allowedRoles = (["manager", "staff"] as const).filter((r) =>
+    canManageRole(actorRole, r),
+  );
+  const [name, setName] = useState(targetUser.name);
+  const [role, setRole] = useState<Role>(targetUser.role);
+  const [selectedBranches, setSelectedBranches] = useState<string[]>(targetUser.branchIds);
+  const [isActive, setIsActive] = useState<boolean>(targetUser.isActive);
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  const handleRoleChange = (nextRole: Role) => {
+    setRole(nextRole);
+    if (nextRole === "staff" && selectedBranches.length > 1) {
+      setSelectedBranches(selectedBranches.slice(0, 1));
+    }
+  };
+
+  const toggleBranch = (bId: string) => {
+    setLocalError(null);
+    if (role === "staff") {
+      setSelectedBranches(selectedBranches.includes(bId) ? [] : [bId]);
+      return;
+    }
+    if (selectedBranches.includes(bId)) {
+      setSelectedBranches(selectedBranches.filter((id) => id !== bId));
+    } else {
+      setSelectedBranches([...selectedBranches, bId]);
+    }
+  };
+
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (selectedBranches.length === 0) {
+      setLocalError("Select at least one branch.");
+      return;
+    }
+    if (role === "staff" && selectedBranches.length !== 1) {
+      setLocalError("Staff accounts must be assigned to exactly 1 branch.");
+      return;
+    }
+    setLocalError(null);
+    onSubmit({
+      name: name.trim(),
+      role,
+      branchIds: selectedBranches,
+      isActive,
+    });
+  };
+
+  const displayError = localError || errorMessage;
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4">
+      {displayError ? (
+        <div className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text">
+          {displayError}
+        </div>
+      ) : null}
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">Full name</label>
+        <Input
+          required
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">Role</label>
+        <select
+          aria-label="Edit user role"
+          className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          value={role}
+          onChange={(e) => handleRoleChange(e.target.value as Role)}
+        >
+          {allowedRoles.map((r) => (
+            <option key={r} value={r}>
+              {r === "manager"
+                ? "Manager (Assigned branches, can approve/reject)"
+                : "Staff (Single branch, read-only)"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">
+          Assigned branches ({selectedBranches.length} selected
+          {role === "staff" ? " · max 1 for staff" : ""})
+        </label>
+        <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
+          {branches.map((b) => (
+            <label
+              key={b.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-card"
+            >
+              <input
+                type="checkbox"
+                checked={selectedBranches.includes(b.id)}
+                onChange={() => toggleBranch(b.id)}
+                className="size-3.5 rounded border-input accent-primary"
+              />
+              <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
+              <span className="truncate text-foreground">{b.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+
+      <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
+        <input
+          type="checkbox"
+          checked={isActive}
+          onChange={(e) => setIsActive(e.target.checked)}
+          className="size-4 rounded border-input accent-primary"
+        />
+        Account active
+      </label>
+
+      <DialogFooter>
+        <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" loading={isSubmitting}>
+          Save changes
+        </Button>
+      </DialogFooter>
     </form>
   );
 }
