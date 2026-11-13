@@ -75,10 +75,8 @@ function initialsOf(name: string): string {
   return `${parts[0]?.[0] ?? ""}${parts[parts.length - 1]?.[0] ?? ""}`.toUpperCase();
 }
 
-function roleBadgeTone(role: Role): "transfer" | "reorder" | "pending" {
-  if (role === "admin") return "transfer";
-  if (role === "manager") return "reorder";
-  return "pending";
+function roleBadgeTone(role: Role): "admin" | "manager" | "staff" {
+  return role;
 }
 
 export function Shell() {

@@ -104,7 +104,7 @@ export function UsersPage() {
                     <td className="px-3 py-2 font-medium">{u.name}</td>
                     <td className="px-3 py-2 text-muted-foreground">{u.email}</td>
                     <td className="px-3 py-2">
-                      <Badge tone={u.role === "admin" ? "high" : u.role === "manager" ? "med" : "low"}>
+                      <Badge tone={u.role}>
                         {u.role}
                       </Badge>
                     </td>

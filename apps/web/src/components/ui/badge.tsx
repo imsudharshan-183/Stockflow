@@ -1,74 +1,99 @@
-import { mergeProps } from "@base-ui/react/merge-props"
-import { useRender } from "@base-ui/react/use-render"
-import { cva, type VariantProps } from "class-variance-authority"
-import { cn } from "@/lib/utils"
+import * as React from "react";
+import { mergeProps } from "@base-ui/react/merge-props";
+import { useRender } from "@base-ui/react/use-render";
+import { cva, type VariantProps } from "class-variance-authority";
+import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
-  "group/badge inline-flex h-5 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-4xl border border-transparent px-2 py-0.5 text-xs font-medium whitespace-nowrap transition-all focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
+  "group/badge inline-flex w-fit shrink-0 items-center justify-center gap-1.5 overflow-hidden rounded-full border px-2.5 py-0.5 text-xs font-medium whitespace-nowrap shadow-badge transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-primary/40 [&>svg]:pointer-events-none [&>svg]:size-3",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
-        secondary:
-          "bg-secondary text-secondary-foreground [a]:hover:bg-secondary/80",
-        destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        outline:
-          "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
-        ghost:
-          "hover:bg-muted hover:text-muted-foreground dark:hover:bg-muted/50",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "border-primary-ring bg-primary-soft text-primary-text",
+        secondary: "border-neutral-ring bg-neutral-bg text-neutral-text",
+        destructive: "border-risk-ring bg-risk-bg text-risk-text",
+        outline: "border-border bg-card text-foreground",
+        ghost: "border-transparent bg-transparent text-muted-foreground",
       },
     },
     defaultVariants: {
       variant: "default",
     },
-  }
-)
+  },
+);
 
 const toneClass = {
-  transfer: "border-violet-200 bg-violet-100 text-violet-900",
-  reorder: "border-sky-200 bg-sky-100 text-sky-900",
-  markdown: "border-amber-200 bg-amber-100 text-amber-900",
-  risk: "border-red-200 bg-red-100 text-red-800",
-  over: "border-amber-200 bg-amber-100 text-amber-900",
-  ok: "border-emerald-200 bg-emerald-100 text-emerald-900",
-  fresh: "border-slate-200 bg-slate-100 text-slate-800",
-  approved: "border-emerald-200 bg-emerald-100 text-emerald-900",
-  rejected: "border-red-200 bg-red-100 text-red-800",
-  pending: "border-slate-200 bg-slate-100 text-slate-700",
-  high: "border-violet-700 bg-violet-700 text-white",
-  med: "border-violet-200 bg-violet-100 text-violet-900",
-  low: "border-slate-200 bg-slate-100 text-slate-700",
-  confHigh: "border-emerald-200 bg-emerald-50 text-emerald-900",
-  confMed: "border-amber-200 bg-amber-50 text-amber-900",
-  confLow: "border-rose-200 bg-rose-50 text-rose-900",
-} as const
+  /* Actions */
+  transfer: "border-indigo-ring bg-indigo-bg text-indigo-text",
+  reorder: "border-info-ring bg-info-bg text-info-text",
+  markdown: "border-warn-ring bg-warn-bg text-warn-text",
 
-export type BadgeTone = keyof typeof toneClass
+  /* Statuses */
+  pending: "border-neutral-ring bg-neutral-bg text-neutral-text",
+  approved: "border-gain-ring bg-gain-bg text-gain-text",
+  rejected: "border-risk-ring bg-risk-bg text-risk-text",
+
+  /* Roles */
+  admin: "border-primary-ring bg-primary-soft text-primary-text",
+  manager: "border-indigo-ring bg-indigo-bg text-indigo-text",
+  staff: "border-neutral-ring bg-neutral-bg text-neutral-text",
+
+  /* Confidence */
+  confHigh: "border-gain-ring bg-gain-bg text-gain-text",
+  confMed: "border-warn-ring bg-warn-bg text-warn-text",
+  confLow: "border-risk-ring bg-risk-bg text-risk-text",
+
+  /* Position health */
+  risk: "border-risk-ring bg-risk-bg text-risk-text",
+  over: "border-warn-ring bg-warn-bg text-warn-text",
+  ok: "border-gain-ring bg-gain-bg text-gain-text",
+  fresh: "border-neutral-ring bg-neutral-bg text-neutral-text",
+} as const;
+
+export type BadgeTone = keyof typeof toneClass;
 
 function Badge({
   className,
   variant = "default",
   tone,
+  dot = false,
+  children,
   render,
   ...props
 }: useRender.ComponentProps<"span"> &
-  VariantProps<typeof badgeVariants> & { tone?: BadgeTone }) {
+  VariantProps<typeof badgeVariants> & {
+    tone?: BadgeTone;
+    dot?: boolean;
+  }) {
   return useRender({
     defaultTagName: "span",
     props: mergeProps<"span">(
       {
-        className: cn(badgeVariants({ variant: tone ? "outline" : variant }), tone ? toneClass[tone] : "", className),
+        className: cn(
+          badgeVariants({ variant: tone ? "outline" : variant }),
+          tone ? toneClass[tone] : "",
+          className,
+        ),
+        children: (
+          <>
+            {dot ? (
+              <span
+                className="size-1.5 shrink-0 rounded-full bg-current opacity-80"
+                aria-hidden="true"
+              />
+            ) : null}
+            {children}
+          </>
+        ),
       },
-      props
+      props,
     ),
     render,
     state: {
       slot: "badge",
       variant,
     },
-  })
+  });
 }
 
-export { Badge, badgeVariants }
+export { Badge, badgeVariants };

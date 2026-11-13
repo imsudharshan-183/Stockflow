@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Spinner } from "@/components/ui/spinner";
-import { priorityOf, QUEUE_PAGE_SIZE } from "@/config";
+import { QUEUE_PAGE_SIZE } from "@/config";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
@@ -226,11 +226,8 @@ export function QueuePage() {
                     ) : null}
                   </td>
                   <td className="px-3 py-2">{formatNumber(row.quantity)}</td>
-                  <td className="px-3 py-2 text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <Badge tone={priorityOf(row.netBenefit)}>{priorityOf(row.netBenefit)}</Badge>
-                      {formatMoneyFull(row.netBenefit)}
-                    </div>
+                  <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                    {formatMoneyFull(row.netBenefit)}
                   </td>
                   <td className="px-3 py-2">
                     <Badge tone={row.status === "APPROVED" ? "approved" : row.status === "REJECTED" ? "rejected" : "pending"}>
