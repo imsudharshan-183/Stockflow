@@ -1,16 +1,31 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/app/Shell";
-import { LoadingBlock } from "@/components/shared/states";
-import { AuditPage } from "@/features/audit/AuditPage";
+import { EmptyBlock, LoadingBlock } from "@/components/shared/states";
 import { AuthProvider, useAuth } from "@/features/auth/AuthContext";
-import { LoginPage } from "@/features/auth/LoginPage";
-import { BranchPage } from "@/features/drilldown/BranchPage";
-import { ProductPage } from "@/features/drilldown/ProductPage";
-import { OverviewPage } from "@/features/overview/OverviewPage";
-import { QueuePage } from "@/features/queue/QueuePage";
-import { UsersPage } from "@/features/users/UsersPage";
 import type { Role } from "@stockflow/core";
-import type { ReactNode } from "react";
+
+const LoginPage = lazy(() =>
+  import("@/features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
+);
+const QueuePage = lazy(() =>
+  import("@/features/queue/QueuePage").then((m) => ({ default: m.QueuePage })),
+);
+const OverviewPage = lazy(() =>
+  import("@/features/overview/OverviewPage").then((m) => ({ default: m.OverviewPage })),
+);
+const AuditPage = lazy(() =>
+  import("@/features/audit/AuditPage").then((m) => ({ default: m.AuditPage })),
+);
+const UsersPage = lazy(() =>
+  import("@/features/users/UsersPage").then((m) => ({ default: m.UsersPage })),
+);
+const BranchPage = lazy(() =>
+  import("@/features/drilldown/BranchPage").then((m) => ({ default: m.BranchPage })),
+);
+const ProductPage = lazy(() =>
+  import("@/features/drilldown/ProductPage").then((m) => ({ default: m.ProductPage })),
+);
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, isLoading } = useAuth();
@@ -46,38 +61,49 @@ function RequireNotStaff({ children }: { children: ReactNode }) {
 export function App() {
   return (
     <AuthProvider>
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route
-          element={
-            <RequireAuth>
-              <Shell />
-            </RequireAuth>
-          }
-        >
-          <Route index element={<OverviewPage />} />
-          <Route path="queue" element={<QueuePage />} />
+      <Suspense fallback={<LoadingBlock />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
           <Route
-            path="audit"
             element={
-              <RequireNotStaff>
-                <AuditPage />
-              </RequireNotStaff>
+              <RequireAuth>
+                <Shell />
+              </RequireAuth>
             }
-          />
-          <Route
-            path="users"
-            element={
-              <RequireRole role="admin">
-                <UsersPage />
-              </RequireRole>
-            }
-          />
-          <Route path="branches/:id" element={<BranchPage />} />
-          <Route path="products/:sku" element={<ProductPage />} />
-          <Route path="*" element={<p className="text-sm text-muted-foreground">That page is not in StockFlow.</p>} />
-        </Route>
-      </Routes>
+          >
+            <Route index element={<QueuePage />} />
+            <Route path="queue" element={<QueuePage />} />
+            <Route path="overview" element={<OverviewPage />} />
+            <Route
+              path="audit"
+              element={
+                <RequireNotStaff>
+                  <AuditPage />
+                </RequireNotStaff>
+              }
+            />
+            <Route
+              path="users"
+              element={
+                <RequireRole role="admin">
+                  <UsersPage />
+                </RequireRole>
+              }
+            />
+            <Route path="branches/:id" element={<BranchPage />} />
+            <Route path="products/:sku" element={<ProductPage />} />
+            <Route
+              path="*"
+              element={
+                <EmptyBlock
+                  title="Page not found"
+                  body="That page is not in StockFlow. Use the sidebar to return to the action queue."
+                />
+              }
+            />
+          </Route>
+        </Routes>
+      </Suspense>
     </AuthProvider>
   );
 }
