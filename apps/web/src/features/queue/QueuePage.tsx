@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, ChevronDown, ChevronRight, Search, X } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, Search, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
@@ -444,28 +444,28 @@ export function QueuePage() {
                     ) : null}
                     <TableHead className="hidden w-11 px-2 lg:table-cell xl:w-14 xl:px-2.5">Rank</TableHead>
                     <TableHead className="w-[88px] px-2 xl:w-[112px] xl:px-2.5">Action</TableHead>
-                    <TableHead className="w-[26%] border-r border-divider-soft px-3 xl:w-[30%]">
+                    <TableHead className="w-[24%] border-r border-divider-soft px-3 xl:w-[28%]">
                       Product
                     </TableHead>
-                    <TableHead className="w-[140px] px-2.5 lg:w-[156px] xl:w-[196px] xl:px-3">
+                    <TableHead className="w-[136px] px-2.5 lg:w-[152px] xl:w-[196px] xl:px-3">
                       Branch(es)
                     </TableHead>
                     <TableHead className="w-[54px] border-r border-divider-soft px-2.5 text-right xl:w-[72px] xl:px-3">
                       Qty
                     </TableHead>
-                    <TableHead className="w-[86px] px-2.5 text-right xl:w-[112px] xl:px-3">
+                    <TableHead className="w-[100px] pr-4 pl-2.5 text-right xl:w-[116px] xl:pr-5">
                       Net benefit
                     </TableHead>
                     <TableHead
                       className={cn(
-                        "w-[88px] px-2.5 xl:w-[106px] xl:px-3",
+                        "w-[98px] px-3 xl:w-[110px]",
                         canDecide ? "border-r border-divider-soft" : "",
                       )}
                     >
                       Status
                     </TableHead>
                     {canDecide ? (
-                      <TableHead className="w-[86px] px-2.5 text-right xl:w-[98px] xl:px-3">
+                      <TableHead className="w-[92px] px-2.5 text-right xl:w-[104px] xl:px-3">
                         <span className="sr-only">Actions</span>
                       </TableHead>
                     ) : (
@@ -609,14 +609,14 @@ export function QueuePage() {
                         </TableCell>
 
                         {/* Net Benefit (right-aligned, most prominent number) */}
-                        <TableCell className="px-2.5 text-right font-semibold text-foreground tabular-nums xl:px-3">
+                        <TableCell className="pr-4 pl-2.5 text-right font-semibold text-foreground tabular-nums xl:pr-5">
                           {formatMoneyFull(row.netBenefit)}
                         </TableCell>
 
                         {/* Status (Group 3 boundary) */}
                         <TableCell
                           className={cn(
-                            "px-2.5 xl:px-3",
+                            "px-3",
                             canDecide ? "border-r border-divider-soft" : "",
                           )}
                         >
@@ -1035,20 +1035,14 @@ function ToolbarSelect({
   children: React.ReactNode;
 }) {
   return (
-    <div className="relative">
-      <select
-        aria-label={ariaLabel}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="custom-select h-9 appearance-none rounded-xl border border-border bg-card pr-7 pl-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
-      >
-        {children}
-      </select>
-      <ChevronDown
-        className="pointer-events-none absolute top-1/2 right-2.5 size-3.5 -translate-y-1/2 text-muted-foreground"
-        aria-hidden="true"
-      />
-    </div>
+    <select
+      aria-label={ariaLabel}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+      className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
+    >
+      {children}
+    </select>
   );
 }
 
