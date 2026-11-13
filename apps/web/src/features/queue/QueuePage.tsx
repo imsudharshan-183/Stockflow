@@ -422,7 +422,7 @@ export function QueuePage() {
                 <TableHeader>
                   <tr className="border-b border-border">
                     {canDecide ? (
-                      <TableHead className="w-10 px-3 text-center">
+                      <TableHead className="w-9 px-2.5 text-center xl:w-10 xl:px-3">
                         <input
                           ref={selectAllRef}
                           type="checkbox"
@@ -442,28 +442,34 @@ export function QueuePage() {
                         <span className="sr-only">Select</span>
                       </TableHead>
                     ) : null}
-                    <TableHead className="hidden w-12 px-2.5 lg:table-cell xl:w-14">Rank</TableHead>
-                    <TableHead className="w-24 px-2.5 xl:w-[116px]">Action</TableHead>
-                    <TableHead className="w-auto border-r border-divider-soft px-3">Product</TableHead>
-                    <TableHead className="w-36 px-3 lg:w-44 xl:w-[200px]">Branch(es)</TableHead>
-                    <TableHead className="w-16 border-r border-divider-soft px-3 text-right xl:w-20">
+                    <TableHead className="hidden w-11 px-2 lg:table-cell xl:w-14 xl:px-2.5">Rank</TableHead>
+                    <TableHead className="w-[88px] px-2 xl:w-[112px] xl:px-2.5">Action</TableHead>
+                    <TableHead className="w-[26%] border-r border-divider-soft px-3 xl:w-[30%]">
+                      Product
+                    </TableHead>
+                    <TableHead className="w-[140px] px-2.5 lg:w-[156px] xl:w-[196px] xl:px-3">
+                      Branch(es)
+                    </TableHead>
+                    <TableHead className="w-[54px] border-r border-divider-soft px-2.5 text-right xl:w-[72px] xl:px-3">
                       Qty
                     </TableHead>
-                    <TableHead className="w-24 px-3 text-right xl:w-[116px]">Net benefit</TableHead>
+                    <TableHead className="w-[86px] px-2.5 text-right xl:w-[112px] xl:px-3">
+                      Net benefit
+                    </TableHead>
                     <TableHead
                       className={cn(
-                        "w-24 px-3 xl:w-[110px]",
+                        "w-[88px] px-2.5 xl:w-[106px] xl:px-3",
                         canDecide ? "border-r border-divider-soft" : "",
                       )}
                     >
                       Status
                     </TableHead>
                     {canDecide ? (
-                      <TableHead className="w-24 px-3 text-right xl:w-[104px]">
+                      <TableHead className="w-[86px] px-2.5 text-right xl:w-[98px] xl:px-3">
                         <span className="sr-only">Actions</span>
                       </TableHead>
                     ) : (
-                      <TableHead className="w-10 px-2 text-right">
+                      <TableHead className="w-9 px-2 text-right">
                         <span className="sr-only">Details</span>
                       </TableHead>
                     )}
@@ -502,7 +508,7 @@ export function QueuePage() {
                       >
                         {canDecide ? (
                           <TableCell
-                            className="w-10 px-3 text-center"
+                            className="w-9 px-2.5 text-center xl:w-10 xl:px-3"
                             onClick={(event) => event.stopPropagation()}
                           >
                             <input
@@ -522,12 +528,12 @@ export function QueuePage() {
                         ) : null}
 
                         {/* Rank (hidden 768-1023px) */}
-                        <TableCell className="hidden px-2.5 text-xs font-medium text-muted-foreground tabular-nums lg:table-cell">
+                        <TableCell className="hidden px-2 text-xs font-medium text-muted-foreground tabular-nums lg:table-cell xl:px-2.5">
                           {row.rank}
                         </TableCell>
 
                         {/* Action Badge */}
-                        <TableCell className="px-2.5">
+                        <TableCell className="px-2 xl:px-2.5">
                           <Badge
                             tone={
                               row.action === "TRANSFER"
@@ -563,7 +569,7 @@ export function QueuePage() {
                         </TableCell>
 
                         {/* Branch(es) */}
-                        <TableCell className="px-3">
+                        <TableCell className="px-2.5 xl:px-3">
                           {row.donorBranchName ? (
                             <Tooltip>
                               <TooltipTrigger
@@ -598,18 +604,21 @@ export function QueuePage() {
                         </TableCell>
 
                         {/* Quantity (Group 2 boundary, right-aligned) */}
-                        <TableCell className="border-r border-divider-soft px-3 text-right font-medium text-foreground tabular-nums">
+                        <TableCell className="border-r border-divider-soft px-2.5 text-right font-medium text-foreground tabular-nums xl:px-3">
                           {formatNumber(row.quantity)}
                         </TableCell>
 
                         {/* Net Benefit (right-aligned, most prominent number) */}
-                        <TableCell className="px-3 text-right font-semibold text-foreground tabular-nums">
+                        <TableCell className="px-2.5 text-right font-semibold text-foreground tabular-nums xl:px-3">
                           {formatMoneyFull(row.netBenefit)}
                         </TableCell>
 
                         {/* Status (Group 3 boundary) */}
                         <TableCell
-                          className={cn("px-3", canDecide ? "border-r border-divider-soft" : "")}
+                          className={cn(
+                            "px-2.5 xl:px-3",
+                            canDecide ? "border-r border-divider-soft" : "",
+                          )}
                         >
                           <Badge
                             tone={
@@ -628,7 +637,7 @@ export function QueuePage() {
                         {/* Actions (Group 4: horizontal icon buttons + chevron affordance) */}
                         {canDecide ? (
                           <TableCell
-                            className="px-3 text-right"
+                            className="px-2.5 text-right xl:px-3"
                             onClick={(event) => event.stopPropagation()}
                           >
                             <div className="flex items-center justify-end gap-1">
@@ -953,13 +962,16 @@ export function QueuePage() {
                 <p className="font-medium text-foreground">
                   Audit reason codes to record:
                 </p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <div className="mt-2 space-y-1.5">
                   {Array.from(
                     new Set(rejectTargets.flatMap((item) => item.reasonCodes)),
                   ).map((code) => (
-                    <Badge key={code} variant="secondary" className="font-mono text-[11px]">
-                      {code}: {REASON_LABELS[code]}
-                    </Badge>
+                    <div key={code} className="flex flex-wrap items-baseline gap-2">
+                      <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
+                        {code}
+                      </Badge>
+                      <span className="text-muted-foreground">{REASON_LABELS[code]}</span>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1028,7 +1040,7 @@ function ToolbarSelect({
         aria-label={ariaLabel}
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-9 appearance-none rounded-xl border border-border bg-card pr-7 pl-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
+        className="custom-select h-9 appearance-none rounded-xl border border-border bg-card pr-7 pl-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
       >
         {children}
       </select>
