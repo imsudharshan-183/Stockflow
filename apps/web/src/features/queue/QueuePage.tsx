@@ -747,7 +747,9 @@ export function QueuePage() {
                     </div>
 
                     <div>
-                      <p className="font-semibold text-foreground">{row.productName}</p>
+                      <p className="font-semibold text-foreground">
+                        {formatProductDisplayName(row.productName, row.sku)}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {row.sku} · {row.category} · {formatNumber(row.quantity)} units
                       </p>
@@ -943,7 +945,7 @@ export function QueuePage() {
             <DialogTitle>
               {rejectTargets && rejectTargets.length > 1
                 ? `Reject ${formatNumber(rejectTargets.length)} selected actions?`
-                : `Reject ${rejectTargets?.[0]?.productName ?? "action"}?`}
+                : `Reject ${rejectTargets?.[0] ? formatProductDisplayName(rejectTargets[0].productName, rejectTargets[0].sku) : "action"}?`}
             </DialogTitle>
             <DialogDescription>
               Rejection records an audit log entry with the recommendation's reason codes and

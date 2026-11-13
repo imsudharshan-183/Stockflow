@@ -115,6 +115,19 @@ export function formatCoverCell(days: number | null | undefined): string {
   return `${Math.round(days)}d`;
 }
 
+/**
+ * Normalizes extreme or raw floating-point cover days in natural-language rationale sentences.
+ */
+export function formatReasonSentence(reason: string): string {
+  if (!reason) return "";
+  return reason.replace(/(\d{4,}(?:\.\d+)?)\s+days of cover/g, (_match, p1) => {
+    const num = parseFloat(p1);
+    if (num >= 9999) return "unlimited days of cover";
+    if (num > 365) return "365+ days of cover";
+    return `${formatNumber(Math.round(num))} days of cover`;
+  });
+}
+
 export function formatDate(iso: string): string {
   if (!iso) return "—";
   const datePart = iso.slice(0, 10);

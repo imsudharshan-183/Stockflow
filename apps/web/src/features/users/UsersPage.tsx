@@ -45,6 +45,7 @@ export function UsersPage() {
   const [editTarget, setEditTarget] = useState<User | null>(null);
   const [resetTarget, setResetTarget] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
 
   const branches = kpisQuery.data?.branches ?? [];
 
@@ -190,16 +191,16 @@ export function UsersPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <Table className="min-w-[860px]">
+            <Table className="min-w-[960px]">
               <TableHeader>
                 <tr className="border-b border-border">
-                  <TableHead className="w-[18%]">Name</TableHead>
-                  <TableHead className="w-[22%]">Email</TableHead>
-                  <TableHead className="w-[96px]">Role</TableHead>
-                  <TableHead className="w-[18%]">Branch scope</TableHead>
-                  <TableHead className="w-[96px]">Status</TableHead>
-                  <TableHead className="w-[148px]">Created</TableHead>
-                  <TableHead className="w-[220px] text-right">Actions</TableHead>
+                  <TableHead className="w-[180px]">Name</TableHead>
+                  <TableHead className="w-[200px]">Email</TableHead>
+                  <TableHead className="w-[90px]">Role</TableHead>
+                  <TableHead className="w-[160px]">Branch scope</TableHead>
+                  <TableHead className="w-[90px]">Status</TableHead>
+                  <TableHead className="w-[130px]">Created</TableHead>
+                  <TableHead className="w-[190px] text-right">Actions</TableHead>
                 </tr>
               </TableHeader>
               <TableBody>
@@ -270,7 +271,7 @@ export function UsersPage() {
                                 variant="soft-danger"
                                 loading={isDeactivatingThis}
                                 disabled={deactivateMutation.isPending}
-                                onClick={() => deactivateMutation.mutate(u.id)}
+                                onClick={() => setDeactivateTarget(u)}
                               >
                                 <UserX className="size-3" aria-hidden="true" />
                                 Deactivate
@@ -408,6 +409,46 @@ export function UsersPage() {
               </Button>
             </DialogFooter>
           </form>
+        </DialogContent>
+      </Dialog>
+
+      {/* Deactivate User Dialog */}
+      <Dialog
+        open={deactivateTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeactivateTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Deactivate user</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to deactivate {deactivateTarget?.name} ({deactivateTarget?.email})? They will immediately lose access to StockFlow.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={deactivateMutation.isPending}
+              onClick={() => setDeactivateTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              loading={deactivateMutation.isPending}
+              onClick={() => {
+                if (deactivateTarget) {
+                  deactivateMutation.mutate(deactivateTarget.id);
+                  setDeactivateTarget(null);
+                }
+              }}
+            >
+              Confirm deactivate
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

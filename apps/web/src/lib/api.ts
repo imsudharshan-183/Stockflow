@@ -27,11 +27,29 @@ import {
 } from "@stockflow/core";
 import { z, type ZodType } from "zod";
 
-let inMemoryAccessToken: string | null = null;
+const TOKEN_STORAGE_KEY = "stockflow_access_token";
+
+let inMemoryAccessToken: string | null = (() => {
+  try {
+    return window.sessionStorage.getItem(TOKEN_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+})();
+
 let onAuthFailedCallback: (() => void) | null = null;
 
 export function setAccessToken(token: string | null): void {
   inMemoryAccessToken = token;
+  try {
+    if (token) {
+      window.sessionStorage.setItem(TOKEN_STORAGE_KEY, token);
+    } else {
+      window.sessionStorage.removeItem(TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage quota or privacy mode errors
+  }
 }
 
 export function getAccessToken(): string | null {

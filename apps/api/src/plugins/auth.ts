@@ -37,27 +37,28 @@ export interface AuthContext {
 
 export function createAuthGuards(env: Env, userRepo: UserRepository): AuthContext {
   const authenticate = async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const authHeader = request.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.substring(7).trim();
+      try {
+        const decoded = await request.server.jwt.verify<{ sub: string; role: Role }>(token);
+        const userRecord = await userRepo.findById(decoded.sub);
+        if (userRecord && userRecord.isActive) {
+          request.currentUser = toPublicUser(userRecord);
+          return;
+        }
+        return reply.code(401).send({ error: "Invalid or inactive user" });
+      } catch {
+        return reply.code(401).send({ error: "Invalid or expired token" });
+      }
+    }
+
     if (!env.AUTH_ENABLED) {
       request.currentUser = SYNTHETIC_ADMIN;
       return;
     }
 
-    const authHeader = request.headers.authorization;
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      return reply.code(401).send({ error: "Authentication required" });
-    }
-
-    const token = authHeader.substring(7).trim();
-    try {
-      const decoded = await request.server.jwt.verify<{ sub: string; role: Role }>(token);
-      const userRecord = await userRepo.findById(decoded.sub);
-      if (!userRecord || !userRecord.isActive) {
-        return reply.code(401).send({ error: "Invalid or inactive user" });
-      }
-      request.currentUser = toPublicUser(userRecord);
-    } catch {
-      return reply.code(401).send({ error: "Invalid or expired token" });
-    }
+    return reply.code(401).send({ error: "Authentication required" });
   };
 
   const requirePermission = (action: PermissionAction) => {

@@ -22,6 +22,7 @@ import {
   formatMoneyFull,
   formatNumber,
   formatPct,
+  formatReasonSentence,
   statusLabel,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -124,7 +125,7 @@ export function RecommendationDrawer({
                   Recommendation rationale
                 </h3>
                 <div className="rounded-xl border border-border bg-secondary/40 p-3.5 text-sm leading-relaxed text-foreground">
-                  {recommendation.reason}
+                  {formatReasonSentence(recommendation.reason)}
                 </div>
 
                 <div className="grid grid-cols-2 gap-2.5">

@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import type { User } from "@stockflow/core";
 import { api, setAccessToken, setOnAuthFailed } from "@/lib/api";
 
@@ -20,6 +21,7 @@ interface AuthContextValue {
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -37,14 +39,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setOnAuthFailed(() => {
       setUser(null);
+      queryClient.clear();
     });
     void refreshUser();
-  }, [refreshUser]);
+  }, [refreshUser, queryClient]);
 
   const login = async (email: string, password: string) => {
     const res = await api.login({ email, password });
     setAccessToken(res.token);
     setUser(res.user);
+    queryClient.clear();
   };
 
   const logout = async () => {
@@ -53,6 +57,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setAccessToken(null);
       setUser(null);
+      queryClient.clear();
     }
   };
 

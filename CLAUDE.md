@@ -36,6 +36,7 @@ StockFlow is a morning decision / action queue system for a 15-branch retail net
   - `formatMoneyFull`: Whole dollars with separators (`$318`, `$1,240`) for tables and detail views (cents shown only for non-zero values `< $1`).
   - `formatNumber`: Integers with separators (`1,240`), preserving 1 decimal only for fractional rates `< 1`.
   - `formatCover` / `formatCoverCell`: Treats engine's `NO_DEMAND_COVER = 999999` (`>= 9999`) as `"No demand"` / `"—"` and caps `> 90` days at `"90d+"` in heatmap cells.
+  - `formatReasonSentence`: Normalizes uncapped or extreme floating-point cover days in natural-language rationale paragraphs.
 - **Automated UI Guardrail (`scripts/check-ui.mjs`, wired into `pnpm lint`)**:
   1. Fails if any raw `<button` element is used outside `apps/web/src/components/ui/`.
   2. Fails if any hex color literal (`#...`) appears in `apps/web/src/` outside `index.css` and `lib/tokens.ts`.

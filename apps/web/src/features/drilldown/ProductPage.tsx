@@ -37,6 +37,7 @@ import {
   TableToolbar,
 } from "@/components/ui/table";
 import { queryKeys } from "@/hooks/queryKeys";
+import { useAuth } from "@/features/auth/AuthContext";
 import { api } from "@/lib/api";
 import {
   actionLabel,
@@ -44,6 +45,7 @@ import {
   formatDate,
   formatMoneyFull,
   formatNumber,
+  formatReasonSentence,
   statusLabel,
 } from "@/lib/format";
 import { TOKENS } from "@/lib/tokens";
@@ -235,6 +237,9 @@ function Logic({
   branches: PositionView[];
   onBranch: (id: string) => void;
 }) {
+  const { user } = useAuth();
+  const isBranchAllowed = !user || user.role === "admin" || user.branchIds.includes(position.branch.id);
+
   const salesRows = points.map((point) => ({
     date: point.date,
     sales: point.salesUnits,
@@ -268,12 +273,18 @@ function Logic({
           </label>
 
           <div>
-            <Link
-              className="text-sm font-semibold text-primary hover:underline"
-              to={`/branches/${position.branch.id}`}
-            >
-              Open {position.branch.name} branch page →
-            </Link>
+            {isBranchAllowed ? (
+              <Link
+                className="text-sm font-semibold text-primary hover:underline"
+                to={`/branches/${position.branch.id}`}
+              >
+                Open {position.branch.name} branch page →
+              </Link>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                {position.branch.name} is outside your branch scope
+              </span>
+            )}
           </div>
 
           <p className="text-xs leading-relaxed text-muted-foreground">
@@ -322,7 +333,7 @@ function Logic({
                 </Badge>
               </div>
               <p className="mt-2 leading-relaxed text-foreground">
-                {position.recommendation.reason}
+                {formatReasonSentence(position.recommendation.reason)}
               </p>
             </div>
           ) : (

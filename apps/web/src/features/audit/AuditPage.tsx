@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { Search, X } from "lucide-react";
+import { ArrowRight, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -47,6 +47,7 @@ export function AuditPage() {
         matchesProductQuery(entry, q) ||
         entry.branchName.toLowerCase().includes(q) ||
         entry.branchId.toLowerCase().includes(q) ||
+        (entry.donorBranchId?.toLowerCase().includes(q) ?? false) ||
         entry.user.toLowerCase().includes(q)
       );
     });
@@ -243,15 +244,32 @@ export function AuditPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Link
-                        to={`/branches/${entry.branchId}`}
-                        className="block truncate font-medium text-foreground hover:text-primary hover:underline"
-                      >
-                        {entry.branchName}
-                      </Link>
-                      <div className="truncate text-xs text-muted-foreground">
-                        {entry.branchId}
-                      </div>
+                      {entry.action === "TRANSFER" && entry.donorBranchId ? (
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                            <span>From {entry.donorBranchId}</span>
+                            <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
+                          </div>
+                          <Link
+                            to={`/branches/${entry.branchId}`}
+                            className="block truncate font-medium text-foreground hover:text-primary hover:underline"
+                          >
+                            {entry.branchName}
+                          </Link>
+                        </div>
+                      ) : (
+                        <>
+                          <Link
+                            to={`/branches/${entry.branchId}`}
+                            className="block truncate font-medium text-foreground hover:text-primary hover:underline"
+                          >
+                            {entry.branchName}
+                          </Link>
+                          <div className="truncate text-xs text-muted-foreground">
+                            {entry.branchId}
+                          </div>
+                        </>
+                      )}
                     </TableCell>
                     <TableCell className="text-right font-semibold text-foreground tabular-nums">
                       {formatMoneyFull(entry.netBenefit)}
