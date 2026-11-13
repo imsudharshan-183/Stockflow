@@ -6,24 +6,43 @@ const moneyCompact = new Intl.NumberFormat("en-US", {
   notation: "compact",
   maximumFractionDigits: 1,
 });
-const moneyFull = new Intl.NumberFormat("en-US", {
+
+const moneyWhole = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const moneyCents = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
 });
+
 const pct = new Intl.NumberFormat("en-US", {
   style: "percent",
   minimumFractionDigits: 1,
   maximumFractionDigits: 1,
 });
-const num = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+
+const intFormat = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 0,
+});
+
+const subOneDecimalFormat = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 1,
+  maximumFractionDigits: 1,
+});
+
 const day = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
   year: "numeric",
   timeZone: "UTC",
 });
+
 const stamp = new Intl.DateTimeFormat("en-US", {
   month: "short",
   day: "numeric",
@@ -33,33 +52,82 @@ const stamp = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
+/**
+ * Compact currency for headers and KPI cards ($37.3K, $1.2M).
+ * Values under $1,000 use whole dollars ($318); non-zero values under $1 show cents ($0.45).
+ */
 export function formatMoney(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "$0";
+  const abs = Math.abs(value);
+  if (abs < 1) return moneyCents.format(value);
+  if (abs < 1000) return moneyWhole.format(Math.round(value));
   return moneyCompact.format(value);
 }
 
+/**
+ * Whole dollars with separators for tables and detail views ($318, $1,240).
+ * No cents anywhere unless a non-zero value is under $1.
+ */
 export function formatMoneyFull(value: number): string {
-  return moneyFull.format(value);
+  if (!Number.isFinite(value) || value === 0) return "$0";
+  const abs = Math.abs(value);
+  if (abs < 1) return moneyCents.format(value);
+  return moneyWhole.format(Math.round(value));
 }
 
 export function formatPct(value: number): string {
+  if (!Number.isFinite(value)) return "0.0%";
   return pct.format(value);
 }
 
+/**
+ * Integers with separators (e.g. 1,240).
+ * Preserves 1 decimal only for non-zero fractional rates under 1 (e.g. 0.4 daily velocity).
+ */
 export function formatNumber(value: number): string {
-  return num.format(value);
+  if (!Number.isFinite(value) || value === 0) return "0";
+  const abs = Math.abs(value);
+  if (abs < 1) return subOneDecimalFormat.format(value);
+  return intFormat.format(Math.round(value));
 }
 
-export function formatCover(days: number | null): string {
-  if (days === null) return "No demand";
+/**
+ * Cover days formatter. Engine uses 999999 (NO_DEMAND_COVER) on positions with 0 velocity;
+ * averaging across SKUs in a category can yield values > 9999 when some SKUs have zero velocity.
+ */
+export function formatCover(days: number | null | undefined): string {
+  if (days === null || days === undefined || !Number.isFinite(days) || days >= 9999) {
+    return "No demand";
+  }
+  if (days > 365) {
+    return "365+ days";
+  }
   return `${formatNumber(days)} days`;
 }
 
+export function formatCoverCell(days: number | null | undefined): string {
+  if (days === null || days === undefined || !Number.isFinite(days) || days >= 9999) {
+    return "—";
+  }
+  if (days > 90) {
+    return "90d+";
+  }
+  return `${Math.round(days)}d`;
+}
+
 export function formatDate(iso: string): string {
-  return day.format(new Date(`${iso.slice(0, 10)}T00:00:00Z`));
+  if (!iso) return "—";
+  const datePart = iso.slice(0, 10);
+  const parsed = new Date(`${datePart}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return day.format(parsed);
 }
 
 export function formatDateTime(iso: string): string {
-  return stamp.format(new Date(iso));
+  if (!iso) return "—";
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return iso;
+  return stamp.format(parsed);
 }
 
 export const REASON_LABELS: Record<ReasonCode, string> = {
