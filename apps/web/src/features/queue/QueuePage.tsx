@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/features/auth/AuthContext";
+import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -15,6 +16,7 @@ import {
   REASON_LABELS,
   actionLabel,
   formatCover,
+  formatMoney,
   formatMoneyFull,
   formatNumber,
   statusLabel,
@@ -78,13 +80,15 @@ export function QueuePage() {
   }
 
   return (
-    <div className="space-y-4">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Action queue</h1>
-        <p className="text-sm text-muted-foreground">
-          {list.data ? `${formatNumber(rows.length)} actions worth ${formatMoneyFull(worth)}` : "Ranked by net benefit."}
-        </p>
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Action queue"
+        subtitle={
+          list.data
+            ? `${formatNumber(rows.length)} actions · ${formatMoney(worth)} projected net benefit`
+            : "Ranked by net benefit."
+        }
+      />
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <Filter label="Branch" value={filters.branch} onChange={(branch) => write({ branch })}>

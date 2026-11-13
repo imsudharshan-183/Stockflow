@@ -8,11 +8,11 @@ import type { Role } from "@stockflow/core";
 const LoginPage = lazy(() =>
   import("@/features/auth/LoginPage").then((m) => ({ default: m.LoginPage })),
 );
-const QueuePage = lazy(() =>
-  import("@/features/queue/QueuePage").then((m) => ({ default: m.QueuePage })),
-);
 const OverviewPage = lazy(() =>
   import("@/features/overview/OverviewPage").then((m) => ({ default: m.OverviewPage })),
+);
+const QueuePage = lazy(() =>
+  import("@/features/queue/QueuePage").then((m) => ({ default: m.QueuePage })),
 );
 const AuditPage = lazy(() =>
   import("@/features/audit/AuditPage").then((m) => ({ default: m.AuditPage })),
@@ -71,9 +71,9 @@ export function App() {
               </RequireAuth>
             }
           >
-            <Route index element={<QueuePage />} />
+            <Route index element={<OverviewPage />} />
+            <Route path="overview" element={<Navigate to="/" replace />} />
             <Route path="queue" element={<QueuePage />} />
-            <Route path="overview" element={<OverviewPage />} />
             <Route
               path="audit"
               element={
@@ -97,7 +97,7 @@ export function App() {
               element={
                 <EmptyBlock
                   title="Page not found"
-                  body="That page is not in StockFlow. Use the sidebar to return to the action queue."
+                  body="That page is not in StockFlow. Use the sidebar to return to the overview or action queue."
                 />
               }
             />
