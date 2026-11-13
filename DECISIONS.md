@@ -78,3 +78,28 @@ Frontend drift (inconsistent buttons, raw HTML tags, conflicting color palettes,
 - Shared UI primitives (`Button`, `Badge`, `TableCard`, `TableToolbar`, `Table`) in `apps/web/src/components/ui/` are the sole permitted controls.
 - All numbers and currency must use `@/lib/format` (`formatMoney`, `formatMoneyFull`, `formatNumber`, `formatCover`, `formatReasonSentence`).
 - Automated enforcement via `scripts/check-ui.mjs` (wired into `pnpm lint`) fails CI builds if raw `<button>` tags, arbitrary hex codes, or unformatted numbers appear in feature components.
+
+---
+
+## ADR-007: Product Catalog Lifecycle, Change History, and Safe Deletion
+
+### Context
+StockFlow's replenishment engine requires product parameters (selling price, unit cost, lead time days) and sales history to generate recommendations. Administrators need to add new products, update catalog parameters, archive discontinued products, and clean up accidental draft entries without corrupting past decision audit trails or running into index misalignment in the pure analytical core.
+
+### Decision
+1. **Tri-State Product Lifecycle**:
+   - `awaiting_history`: Newly created products (`POST /api/catalog/products`) pending sales data. They generate no morning queue actions until sales are recorded or sample history is generated.
+   - `active`: Products with history participating in morning inventory optimization and replenishment planning.
+   - `archived`: Discontinued products whose pending actions are immediately purged from the morning queue and whose history is permanently preserved.
+2. **Catalog Invariants & Role Protection**:
+   - Only `admin` role has `"products:manage"` permission; `manager` and `staff` access returns `403 Forbidden`.
+   - Selling price must strictly exceed unit cost (`price > cost > 0`).
+   - Lead time is an integer between 1 and 21 days (`1 <= leadTimeDays <= 21`).
+   - Product names must be unique within their category (case-insensitive check returns `409 Conflict`).
+   - Auto-generated sequential SKU format (`SKU-XXXXX`).
+3. **Change History Tracking**:
+   - Every product creation, parameter update, archive, and restore operation logs an immutable record to the `product_changes` collection with `actedBy: { userId, name, role }`, `action`, and `{ before, after }` diffs for each modified attribute.
+4. **Delete Safety Guarantee**:
+   - `DELETE /api/catalog/products/:sku` is strictly blocked (`409 Conflict`) if the SKU has past sales history or decision audit entries. In such cases, archiving is mandated to protect financial and audit integrity. Only mistake entries with zero sales and zero decisions may be permanently deleted.
+5. **3D Dataset Matrix Alignment**:
+   - To preserve the pure mathematical invariant of `packages/core/src/engine/` without modifying it, `Dataset.sales`, `onHand`, and `demand` 3D tensor dimensions `[skuIndex][branchIndex][dayIndex]` are kept strictly synchronized with `Dataset.products`. Analysis recomputations filter active indices uniformly across products and data tensors.

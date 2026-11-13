@@ -17,6 +17,7 @@ describe("auth helpers and schemas", () => {
     expect(can("admin", "audit:read")).toBe(true);
     expect(can("admin", "users:manage")).toBe(true);
     expect(can("admin", "branches:view_all")).toBe(true);
+    expect(can("admin", "products:manage")).toBe(true);
 
     // Manager permissions
     expect(can("manager", "recommendations:read")).toBe(true);
@@ -24,6 +25,7 @@ describe("auth helpers and schemas", () => {
     expect(can("manager", "audit:read")).toBe(true);
     expect(can("manager", "users:manage")).toBe(false);
     expect(can("manager", "branches:view_all")).toBe(false);
+    expect(can("manager", "products:manage")).toBe(false);
 
     // Staff permissions
     expect(can("staff", "recommendations:read")).toBe(true);
@@ -31,6 +33,7 @@ describe("auth helpers and schemas", () => {
     expect(can("staff", "audit:read")).toBe(false);
     expect(can("staff", "users:manage")).toBe(false);
     expect(can("staff", "branches:view_all")).toBe(false);
+    expect(can("staff", "products:manage")).toBe(false);
   });
 
   it("enforces role management hierarchy (strictly lower role)", () => {

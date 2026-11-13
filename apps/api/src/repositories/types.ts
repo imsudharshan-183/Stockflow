@@ -1,4 +1,4 @@
-import type { ActionRecord, Analysis, AuditEntry, Dataset } from "@stockflow/core";
+import type { ActionRecord, Analysis, AuditEntry, Dataset, Product, ProductChangeRecord } from "@stockflow/core";
 import type { UserRepository } from "./userTypes.js";
 
 // IMPORTANT: both stores must return the same dataset shape and the same audit rows. The engine does not know which one it is reading.
@@ -14,5 +14,10 @@ export interface StockRepository {
   saveAction(record: ActionRecord): Promise<void>;
   listAudit(): Promise<AuditEntry[]>;
   saveAudit(entry: AuditEntry): Promise<void>;
+  saveProduct(product: Product): Promise<void>;
+  removeProduct(sku: string): Promise<void>;
+  listProductChanges(sku: string): Promise<ProductChangeRecord[]>;
+  saveProductChange(change: ProductChangeRecord): Promise<void>;
+  hasHistoryOrAudits(sku: string): Promise<{ hasSales: boolean; hasAudits: boolean }>;
   close(): Promise<void>;
 }

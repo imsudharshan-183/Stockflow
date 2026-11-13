@@ -6,6 +6,7 @@ import type {
   Branch,
   Dataset,
   Product,
+  ProductChangeRecord,
   Role,
 } from "@stockflow/core";
 import { buildApp } from "../plugins/app.js";
@@ -144,6 +145,29 @@ export class FixedDatasetRepository implements StockRepository {
   saveAudit(entry: AuditEntry): Promise<void> {
     this.audit.push(entry);
     return Promise.resolve();
+  }
+  saveProduct(product: Product): Promise<void> {
+    const idx = this.data.products.findIndex((p) => p.sku === product.sku);
+    if (idx >= 0) this.data.products[idx] = product;
+    else this.data.products.push(product);
+    return Promise.resolve();
+  }
+  removeProduct(sku: string): Promise<void> {
+    const idx = this.data.products.findIndex((p) => p.sku === sku);
+    if (idx >= 0) this.data.products.splice(idx, 1);
+    return Promise.resolve();
+  }
+  listProductChanges(): Promise<ProductChangeRecord[]> {
+    return Promise.resolve([]);
+  }
+  saveProductChange(): Promise<void> {
+    return Promise.resolve();
+  }
+  hasHistoryOrAudits(sku: string): Promise<{ hasSales: boolean; hasAudits: boolean }> {
+    return Promise.resolve({
+      hasAudits: this.audit.some((a) => a.sku === sku),
+      hasSales: false,
+    });
   }
   close(): Promise<void> {
     return Promise.resolve();

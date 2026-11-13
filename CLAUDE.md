@@ -67,6 +67,16 @@ StockFlow is a morning decision / action queue system for a 15-branch retail net
 - Transfers are visible to a manager/staff member if the user's branch scope includes either the donor OR receiver branch.
 - Reorders and markdowns are visible if the user's branch scope includes the target branch.
 
+## Product Catalog Management API (`apps/api`)
+- `GET /api/catalog/products`: Paginated product listing with filters (`search`, `category`, `status`). Available to authenticated users (`admin`, `manager`, `staff`).
+- `GET /api/catalog/products/:sku`: Returns detailed product record, change history, and `canDeletePermanently` indicator with reason if blocked.
+- `POST /api/catalog/products`: Admin-only (`products:manage`). Auto-generates sequential SKU (`SKU-XXXXX`), enforces `price > cost > 0`, integer lead time 1..21, and category-level name uniqueness. Sets initial status `awaiting_history`.
+- `PATCH /api/catalog/products/:sku`: Admin-only. Edits product attributes with validation; automatically triggers network-wide analysis recomputation when mathematical fields (`price`, `cost`, `leadTimeDays`) change on active products.
+- `PATCH /api/catalog/products/:sku/archive`: Admin-only. Sets status to `archived`, purges pending recommendations from the morning queue, and returns the count of removed actions.
+- `PATCH /api/catalog/products/:sku/restore`: Admin-only. Restores an archived product to `active` (or `awaiting_history` if no sales history exists) and triggers engine recomputation.
+- `DELETE /api/catalog/products/:sku`: Admin-only. Permanently deletes mistake entries with zero sales and zero decisions. Blocked (`409 Conflict`) if history exists.
+- `POST /api/catalog/products/:sku/sample-history`: Admin-only. Generates 30 days of realistic sample sales and on-hand inventory across all 15 branches, moves product from `awaiting_history` to `active`, and triggers engine recomputation.
+
 ## Sales Entries Ingestion (`apps/api`)
 - `POST /api/sales-entries`: Validates `branchId`, `sku`, `date` (`YYYY-MM-DD`), `unitsSold` (`>= 0`), and `onHand` (`>= 0`) with field-specific `400` messages, upserts on `(branchId, sku, date)` in `sales_entries`, triggers `recomputeForSku(branchId, sku)`, and returns `201`.
 - `POST /api/sales-entries/import`: Accepts `multipart/form-data` field `"file"` (max 5MB CSV with header `branchId,sku,date,unitsSold,onHand`), validates each row without failing the whole file on bad rows, upserts valid rows, triggers `recomputeForSku(branchId, sku)` once per distinct `(branchId, sku)` touched, and returns `{ inserted, updated, errors }`.

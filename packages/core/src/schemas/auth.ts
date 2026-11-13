@@ -15,6 +15,7 @@ export const PermissionActionSchema = z.enum([
   "audit:read",
   "users:manage",
   "branches:view_all",
+  "products:manage",
 ]);
 export type PermissionAction = z.infer<typeof PermissionActionSchema>;
 
@@ -25,6 +26,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<PermissionAction>> = {
     "audit:read",
     "users:manage",
     "branches:view_all",
+    "products:manage",
   ]),
   manager: new Set([
     "recommendations:read",

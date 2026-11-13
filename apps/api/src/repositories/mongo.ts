@@ -7,14 +7,30 @@ import {
   RecommendationSchema,
   analyze,
   generateDataset,
+  ProductChangeRecordSchema,
   type ActionRecord,
   type Analysis,
   type AuditEntry,
   type Dataset,
+  type Product,
+  type ProductChangeRecord,
 } from "@stockflow/core";
 import mongoose from "mongoose";
 import { z } from "zod";
-import { ActionModel, AuditModel, FactModel, MetaModel, MetaShape, PlanModel, SeriesModel, SeriesShape, UserModel, RefreshTokenModel, SalesEntryModel } from "./models.js";
+import {
+  ActionModel,
+  AuditModel,
+  FactModel,
+  MetaModel,
+  MetaShape,
+  PlanModel,
+  ProductChangeModel,
+  RefreshTokenModel,
+  SalesEntryModel,
+  SeriesModel,
+  SeriesShape,
+  UserModel,
+} from "./models.js";
 import type { StockRepository } from "./types.js";
 import { MongoUserRepository } from "./mongoUser.js";
 import { getInitialSeedUsers } from "./seedData.js";
@@ -124,6 +140,49 @@ export class MongoRepository implements StockRepository {
 
   async saveAudit(entry: AuditEntry): Promise<void> {
     await AuditModel.create(AuditEntrySchema.parse(entry));
+  }
+
+  async saveProduct(product: Product): Promise<void> {
+    const updated = await MetaModel.updateOne(
+      { _id: "dataset", "products.sku": product.sku },
+      { $set: { "products.$": product } },
+    );
+    if (updated.matchedCount === 0) {
+      await MetaModel.updateOne(
+        { _id: "dataset" },
+        { $push: { products: product } },
+      );
+    }
+  }
+
+  async removeProduct(sku: string): Promise<void> {
+    await MetaModel.updateOne(
+      { _id: "dataset" },
+      { $pull: { products: { sku } } },
+    );
+    await SeriesModel.deleteMany({ sku });
+    await FactModel.deleteMany({ sku });
+  }
+
+  async listProductChanges(sku: string): Promise<ProductChangeRecord[]> {
+    const rows = await ProductChangeModel.find({ sku }).sort({ at: -1 }).lean();
+    return rows.map((r) => ProductChangeRecordSchema.parse(r));
+  }
+
+  async saveProductChange(change: ProductChangeRecord): Promise<void> {
+    await ProductChangeModel.create(ProductChangeRecordSchema.parse(change));
+  }
+
+  async hasHistoryOrAudits(sku: string): Promise<{ hasSales: boolean; hasAudits: boolean }> {
+    const [auditCount, salesEntryCount, factCount] = await Promise.all([
+      AuditModel.countDocuments({ sku }),
+      SalesEntryModel.countDocuments({ sku, unitsSold: { $gt: 0 } }),
+      FactModel.countDocuments({ sku, units: { $gt: 0 } }),
+    ]);
+    return {
+      hasAudits: auditCount > 0,
+      hasSales: salesEntryCount > 0 || factCount > 0,
+    };
   }
 
   async close(): Promise<void> {

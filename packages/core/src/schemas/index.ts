@@ -9,6 +9,9 @@ export const BranchSchema = z.object({
   region: z.string().min(1),
 });
 
+export const ProductStatusSchema = z.enum(["active", "awaiting_history", "archived"]);
+export type ProductStatus = z.infer<typeof ProductStatusSchema>;
+
 export const ProductSchema = z.object({
   sku: z.string().min(1),
   name: z.string().min(1),
@@ -16,6 +19,82 @@ export const ProductSchema = z.object({
   price: z.number().positive(),
   cost: z.number().positive(),
   leadTimeDays: z.number().int().positive(),
+  status: ProductStatusSchema.optional(),
+});
+
+export const CreateProductSchema = z
+  .object({
+    name: z.string().min(1, "Name is required").max(60, "Name must be 60 characters or less"),
+    category: z.string().min(1, "Category is required"),
+    price: z.number().positive("Price must be greater than 0"),
+    cost: z.number().positive("Unit cost must be greater than 0"),
+    leadTimeDays: z.number().int("Lead time must be an integer").min(1, "Lead time must be at least 1 day").max(21, "Lead time cannot exceed 21 days"),
+  })
+  .refine((data) => data.price > data.cost, {
+    message: "Selling price must be greater than unit cost",
+    path: ["price"],
+  });
+
+export const UpdateProductSchema = z
+  .object({
+    name: z.string().min(1, "Name cannot be empty").max(60, "Name must be 60 characters or less").optional(),
+    category: z.string().min(1, "Category cannot be empty").optional(),
+    price: z.number().positive("Price must be greater than 0").optional(),
+    cost: z.number().positive("Unit cost must be greater than 0").optional(),
+    leadTimeDays: z.number().int("Lead time must be an integer").min(1, "Lead time must be at least 1 day").max(21, "Lead time cannot exceed 21 days").optional(),
+  })
+  .refine(
+    (data) => {
+      if (data.price !== undefined && data.cost !== undefined) {
+        return data.price > data.cost;
+      }
+      return true;
+    },
+    {
+      message: "Selling price must be greater than unit cost",
+      path: ["price"],
+    },
+  );
+
+export const ProductChangeFieldSchema = z.object({
+  before: z.unknown(),
+  after: z.unknown(),
+});
+
+export const ProductChangeRecordSchema = z.object({
+  id: z.string().min(1),
+  sku: z.string().min(1),
+  at: z.string().min(1),
+  actedBy: z.object({
+    userId: z.string().min(1),
+    name: z.string().min(1),
+    role: z.enum(["admin", "manager", "staff"]),
+  }),
+  action: z.enum(["CREATE", "UPDATE", "ARCHIVE", "RESTORE"]),
+  changes: z.record(ProductChangeFieldSchema),
+});
+
+export const ProductListQuerySchema = z.object({
+  status: ProductStatusSchema.optional(),
+  category: z.string().min(1).optional(),
+  search: z.string().optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(50),
+});
+
+export const ProductListResponseSchema = z.object({
+  products: z.array(ProductSchema),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  limit: z.number().int().positive(),
+  totalPages: z.number().int().positive(),
+});
+
+export const ProductDetailWithHistorySchema = z.object({
+  product: ProductSchema,
+  history: z.array(ProductChangeRecordSchema),
+  canDeletePermanently: z.boolean(),
+  cannotDeleteReason: z.string().nullable(),
 });
 
 export const IsoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
@@ -278,3 +357,10 @@ export type RecommendationList = z.infer<typeof RecommendationListSchema>;
 export type ErrorBody = z.infer<typeof ErrorBodySchema>;
 export type Health = z.infer<typeof HealthSchema>;
 export type SeriesPoint = z.infer<typeof SeriesPointSchema>;
+export type CreateProduct = z.infer<typeof CreateProductSchema>;
+export type UpdateProduct = z.infer<typeof UpdateProductSchema>;
+export type ProductChangeField = z.infer<typeof ProductChangeFieldSchema>;
+export type ProductChangeRecord = z.infer<typeof ProductChangeRecordSchema>;
+export type ProductListQuery = z.infer<typeof ProductListQuerySchema>;
+export type ProductListResponse = z.infer<typeof ProductListResponseSchema>;
+export type ProductDetailWithHistory = z.infer<typeof ProductDetailWithHistorySchema>;

@@ -20,6 +20,7 @@ const productSchema = new Schema(
     price: { type: Number, required: true },
     cost: { type: Number, required: true },
     leadTimeDays: { type: Number, required: true },
+    status: { type: String, enum: ["active", "awaiting_history", "archived"], default: "active" },
   },
   { _id: false },
 );
@@ -108,12 +109,30 @@ const planSchema = new Schema({
   positions: { type: Schema.Types.Mixed, required: true },
 });
 
+const productChangeSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    sku: { type: String, required: true, index: true },
+    at: { type: String, required: true },
+    actedBy: {
+      userId: { type: String, required: true },
+      name: { type: String, required: true },
+      role: { type: String, required: true, enum: ["admin", "manager", "staff"] },
+    },
+    action: { type: String, required: true, enum: ["CREATE", "UPDATE", "ARCHIVE", "RESTORE"] },
+    changes: { type: Schema.Types.Mixed, required: true },
+  },
+  { collection: "product_changes" },
+);
+productChangeSchema.index({ sku: 1, at: -1 });
+
 export const MetaModel = mongoose.model("StockflowMeta", metaSchema);
 export const PlanModel = mongoose.model("StockflowPlan", planSchema);
 export const SeriesModel = mongoose.model("StockflowSeries", seriesSchema);
 export const FactModel = mongoose.model("StockflowFact", factSchema);
 export const ActionModel = mongoose.model("StockflowAction", actionSchema);
 export const AuditModel = mongoose.model("StockflowAudit", auditSchema);
+export const ProductChangeModel = mongoose.model("StockflowProductChange", productChangeSchema);
 
 const userSchema = new Schema({
   id: { type: String, required: true, unique: true },
