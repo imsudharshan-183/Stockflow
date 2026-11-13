@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { ModeToggle } from "@/components/mode-toggle";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -369,9 +370,12 @@ export function Shell() {
               </nav>
             </div>
 
-            {/* Right: Single User Menu Button + Dropdown */}
-            {user ? (
-              <div ref={userMenuRef} className="relative flex min-w-0 shrink-0 items-center">
+            {/* Right: Theme Toggle + Single User Menu Button + Dropdown */}
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+              <ModeToggle />
+
+              {user ? (
+                <div ref={userMenuRef} className="relative flex min-w-0 shrink-0 items-center">
                 <Button
                   ref={userTriggerRef}
                   variant="ghost"
@@ -446,7 +450,8 @@ export function Shell() {
                   </div>
                 ) : null}
               </div>
-            ) : null}
+              ) : null}
+            </div>
           </header>
 
           <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 sm:px-6">

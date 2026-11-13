@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/app/Shell";
 import { EmptyBlock, LoadingBlock } from "@/components/shared/states";
+import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider, useAuth } from "@/features/auth/AuthContext";
 import type { Role } from "@stockflow/core";
 
@@ -60,50 +61,52 @@ function RequireNotStaff({ children }: { children: ReactNode }) {
 
 export function App() {
   return (
-    <AuthProvider>
-      <Suspense fallback={<LoadingBlock />}>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route
-            element={
-              <RequireAuth>
-                <Shell />
-              </RequireAuth>
-            }
-          >
-            <Route index element={<OverviewPage />} />
-            <Route path="overview" element={<Navigate to="/" replace />} />
-            <Route path="queue" element={<QueuePage />} />
+    <ThemeProvider defaultTheme="light" storageKey="stockflow-theme">
+      <AuthProvider>
+        <Suspense fallback={<LoadingBlock />}>
+          <Routes>
+            <Route path="/login" element={<LoginPage />} />
             <Route
-              path="audit"
               element={
-                <RequireNotStaff>
-                  <AuditPage />
-                </RequireNotStaff>
+                <RequireAuth>
+                  <Shell />
+                </RequireAuth>
               }
-            />
-            <Route
-              path="users"
-              element={
-                <RequireRole role="admin">
-                  <UsersPage />
-                </RequireRole>
-              }
-            />
-            <Route path="branches/:id" element={<BranchPage />} />
-            <Route path="products/:sku" element={<ProductPage />} />
-            <Route
-              path="*"
-              element={
-                <EmptyBlock
-                  title="Page not found"
-                  body="That page is not in StockFlow. Use the sidebar to return to the overview or action queue."
-                />
-              }
-            />
-          </Route>
-        </Routes>
-      </Suspense>
-    </AuthProvider>
+            >
+              <Route index element={<OverviewPage />} />
+              <Route path="overview" element={<Navigate to="/" replace />} />
+              <Route path="queue" element={<QueuePage />} />
+              <Route
+                path="audit"
+                element={
+                  <RequireNotStaff>
+                    <AuditPage />
+                  </RequireNotStaff>
+                }
+              />
+              <Route
+                path="users"
+                element={
+                  <RequireRole role="admin">
+                    <UsersPage />
+                  </RequireRole>
+                }
+              />
+              <Route path="branches/:id" element={<BranchPage />} />
+              <Route path="products/:sku" element={<ProductPage />} />
+              <Route
+                path="*"
+                element={
+                  <EmptyBlock
+                    title="Page not found"
+                    body="That page is not in StockFlow. Use the sidebar to return to the overview or action queue."
+                  />
+                }
+              />
+            </Route>
+          </Routes>
+        </Suspense>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

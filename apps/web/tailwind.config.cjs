@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
+  darkMode: "class",
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   theme: {
     extend: {
@@ -44,7 +45,7 @@ module.exports = {
           foreground: "var(--ink)",
         },
         popover: {
-          DEFAULT: "var(--surface)",
+          DEFAULT: "var(--popover)",
           foreground: "var(--ink)",
         },
         gain: {
@@ -94,12 +95,12 @@ module.exports = {
         sm: "8px",
       },
       boxShadow: {
-        xs: "0 1px 2px rgba(20, 17, 43, 0.06)",
-        card: "0 1px 2px rgba(20, 17, 43, 0.04), 0 8px 24px -12px rgba(20, 17, 43, 0.10)",
-        primary: "0 1px 2px rgba(109, 40, 217, 0.25), 0 6px 16px -4px rgba(109, 40, 217, 0.35)",
-        "primary-hover": "0 2px 4px rgba(109, 40, 217, 0.25), 0 10px 22px -4px rgba(109, 40, 217, 0.45)",
-        pop: "0 12px 40px -8px rgba(20, 17, 43, 0.25)",
-        badge: "0 1px 1px rgba(20, 17, 43, 0.04)",
+        xs: "var(--shadow-xs)",
+        card: "var(--shadow-card)",
+        primary: "var(--shadow-primary)",
+        "primary-hover": "var(--shadow-primary-hover)",
+        pop: "var(--shadow-pop)",
+        badge: "var(--shadow-badge)",
       },
       transitionDuration: {
         DEFAULT: "150ms",
