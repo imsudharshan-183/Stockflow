@@ -54,16 +54,16 @@ export function Analytics({
           <CardTitle>Action mix</CardTitle>
           <CardDescription>Count and projected value by action type</CardDescription>
         </CardHeader>
-        <CardContent className="grid items-center gap-4 sm:grid-cols-[150px_1fr]">
-          <div className="h-40">
+        <CardContent className="grid items-center gap-3 sm:grid-cols-[116px_1fr]">
+          <div className="mx-auto h-32 w-28">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
                   data={mix}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={42}
-                  outerRadius={64}
+                  innerRadius={34}
+                  outerRadius={52}
                   paddingAngle={2}
                 >
                   {mix.map((slice) => (
@@ -76,11 +76,11 @@ export function Analytics({
               </PieChart>
             </ResponsiveContainer>
           </div>
-          <ul className="space-y-2.5 text-xs">
+          <ul className="min-w-0 space-y-2.5 text-xs">
             {mix.map((slice) => (
-              <li key={slice.name} className="flex items-center justify-between gap-2">
+              <li key={slice.name} className="flex items-center justify-between gap-2 whitespace-nowrap">
                 <span className="flex items-center gap-2 font-medium text-foreground">
-                  <span className={cn("size-2.5 rounded-full", slice.dotClass)} />
+                  <span className={cn("size-2.5 shrink-0 rounded-full", slice.dotClass)} />
                   {slice.name}
                 </span>
                 <span className="text-muted-foreground tabular-nums">
