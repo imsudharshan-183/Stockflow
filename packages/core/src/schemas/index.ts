@@ -238,6 +238,7 @@ export const AuditEntrySchema = z.object({
   productName: z.string().min(1),
   branchId: z.string().min(1),
   branchName: z.string().min(1),
+  donorBranchId: z.string().min(1).nullable().optional(),
   netBenefit: z.number(),
   reasonCodes: z.array(ReasonCodeSchema),
   actedBy: ActedBySchema.optional(),

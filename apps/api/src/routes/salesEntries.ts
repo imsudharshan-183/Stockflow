@@ -1,5 +1,7 @@
+import { isBranchInScope } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
 import { recomputeForSku, upsertSalesEntry } from "../db.js";
+import type { AuthContext } from "../plugins/auth.js";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -304,7 +306,10 @@ export function parseCsvWithHeaders(
   return results;
 }
 
-export function registerSalesEntriesRoutes(app: FastifyInstance): void {
+export function registerSalesEntriesRoutes(
+  app: FastifyInstance,
+  authGuards: AuthContext,
+): void {
   // Accept multipart/form-data as raw Buffer within this route scope
   app.addContentTypeParser(
     "multipart/form-data",
@@ -318,75 +323,103 @@ export function registerSalesEntriesRoutes(app: FastifyInstance): void {
    * POST /api/sales-entries
    * Manual single-entry upsert on (branchId, sku, date).
    */
-  app.post("/sales-entries", async (request, reply) => {
-    const validation = validateSalesEntryInput(request.body, { coerceNumericStrings: false });
-    if (!validation.ok) {
-      return reply.code(400).send({ error: validation.message });
-    }
+  app.post(
+    "/sales-entries",
+    { preHandler: [authGuards.authenticate] },
+    async (request, reply) => {
+      const validation = validateSalesEntryInput(request.body, { coerceNumericStrings: false });
+      if (!validation.ok) {
+        return reply.code(400).send({ error: validation.message });
+      }
 
-    const { entry } = await upsertSalesEntry(validation.data);
-    await recomputeForSku(entry.branchId, entry.sku);
+      if (!isBranchInScope(request.currentUser, validation.data.branchId)) {
+        return reply.code(403).send({ error: "Access to branch forbidden" });
+      }
 
-    return reply.code(201).send(entry);
-  });
+      const { entry } = await upsertSalesEntry(validation.data);
+      await recomputeForSku(entry.branchId, entry.sku);
+
+      return reply.code(201).send(entry);
+    },
+  );
 
   /**
    * POST /api/sales-entries/import
    * Bulk CSV upload via multipart/form-data field "file" (max 5MB).
    */
-  app.post("/sales-entries/import", async (request, reply) => {
-    const rawBuffer = Buffer.isBuffer(request.body) ? request.body : null;
-    if (!rawBuffer) {
-      return reply
-        .code(400)
-        .send({ error: "Expected multipart/form-data with a 'file' field" });
-    }
-
-    const extracted = extractMultipartFile(rawBuffer, request.headers["content-type"]);
-    if (!extracted.ok) {
-      return reply.code(extracted.statusCode).send({ error: extracted.message });
-    }
-
-    const csvText = extracted.fileBuffer.toString("utf8");
-    const parsedRows = parseCsvWithHeaders(csvText);
-
-    let inserted = 0;
-    let updated = 0;
-    const errors: Array<{ row: number; message: string }> = [];
-    const touchedPairs = new Map<string, { branchId: string; sku: string }>();
-
-    for (const item of parsedRows) {
-      const validation = validateSalesEntryInput(item.record, {
-        coerceNumericStrings: true,
-      });
-      if (!validation.ok) {
-        errors.push({ row: item.rowNumber, message: validation.message });
-        continue;
+  app.post(
+    "/sales-entries/import",
+    { preHandler: [authGuards.authenticate] },
+    async (request, reply) => {
+      const rawBuffer = Buffer.isBuffer(request.body) ? request.body : null;
+      if (!rawBuffer) {
+        return reply
+          .code(400)
+          .send({ error: "Expected multipart/form-data with a 'file' field" });
       }
 
-      const result = await upsertSalesEntry(validation.data);
-      if (result.created) {
-        inserted += 1;
-      } else {
-        updated += 1;
+      const extracted = extractMultipartFile(rawBuffer, request.headers["content-type"]);
+      if (!extracted.ok) {
+        return reply.code(extracted.statusCode).send({ error: extracted.message });
       }
 
-      const pairKey = `${result.entry.branchId}::${result.entry.sku}`;
-      touchedPairs.set(pairKey, {
-        branchId: result.entry.branchId,
-        sku: result.entry.sku,
+      const csvText = extracted.fileBuffer.toString("utf8");
+      const parsedRows = parseCsvWithHeaders(csvText);
+
+      const validatedRows: Array<
+        | { ok: true; rowNumber: number; data: ValidatedSalesEntryInput }
+        | { ok: false; rowNumber: number; message: string }
+      > = [];
+
+      for (const item of parsedRows) {
+        const validation = validateSalesEntryInput(item.record, {
+          coerceNumericStrings: true,
+        });
+        if (!validation.ok) {
+          validatedRows.push({ ok: false, rowNumber: item.rowNumber, message: validation.message });
+          continue;
+        }
+        if (!isBranchInScope(request.currentUser, validation.data.branchId)) {
+          return reply.code(403).send({ error: "Access to branch forbidden" });
+        }
+        validatedRows.push({ ok: true, rowNumber: item.rowNumber, data: validation.data });
+      }
+
+      let inserted = 0;
+      let updated = 0;
+      const errors: Array<{ row: number; message: string }> = [];
+      const touchedPairs = new Map<string, { branchId: string; sku: string }>();
+
+      for (const item of validatedRows) {
+        if (!item.ok) {
+          errors.push({ row: item.rowNumber, message: item.message });
+          continue;
+        }
+
+        const result = await upsertSalesEntry(item.data);
+        if (result.created) {
+          inserted += 1;
+        } else {
+          updated += 1;
+        }
+
+        const pairKey = `${result.entry.branchId}::${result.entry.sku}`;
+        touchedPairs.set(pairKey, {
+          branchId: result.entry.branchId,
+          sku: result.entry.sku,
+        });
+      }
+
+      // Trigger recomputeForSku once per distinct (branchId, sku) touched
+      for (const pair of touchedPairs.values()) {
+        await recomputeForSku(pair.branchId, pair.sku);
+      }
+
+      return reply.code(200).send({
+        inserted,
+        updated,
+        errors,
       });
-    }
-
-    // Trigger recomputeForSku once per distinct (branchId, sku) touched
-    for (const pair of touchedPairs.values()) {
-      await recomputeForSku(pair.branchId, pair.sku);
-    }
-
-    return reply.code(200).send({
-      inserted,
-      updated,
-      errors,
-    });
-  });
+    },
+  );
 }

@@ -58,6 +58,10 @@ export class MongoUserRepository implements UserRepository {
   async findRefreshToken(token: string): Promise<RefreshTokenRecord | null> {
     const doc = await RefreshTokenModel.findOne({ token }).lean();
     if (!doc) return null;
+    if (doc.expiresAt.getTime() < Date.now()) {
+      await this.deleteRefreshToken(token);
+      return null;
+    }
     return {
       token: doc.token,
       userId: doc.userId,

@@ -10,6 +10,7 @@ import {
   RecommendationListSchema,
   RecommendationSchema,
   analyze,
+  backtest,
   buildBranchDetail,
   buildProductDetail,
   can,
@@ -46,6 +47,7 @@ export class DecisionForbiddenError extends Error {
 
 export class StockService {
   private readonly decisions = new Map<string, Extract<RecommendationStatus, "APPROVED" | "REJECTED">>();
+  private readonly scopedKpiCache = new Map<string, KpiSummary>();
   private audit: AuditEntry[] = [];
 
   private constructor(
@@ -79,10 +81,20 @@ export class StockService {
     }
 
     const allBranchIds = this.data.branches.map((b) => b.id);
-    const userBranches = new Set(scopeBranches(user, allBranchIds));
+    const scopedList = scopeBranches(user, allBranchIds);
+    const cacheKey = [...scopedList].sort().join("|");
+    const cached = this.scopedKpiCache.get(cacheKey);
+    if (cached) return cached;
+
+    const userBranches = new Set(scopedList);
     const branches = this.analysis.kpis.branches.filter((b) => userBranches.has(b.id));
     const branchRisk = this.analysis.kpis.branchRisk.filter((b) => userBranches.has(b.branchId));
     const coverGrid = this.analysis.kpis.coverGrid.filter((b) => userBranches.has(b.branchId));
+    const branchIndices: number[] = [];
+    for (let bIdx = 0; bIdx < this.data.branches.length; bIdx += 1) {
+      const branch = this.data.branches[bIdx];
+      if (branch && userBranches.has(branch.id)) branchIndices.push(bIdx);
+    }
 
     let deadStockValue = 0;
     let lostSalesAtRisk = 0;
@@ -93,9 +105,7 @@ export class StockService {
       if (!product) continue;
       const row = this.analysis.positions[sku];
       if (!row) continue;
-      for (let bIdx = 0; bIdx < this.data.branches.length; bIdx += 1) {
-        const branch = this.data.branches[bIdx];
-        if (!branch || !userBranches.has(branch.id)) continue;
+      for (const bIdx of branchIndices) {
         const position = row[bIdx];
         if (!position) continue;
         if (position.status === "OVERSTOCK" && position.velocity < DEAD_VELOCITY_PER_DAY) {
@@ -110,20 +120,71 @@ export class StockService {
       }
     }
 
+    const trend = this.data.dates.map((date, day) => {
+      let stockouts = 0;
+      let cells = 0;
+      let salesValue = 0;
+      let inventoryValue = 0;
+      for (let sku = 0; sku < this.data.products.length; sku += 1) {
+        const product = this.data.products[sku];
+        const salesByBranch = this.data.sales[sku];
+        const stockByBranch = this.data.onHand[sku];
+        const demandByBranch = this.data.demand[sku];
+        if (!product || !salesByBranch || !stockByBranch || !demandByBranch) continue;
+        for (const bIdx of branchIndices) {
+          const sold = salesByBranch[bIdx]?.[day] ?? 0;
+          const onHand = stockByBranch[bIdx]?.[day] ?? 0;
+          const demand = demandByBranch[bIdx]?.[day] ?? 0;
+          cells += 1;
+          salesValue += sold * product.price;
+          inventoryValue += onHand * product.cost;
+          if (demand > 0 && onHand + sold <= 0) stockouts += 1;
+        }
+      }
+      return {
+        date,
+        stockoutRate: cells === 0 ? 0 : stockouts / cells,
+        salesValue: Math.round((salesValue + Number.EPSILON) * 100) / 100,
+        inventoryValue: Math.round((inventoryValue + Number.EPSILON) * 100) / 100,
+      };
+    });
+
+    const scopedDataset: Dataset = {
+      ...this.data,
+      branches,
+      sales: this.data.sales.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
+      onHand: this.data.onHand.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
+      demand: this.data.demand.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
+    };
+    const scopedBacktest =
+      branches.length > 0
+        ? backtest(scopedDataset, DEFAULT_POLICY)
+        : {
+            windowDays: Math.min(DEFAULT_POLICY.backtestDays, this.data.dates.length),
+            baselineStockoutDays: 0,
+            engineStockoutDays: 0,
+            stockoutDaysAvoided: 0,
+            cashReleased: 0,
+          };
+
     const stockoutRates = branchRisk.map((r) => r.stockoutRate);
     const avgStockoutRate =
       stockoutRates.length > 0 ? stockoutRates.reduce((sum, r) => sum + r, 0) / stockoutRates.length : 0;
 
-    return {
+    const result: KpiSummary = {
       ...this.analysis.kpis,
       branches,
       branchRisk,
       coverGrid,
+      trend,
+      backtest: scopedBacktest,
       deadStockValue: Math.round(deadStockValue * 100) / 100,
       lostSalesAtRisk: Math.round(lostSalesAtRisk * 100) / 100,
       cashReleasable: Math.round(cashReleasable * 100) / 100,
       stockoutRate: Math.round(avgStockoutRate * 1000) / 1000,
     };
+    this.scopedKpiCache.set(cacheKey, result);
+    return result;
   }
 
   list(query: RecommendationQuery, user?: User): RecommendationList {
@@ -205,7 +266,11 @@ export class StockService {
 
     let entries = [...this.audit].sort((a, b) => b.at.localeCompare(a.at));
     if (user && user.role !== "admin") {
-      entries = entries.filter((e) => isBranchInScope(user, e.branchId));
+      entries = entries.filter(
+        (e) =>
+          isBranchInScope(user, e.branchId) ||
+          (e.donorBranchId ? isBranchInScope(user, e.donorBranchId) : false),
+      );
     }
     return AuditListSchema.parse({ entries });
   }
@@ -245,6 +310,7 @@ export class StockService {
       productName: existing.productName,
       branchId: existing.branchId,
       branchName: existing.branchName,
+      donorBranchId: existing.donorBranchId,
       netBenefit: existing.netBenefit,
       reasonCodes: existing.reasonCodes,
       actedBy: user

@@ -59,6 +59,15 @@ const actionSchema = new Schema({
   decidedAt: { type: String, required: true },
 });
 
+const actedBySchema = new Schema(
+  {
+    userId: { type: String, required: true },
+    name: { type: String, required: true },
+    role: { type: String, required: true, enum: ["admin", "manager", "staff"] },
+  },
+  { _id: false },
+);
+
 const auditSchema = new Schema({
   id: { type: String, required: true, unique: true },
   at: { type: String, required: true },
@@ -70,8 +79,10 @@ const auditSchema = new Schema({
   productName: { type: String, required: true },
   branchId: { type: String, required: true },
   branchName: { type: String, required: true },
+  donorBranchId: { type: String, default: null },
   netBenefit: { type: Number, required: true },
   reasonCodes: { type: [String], required: true },
+  actedBy: { type: actedBySchema, required: false },
 });
 
 export const MetaShape = z.object({
@@ -115,14 +126,12 @@ const userSchema = new Schema({
   createdAt: { type: String, required: true },
   lastLoginAt: { type: String, default: null },
 });
-userSchema.index({ email: 1 }, { unique: true });
 
 const refreshTokenSchema = new Schema({
   token: { type: String, required: true, unique: true },
   userId: { type: String, required: true, index: true },
   expiresAt: { type: Date, required: true, expires: 0 },
 });
-refreshTokenSchema.index({ token: 1 }, { unique: true });
 
 export const UserModel = mongoose.model("StockflowUser", userSchema);
 export const RefreshTokenModel = mongoose.model("StockflowRefreshToken", refreshTokenSchema);

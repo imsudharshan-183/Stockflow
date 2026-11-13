@@ -48,7 +48,7 @@ export function registerUsersRoutes(
 
       const existing = await userRepo.findByEmail(input.email);
       if (existing) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Email already in use" }));
+        return reply.code(409).send(ErrorBodySchema.parse({ error: "Email already in use" }));
       }
 
       const passwordHash = await authService.hashPassword(input.password);

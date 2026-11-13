@@ -1,7 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { clearMemorySalesEntries, clearRecomputeCallLog, getRecomputeCallLog } from "./db.js";
-import { buildMultipartPayload, json, setupApp } from "./test/helpers.js";
+import { SEED_USERS, bearer, buildMultipartPayload, json, setupApp, tokenFor } from "./test/helpers.js";
 
 const HEADER = "branchId,sku,date,unitsSold,onHand";
 const FIVE_MB = 5 * 1024 * 1024;
@@ -239,5 +239,98 @@ describe("POST /api/sales-entries/import", () => {
     const r = await importCsv(`${HEADER}\nBR-001,SKU-00001,2026-11-13,5,20`, "upload");
     expect(r.status).toBe(400);
     expect(r.body.error).toBe("Missing required file field named 'file'");
+  });
+});
+
+describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLED=true)", () => {
+  let authedApp: FastifyInstance;
+
+  beforeAll(async () => {
+    authedApp = (await setupApp({ authEnabled: true })).app;
+  });
+  afterAll(async () => authedApp.close());
+
+  it("401 without a token on both /sales-entries and /sales-entries/import", async () => {
+    const single = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      payload: valid,
+    });
+    expect(single.statusCode).toBe(401);
+
+    const { payload, contentType } = buildMultipartPayload(
+      "file",
+      "sales.csv",
+      `${HEADER}\nBR-001,SKU-00001,2026-11-13,5,20`,
+    );
+    const imp = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries/import",
+      headers: { "content-type": contentType },
+      payload,
+    });
+    expect(imp.statusCode).toBe(401);
+  });
+
+  it("enforces branch scope on POST /api/sales-entries (403 out-of-scope, 201 in-scope)", async () => {
+    const staffToken = tokenFor(authedApp, SEED_USERS.staffChicago); // BR-001 only
+    const mgrToken = tokenFor(authedApp, SEED_USERS.managerMidwest); // BR-001, BR-002
+
+    const staffOos = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(staffToken),
+      payload: { ...valid, branchId: "BR-002" },
+    });
+    expect(staffOos.statusCode).toBe(403);
+
+    const mgrOos = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(mgrToken),
+      payload: { ...valid, branchId: "BR-005" },
+    });
+    expect(mgrOos.statusCode).toBe(403);
+
+    const staffOk = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(staffToken),
+      payload: { ...valid, branchId: "BR-001" },
+    });
+    expect(staffOk.statusCode).toBe(201);
+  });
+
+  it("enforces branch scope on POST /api/sales-entries/import without writing partial rows on 403", async () => {
+    const mgrToken = tokenFor(authedApp, SEED_USERS.managerMidwest); // BR-001, BR-002
+    const mixedScopeCsv = [
+      HEADER,
+      "BR-001,SKU-00001,2026-11-13,5,20",
+      "BR-005,SKU-00001,2026-11-13,5,20", // out-of-scope
+    ].join("\n");
+    const bad = buildMultipartPayload("file", "sales.csv", mixedScopeCsv);
+    const badRes = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries/import",
+      headers: { ...bearer(mgrToken), "content-type": bad.contentType },
+      payload: bad.payload,
+    });
+    expect(badRes.statusCode).toBe(403);
+    expect(getRecomputeCallLog()).toHaveLength(0);
+
+    const inScopeCsv = [
+      HEADER,
+      "BR-001,SKU-00001,2026-11-13,5,20",
+      "BR-002,SKU-00002,2026-11-13,3,15",
+    ].join("\n");
+    const good = buildMultipartPayload("file", "sales.csv", inScopeCsv);
+    const goodRes = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries/import",
+      headers: { ...bearer(mgrToken), "content-type": good.contentType },
+      payload: good.payload,
+    });
+    expect(goodRes.statusCode).toBe(200);
+    expect(json(goodRes.payload)).toEqual({ inserted: 2, updated: 0, errors: [] });
   });
 });

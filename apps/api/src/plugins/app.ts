@@ -66,7 +66,7 @@ export async function buildApp(
       registerAuthRoutes(scope, authService, authGuards, env);
       registerUsersRoutes(scope, service.userRepo, authService, authGuards);
       registerStockRoutes(scope, service, authGuards);
-      registerSalesEntriesRoutes(scope);
+      registerSalesEntriesRoutes(scope, authGuards);
     },
     { prefix: "/api" },
   );

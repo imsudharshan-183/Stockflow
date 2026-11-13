@@ -1,6 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { AuditList, KpiSummary, ProductDetail, RecommendationList, User } from "@stockflow/core";
+import { AuditModel, RefreshTokenModel } from "./repositories/models.js";
+import { MongoUserRepository } from "./repositories/mongoUser.js";
 import {
   SEED_USERS,
   TEST_JWT_SECRET,
@@ -164,15 +166,22 @@ describe("route matrix: read-only routes", () => {
       expect(k.coverGrid.length).toBeGreaterThan(0);
       expect(k.deadStockValue).toBeLessThan(admin.deadStockValue);
       expect(k.cashReleasable).toBeLessThan(admin.cashReleasable);
+      expect(k.trend).toHaveLength(admin.trend.length);
+      expect(k.trend[0]!.salesValue).toBeLessThan(admin.trend[0]!.salesValue);
+      expect(k.trend[0]!.inventoryValue).toBeLessThan(admin.trend[0]!.inventoryValue);
+      expect(k.backtest.baselineStockoutDays).toBeLessThan(admin.backtest.baselineStockoutDays);
     });
 
     it("staff is scoped to a single branch", async () => {
+      const mgr = (await call("GET", "/api/kpis", t.manager)).body as unknown as KpiSummary;
       const r = await call("GET", "/api/kpis", t.staff);
       expect(r.status).toBe(200);
       const k = r.body as unknown as KpiSummary;
       expect(k.branches.map((b) => b.id)).toEqual(["BR-001"]);
       expect(k.coverGrid.every((c) => c.branchId === "BR-001")).toBe(true);
       expect(k.branchRisk.every((b) => b.branchId === "BR-001")).toBe(true);
+      expect(k.trend[0]!.inventoryValue).toBeLessThan(mgr.trend[0]!.inventoryValue);
+      expect(k.backtest.baselineStockoutDays).toBeLessThan(mgr.backtest.baselineStockoutDays);
     });
   });
 
@@ -430,9 +439,9 @@ describe("route matrix: /api/users writes", () => {
     expect(login.statusCode).toBe(200);
   });
 
-  it("POST: 400 duplicate email (case-insensitive)", async () => {
+  it("POST: 409 duplicate email (case-insensitive)", async () => {
     const r = await call("POST", "/api/users", admin, { ...newUser, email: "ADMIN@stockflow.dev" });
-    expect(r.status).toBe(400);
+    expect(r.status).toBe(409);
     expect(r.body).toEqual({ error: "Email already in use" });
   });
 
@@ -600,5 +609,42 @@ describe("route matrix: approve / reject / audit", () => {
     expect(after?.status).toBe("REJECTED");
     expect(second.service.listAudit().entries).toHaveLength(1);
     await second.app.close();
+  });
+
+  it("AuditModel Mongoose schema preserves actedBy and donorBranchId, and MongoUserRepository rejects expired refresh tokens", async () => {
+    const doc = new AuditModel({
+      id: "aud_1",
+      at: "2026-11-13T00:00:00.000Z",
+      user: "Marcus Vance",
+      recommendationId: "rec_1",
+      decision: "APPROVED",
+      action: "TRANSFER",
+      sku: "SKU-00001",
+      productName: "Sample",
+      branchId: "BR-005",
+      branchName: "Santa Monica",
+      donorBranchId: "BR-001",
+      netBenefit: 120,
+      reasonCodes: ["DONOR_SURPLUS"],
+      actedBy: { userId: "usr_mgr_01", name: "Marcus Vance", role: "manager" },
+    }).toObject();
+    expect(doc.donorBranchId).toBe("BR-001");
+    expect(doc.actedBy).toEqual({ userId: "usr_mgr_01", name: "Marcus Vance", role: "manager" });
+
+    const findSpy = vi.spyOn(RefreshTokenModel, "findOne").mockReturnValue({
+      lean: () =>
+        Promise.resolve({
+          token: "tok_expired",
+          userId: "usr_stf_01",
+          expiresAt: new Date(Date.now() - 10_000),
+        }),
+    } as never);
+    const deleteSpy = vi.spyOn(RefreshTokenModel, "deleteOne").mockResolvedValue({} as never);
+    const mongoUsers = new MongoUserRepository();
+    const expired = await mongoUsers.findRefreshToken("tok_expired");
+    expect(expired).toBeNull();
+    expect(deleteSpy).toHaveBeenCalledWith({ token: "tok_expired" });
+    findSpy.mockRestore();
+    deleteSpy.mockRestore();
   });
 });

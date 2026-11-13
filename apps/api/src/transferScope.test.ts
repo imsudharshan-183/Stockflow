@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import type { Recommendation, RecommendationList, User } from "@stockflow/core";
+import type { AuditList, Recommendation, RecommendationList, User } from "@stockflow/core";
 import { FixedDatasetRepository, SEED_USERS, bearer, json, setupApp, tokenFor, transferDataset } from "./test/helpers.js";
 
 /**
@@ -74,7 +74,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("manager whose branch is only the donor can approve it", async () => {
+  it("manager whose branch is only the donor can approve it and see the decision in GET /api/audit", async () => {
     const res = await app.inject({
       method: "POST",
       url: `/api/recommendations/${transfer.id}/approve`,
@@ -82,5 +82,34 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     });
     expect(res.statusCode).toBe(200);
     expect(json<Recommendation>(res.payload).status).toBe("APPROVED");
+
+    const donorAudit = await app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: bearer(tokenFor(app, SEED_USERS.managerMidwest)),
+    });
+    expect(donorAudit.statusCode).toBe(200);
+    const donorEntries = json<AuditList>(donorAudit.payload).entries;
+    expect(donorEntries).toHaveLength(1);
+    expect(donorEntries[0]).toMatchObject({
+      recommendationId: transfer.id,
+      branchId: "BR-005",
+      donorBranchId: "BR-001",
+      actedBy: { userId: SEED_USERS.managerMidwest.id, role: "manager" },
+    });
+
+    const receiverAudit = await app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: bearer(tokenFor(app, SEED_USERS.managerWest)),
+    });
+    expect(json<AuditList>(receiverAudit.payload).entries).toHaveLength(1);
+
+    const outsiderAudit = await app.inject({
+      method: "GET",
+      url: "/api/audit",
+      headers: bearer(tokenFor(app, outsider)),
+    });
+    expect(json<AuditList>(outsiderAudit.payload).entries).toEqual([]);
   });
 });
