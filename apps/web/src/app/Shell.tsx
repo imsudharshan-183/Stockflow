@@ -5,6 +5,7 @@ import {
   ListOrdered,
   LogOut,
   Menu,
+  Package,
   PanelLeftClose,
   PanelLeftOpen,
   Users,
@@ -61,9 +62,12 @@ function breadcrumbForPath(pathname: string): { section: string; page: string } 
     const id = pathname.split("/")[2] ?? "Branch";
     return { section: "Branches", page: id };
   }
+  if (pathname === "/products") {
+    return { section: "Catalog", page: "Products" };
+  }
   if (pathname.startsWith("/products/")) {
     const sku = pathname.split("/")[2] ?? "Product";
-    return { section: "Products", page: sku };
+    return { section: "Catalog", page: sku };
   }
   return { section: "StockFlow", page: "Page" };
 }
@@ -146,6 +150,10 @@ export function Shell() {
   const operationsNav: NavItem[] = [
     { to: "/", label: "Overview", icon: BarChart3, matchPaths: ["/", "/overview"] },
     { to: "/queue", label: "Action queue", icon: ListOrdered, matchPaths: ["/queue"] },
+  ];
+
+  const catalogNav: NavItem[] = [
+    { to: "/products", label: "Products", icon: Package, matchPaths: ["/products"] },
   ];
 
   const adminNav: NavItem[] = [
@@ -256,6 +264,23 @@ export function Shell() {
               </ul>
             </div>
 
+            <div>
+              {!collapsed ? (
+                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Catalog
+                </p>
+              ) : (
+                <div className="my-2 border-t border-border" />
+              )}
+              <ul className="space-y-1">
+                {catalogNav.map((item) => (
+                  <li key={item.to}>
+                    <SidebarLink item={item} collapsed={collapsed} pathname={location.pathname} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+
             {adminNav.length > 0 ? (
               <div>
                 {!collapsed ? (
@@ -297,6 +322,18 @@ export function Shell() {
                 </p>
                 <ul className="space-y-1">
                   {operationsNav.map((item) => (
+                    <li key={item.to}>
+                      <SidebarLink item={item} collapsed={false} pathname={location.pathname} />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Catalog
+                </p>
+                <ul className="space-y-1">
+                  {catalogNav.map((item) => (
                     <li key={item.to}>
                       <SidebarLink item={item} collapsed={false} pathname={location.pathname} />
                     </li>

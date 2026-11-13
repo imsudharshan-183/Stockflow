@@ -21,6 +21,9 @@ const AuditPage = lazy(() =>
 const UsersPage = lazy(() =>
   import("@/features/users/UsersPage").then((m) => ({ default: m.UsersPage })),
 );
+const ProductsPage = lazy(() =>
+  import("@/features/products/ProductsPage").then((m) => ({ default: m.ProductsPage })),
+);
 const BranchPage = lazy(() =>
   import("@/features/drilldown/BranchPage").then((m) => ({ default: m.BranchPage })),
 );
@@ -93,6 +96,7 @@ export function App() {
                 }
               />
               <Route path="branches/:id" element={<BranchPage />} />
+              <Route path="products" element={<ProductsPage />} />
               <Route path="products/:sku" element={<ProductPage />} />
               <Route
                 path="*"

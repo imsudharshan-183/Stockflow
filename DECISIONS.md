@@ -103,3 +103,25 @@ StockFlow's replenishment engine requires product parameters (selling price, uni
    - `DELETE /api/catalog/products/:sku` is strictly blocked (`409 Conflict`) if the SKU has past sales history or decision audit entries. In such cases, archiving is mandated to protect financial and audit integrity. Only mistake entries with zero sales and zero decisions may be permanently deleted.
 5. **3D Dataset Matrix Alignment**:
    - To preserve the pure mathematical invariant of `packages/core/src/engine/` without modifying it, `Dataset.sales`, `onHand`, and `demand` 3D tensor dimensions `[skuIndex][branchIndex][dayIndex]` are kept strictly synchronized with `Dataset.products`. Analysis recomputations filter active indices uniformly across products and data tensors.
+
+---
+
+## ADR-008: Product Catalog Management UI and Ingestion Workflows
+
+### Context
+Store operators and administrators require an intuitive, accessible interface to manage network catalog products, review change history, configure price/cost parameters, activate draft SKUs, and import daily sales records without leaving the application.
+
+### Decision
+1. **Catalog Navigation Integration**:
+   - Added `/products` route to `Shell.tsx` under a dedicated `CATALOG` section located between `OPERATIONS` and `GOVERNANCE` in both desktop collapsible sidebar and mobile drawer.
+   - Breadcrumbs dynamically reflect section hierarchy (`Catalog / Products` and `Catalog / SKU-XXXXX`).
+2. **Unified Data Table Experience**:
+   - `ProductsPage.tsx` uses `TableCard`, `TableToolbar`, and `Table` primitives with sticky search, category dropdown filter, status tabs (`All`, `Active`, `Draft`, `Archived`), and 25-row pagination.
+   - Displays formatted metrics (`formatMoneyFull`, `formatNumber`, margin percentages) and semantic status badges (`ok` for active, `over` for awaiting history, `staff` for archived).
+3. **Interactive Admin Workflows**:
+   - **Add Product Dialog**: Real-time validation enforcing `price > cost > 0`, integer lead time 1..21, and 60-character name limit. Creates draft products in `awaiting_history`.
+   - **Edit Product Dialog**: Displays a contextual notice warning administrators when edits to price, cost, or lead time on an active product trigger network-wide recommendation recomputation.
+   - **One-Click Activation**: For draft products, a "Generate sample history" button creates 30 days of synthetic sales across all 15 branches, promotes status to `active`, and immediately triggers engine analysis.
+   - **Change History Dialog**: Pulls chronological audit trail from `/api/catalog/products/:sku`, displaying user attribution, timestamps, and field diffs.
+   - **Safe Delete / Archive Flow**: Inspects `canDeletePermanently` from API. If sales or audit entries exist, guides user to archive instead of delete; allows permanent deletion only for zero-history drafts.
+   - **CSV Import Modal**: Uploads `.csv` files up to 5MB to `/api/sales-entries/import`, displaying row counts inserted/updated and actionable per-row error listings.

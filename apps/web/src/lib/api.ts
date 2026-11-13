@@ -1,26 +1,37 @@
 import {
   AuditListSchema,
   BranchDetailSchema,
+  CreateProductSchema,
   CreateUserSchema,
   ErrorBodySchema,
   KpiSummarySchema,
   LoginResponseSchema,
   ProductDetailSchema,
+  ProductDetailWithHistorySchema,
+  ProductListResponseSchema,
+  ProductSchema,
   RecommendationListSchema,
   RecommendationSchema,
+  UpdateProductSchema,
   UpdateUserSchema,
   UserListSchema,
   UserSchema,
   type AuditList,
   type BranchDetail,
+  type CreateProduct,
   type CreateUser,
   type KpiSummary,
   type LoginRequest,
   type LoginResponse,
+  type Product,
   type ProductDetail,
+  type ProductDetailWithHistory,
+  type ProductListQuery,
+  type ProductListResponse,
   type Recommendation,
   type RecommendationList,
   type RecommendationQuery,
+  type UpdateProduct,
   type UpdateUser,
   type User,
   type UserList,
@@ -107,12 +118,13 @@ async function request<T>(
   return schema.parse(body);
 }
 
-function withQuery(path: string, query: RecommendationQuery): string {
+function withQuery(path: string, query: Record<string, unknown>): string {
   const params = new URLSearchParams();
-  if (query.branch) params.set("branch", query.branch);
-  if (query.category) params.set("category", query.category);
-  if (query.action) params.set("action", query.action);
-  if (query.status) params.set("status", query.status);
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null && value !== "") {
+      params.set(key, String(value));
+    }
+  }
   const text = params.toString();
   return text.length > 0 ? `${path}?${text}` : path;
 }
@@ -165,7 +177,7 @@ export const api = {
   kpis: (): Promise<KpiSummary> => request("/api/kpis", KpiSummarySchema),
   audit: (): Promise<AuditList> => request("/api/audit", AuditListSchema),
   recommendations: (query: RecommendationQuery): Promise<RecommendationList> =>
-    request(withQuery("/api/recommendations", query), RecommendationListSchema),
+    request(withQuery("/api/recommendations", query as Record<string, unknown>), RecommendationListSchema),
   branch: (id: string): Promise<BranchDetail> =>
     request(`/api/branches/${encodeURIComponent(id)}`, BranchDetailSchema),
   product: (sku: string): Promise<ProductDetail> =>
@@ -174,4 +186,66 @@ export const api = {
     request(`/api/recommendations/${encodeURIComponent(id)}/${decision}`, RecommendationSchema, {
       method: "POST",
     }),
+
+  // Catalog Products
+  listCatalogProducts: (query?: ProductListQuery): Promise<ProductListResponse> =>
+    request(withQuery("/api/catalog/products", (query ?? {}) as Record<string, unknown>), ProductListResponseSchema),
+  getCatalogProduct: (sku: string): Promise<ProductDetailWithHistory> =>
+    request(`/api/catalog/products/${encodeURIComponent(sku)}`, ProductDetailWithHistorySchema),
+  createCatalogProduct: (data: CreateProduct): Promise<Product> =>
+    request("/api/catalog/products", ProductSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(CreateProductSchema.parse(data)),
+    }),
+  updateCatalogProduct: (sku: string, data: UpdateProduct): Promise<Product> =>
+    request(`/api/catalog/products/${encodeURIComponent(sku)}`, ProductSchema, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(UpdateProductSchema.parse(data)),
+    }),
+  archiveCatalogProduct: (sku: string): Promise<{ product: Product; removedPendingActionsCount: number }> =>
+    request(
+      `/api/catalog/products/${encodeURIComponent(sku)}/archive`,
+      z.object({ product: ProductSchema, removedPendingActionsCount: z.number() }),
+      { method: "PATCH" },
+    ),
+  restoreCatalogProduct: (sku: string): Promise<Product> =>
+    request(`/api/catalog/products/${encodeURIComponent(sku)}/restore`, ProductSchema, {
+      method: "PATCH",
+    }),
+  deleteCatalogProduct: (sku: string): Promise<{ ok: boolean }> =>
+    request(`/api/catalog/products/${encodeURIComponent(sku)}`, z.object({ ok: z.boolean() }), {
+      method: "DELETE",
+    }),
+  generateSampleHistory: (sku: string): Promise<{ salesEntriesCount: number }> =>
+    request(
+      `/api/catalog/products/${encodeURIComponent(sku)}/sample-history`,
+      z.object({ salesEntriesCount: z.number() }),
+      { method: "POST" },
+    ),
+
+  // Sales entries
+  createSalesEntry: (data: { branchId: string; sku: string; date: string; unitsSold: number; onHand: number }): Promise<unknown> =>
+    request("/api/sales-entries", z.unknown(), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  importSalesCsv: (file: File): Promise<{ inserted: number; updated: number; errors: Array<{ row: number; message: string }> }> => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request(
+      "/api/sales-entries/import",
+      z.object({
+        inserted: z.number(),
+        updated: z.number(),
+        errors: z.array(z.object({ row: z.number(), message: z.string() })),
+      }),
+      {
+        method: "POST",
+        body: formData,
+      },
+    );
+  },
 };

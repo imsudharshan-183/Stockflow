@@ -50,6 +50,7 @@ StockFlow is a morning decision / action queue system for a 15-branch retail net
 | `/` | `OverviewPage` | `admin`, `manager`, `staff` | Network hero, 4 KPI cards, Action Mix, 4-band Cover-Days Heatmap, 90d trends |
 | `/queue` | `QueuePage` | `admin`, `manager`, `staff` | Ranked action queue, action tabs, filters, batch bar (`admin`/`manager`), right-hand `RecommendationDrawer` |
 | `/branches/:id` | `BranchPage` | `admin`, `manager`, `staff` (scoped) | Branch KPIs, sales & stock chart, actions touching branch |
+| `/products` | `ProductsPage` | `admin`, `manager`, `staff` | Network catalog table, filters, Add/Edit modals, Change History, CSV Import |
 | `/products/:sku` | `ProductPage` | `admin`, `manager`, `staff` (scoped) | SKU policy breakdown, sales/stock/cover charts, branch position table |
 | `/audit` | `AuditPage` | `admin`, `manager` | Searchable decision audit log with reason-code badges |
 | `/users` | `UsersPage` | `admin` | Create, edit role/branches, reset password, and deactivate users |
