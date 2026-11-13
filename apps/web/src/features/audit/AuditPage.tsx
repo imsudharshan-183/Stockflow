@@ -29,6 +29,7 @@ import {
   formatNumber,
   statusLabel,
 } from "@/lib/format";
+import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
   const audit = useQuery({ queryKey: queryKeys.audit, queryFn: api.audit });
@@ -43,8 +44,7 @@ export function AuditPage() {
       if (decisionFilter && entry.decision !== decisionFilter) return false;
       if (!q) return true;
       return (
-        entry.sku.toLowerCase().includes(q) ||
-        entry.productName.toLowerCase().includes(q) ||
+        matchesProductQuery(entry, q) ||
         entry.branchName.toLowerCase().includes(q) ||
         entry.branchId.toLowerCase().includes(q) ||
         entry.user.toLowerCase().includes(q)
@@ -75,7 +75,7 @@ export function AuditPage() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search SKU, branch, or user..."
+                placeholder="Search product, SKU, branch, or user..."
                 aria-label="Search audit log"
                 className="h-9 rounded-xl border-border bg-card pr-8 pl-8 text-xs shadow-xs"
               />
@@ -223,12 +223,21 @@ export function AuditPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Link
-                        to={`/products/${entry.sku}`}
-                        className="block truncate font-semibold text-foreground hover:text-primary hover:underline"
-                      >
-                        {entry.productName}
-                      </Link>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <Link
+                              to={`/products/${entry.sku}`}
+                              className="block truncate font-semibold text-foreground hover:text-primary hover:underline"
+                            >
+                              {formatProductDisplayName(entry.productName, entry.sku)}
+                            </Link>
+                          }
+                        />
+                        <TooltipContent side="top">
+                          {formatProductDisplayName(entry.productName, entry.sku)}
+                        </TooltipContent>
+                      </Tooltip>
                       <div className="truncate font-mono text-xs text-muted-foreground">
                         {entry.sku}
                       </div>

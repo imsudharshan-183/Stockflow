@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_POLICY } from "../engine/config.js";
-import { backtest } from "../engine/index.js";
-import { buildRecommendations } from "../report/index.js";
+import { assessPositions, backtest } from "../engine/index.js";
+import { buildProductDetail, buildRecommendations } from "../report/index.js";
 import { at, round2 } from "../round.js";
 import { InventorySnapshotSchema, SalesDailySchema } from "../schemas/index.js";
 import {
@@ -14,6 +14,8 @@ import {
   PROMO_DAY_END,
   PROMO_DAY_START,
   PROMO_SKU,
+  formatProductDisplayName,
+  matchesProductQuery,
 } from "./catalog.js";
 import { generateDataset } from "./generate.js";
 
@@ -167,5 +169,63 @@ describe("seed", () => {
     const second = buildRecommendations(data, DEFAULT_POLICY);
     expect(second).toEqual(first);
     expect(first.every((recommendation) => recommendation.reasonCodes.length > 0)).toBe(true);
+  });
+
+  it("generates unique, professional product names per category without SKU codes or mismatched units", () => {
+    const allNames = new Set<string>();
+    const byCategory = new Map<string, Set<string>>();
+
+    for (const product of data.products) {
+      expect(product.name.length).toBeGreaterThanOrEqual(3);
+      expect(product.name.length).toBeLessThanOrEqual(60);
+      expect(product.name).not.toMatch(/SKU-\d+/i);
+      expect(product.name).not.toContain("$");
+      expect(product.name).toMatch(/^[^,]+, [^,]+$/);
+
+      expect(allNames.has(product.name.toLowerCase())).toBe(false);
+      allNames.add(product.name.toLowerCase());
+
+      const catSet = byCategory.get(product.category) ?? new Set<string>();
+      expect(catSet.has(product.name.toLowerCase())).toBe(false);
+      catSet.add(product.name.toLowerCase());
+      byCategory.set(product.category, catSet);
+
+      if (product.category === "Toys" || product.category === "Stationery" || product.category === "Accessories") {
+        expect(product.name).not.toMatch(/\b(\d+\s*(ml|l|g|kg))\b/i);
+      }
+      if (product.category === "Beverages") {
+        expect(product.name).toMatch(/\b(ml|L|Pack of \d+)\b/);
+      }
+    }
+    expect(allNames.size).toBe(PRODUCT_COUNT);
+  });
+
+  it("matches search queries by both product name and SKU and falls back to SKU when name is missing", () => {
+    const sample = at(data.products, 0, "product");
+    expect(matchesProductQuery(sample, sample.sku)).toBe(true);
+    expect(matchesProductQuery(sample, sample.sku.toLowerCase())).toBe(true);
+    expect(matchesProductQuery(sample, "sparkling")).toBe(true);
+    expect(matchesProductQuery(sample, "aurelia")).toBe(true);
+    expect(matchesProductQuery(sample, "nonexistent-term-xyz")).toBe(false);
+
+    expect(formatProductDisplayName("Aurelia Sparkling Water, 330 ml", "SKU-00001")).toBe(
+      "Aurelia Sparkling Water, 330 ml",
+    );
+    expect(formatProductDisplayName("", "SKU-00001")).toBe("SKU-00001");
+    expect(formatProductDisplayName("   ", "SKU-00001")).toBe("SKU-00001");
+    expect(formatProductDisplayName(null, "SKU-00001")).toBe("SKU-00001");
+
+    const blankNameData = {
+      ...data,
+      products: data.products.map((p, idx) => (idx === 0 ? { ...p, name: "   " } : p)),
+    };
+    const positions = assessPositions(blankNameData, DEFAULT_POLICY);
+    const recs = buildRecommendations(blankNameData, DEFAULT_POLICY);
+    const detail = buildProductDetail(blankNameData, DEFAULT_POLICY, positions, recs, "SKU-00001");
+    expect(detail?.product.name).toBe("SKU-00001");
+    for (const r of recs.filter((x) => x.sku === "SKU-00001")) {
+      expect(r.productName).toBe("SKU-00001");
+      expect(r.reason).toContain("SKU-00001");
+    }
   });
 });

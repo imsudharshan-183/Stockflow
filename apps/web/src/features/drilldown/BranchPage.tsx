@@ -26,6 +26,11 @@ import {
   TableRow,
   TableToolbar,
 } from "@/components/ui/table";
+import {
+  Tooltip as UiTooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
@@ -39,7 +44,7 @@ import {
 } from "@/lib/format";
 import { TOKENS } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { BranchTrendPoint } from "@stockflow/core";
+import { formatProductDisplayName, type BranchTrendPoint } from "@stockflow/core";
 
 export function BranchPage() {
   const { id } = useParams();
@@ -204,12 +209,21 @@ export function BranchPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Link
-                        className="block truncate font-semibold text-foreground hover:text-primary hover:underline"
-                        to={`/products/${recommendation.sku}`}
-                      >
-                        {recommendation.productName}
-                      </Link>
+                      <UiTooltip>
+                        <TooltipTrigger
+                          render={
+                            <Link
+                              className="block truncate font-semibold text-foreground hover:text-primary hover:underline"
+                              to={`/products/${recommendation.sku}`}
+                            >
+                              {formatProductDisplayName(recommendation.productName, recommendation.sku)}
+                            </Link>
+                          }
+                        />
+                        <TooltipContent side="top">
+                          {formatProductDisplayName(recommendation.productName, recommendation.sku)}
+                        </TooltipContent>
+                      </UiTooltip>
                       <span className="font-mono text-xs text-muted-foreground">
                         {recommendation.sku}
                       </span>

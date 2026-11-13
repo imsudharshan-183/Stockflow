@@ -1,4 +1,5 @@
 import type { Dataset } from "../seed/types.js";
+import { formatProductDisplayName } from "../seed/catalog.js";
 import { RecommendationSchema, type Policy, type Recommendation } from "../schemas/index.js";
 import { at } from "../round.js";
 import { planActions, type ActionDraft } from "../engine/index.js";
@@ -23,12 +24,14 @@ export function buildRecommendations(data: Dataset, policy: Policy): Recommendat
     if (seen.has(id)) throw new Error(`duplicate recommendation ${id}`);
     seen.add(id);
 
+    const displayName = formatProductDisplayName(product.name, product.sku);
+
     recommendations.push(
       RecommendationSchema.parse({
         id,
         rank: recommendations.length + 1,
         sku: product.sku,
-        productName: product.name,
+        productName: displayName,
         category: product.category,
         branchId: branch.id,
         branchName: branch.name,
@@ -41,7 +44,7 @@ export function buildRecommendations(data: Dataset, policy: Policy): Recommendat
         reason: describeRecommendation({
           action: draft.action,
           quantity,
-          productName: product.name,
+          productName: displayName,
           branchName: branch.name,
           donorBranchName: donor?.name ?? null,
           coverDays: draft.coverDays,

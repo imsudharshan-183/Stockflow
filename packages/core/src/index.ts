@@ -104,6 +104,13 @@ export {
 } from "./engine/index.js";
 export type { ActionDraft, Forecaster, Matcher, Position } from "./engine/index.js";
 export { generateDataset } from "./seed/generate.js";
+export {
+  CATEGORIES,
+  formatProductDisplayName,
+  matchesProductQuery,
+  productName,
+  skuCode,
+} from "./seed/catalog.js";
 export type { Dataset } from "./seed/types.js";
 export { analyze, buildBranchDetail, buildProductDetail, buildRecommendations } from "./report/index.js";
 export type { Analysis } from "./report/index.js";

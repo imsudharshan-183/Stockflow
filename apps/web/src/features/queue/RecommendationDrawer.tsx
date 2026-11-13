@@ -25,7 +25,7 @@ import {
   statusLabel,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Recommendation } from "@stockflow/core";
+import { formatProductDisplayName, type Recommendation } from "@stockflow/core";
 
 export interface RecommendationDrawerProps {
   recommendation: Recommendation | null;
@@ -98,7 +98,7 @@ export function RecommendationDrawer({
                 </span>
               </div>
               <SheetTitle className="mt-1 text-base font-semibold tracking-tight text-foreground">
-                {recommendation.productName}
+                {formatProductDisplayName(recommendation.productName, recommendation.sku)}
               </SheetTitle>
               <SheetDescription className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{recommendation.sku}</span>
@@ -351,7 +351,10 @@ export function RecommendationDrawer({
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-foreground">
-                          {productQuery.data.product.name}
+                          {formatProductDisplayName(
+                            productQuery.data.product.name,
+                            productQuery.data.product.sku,
+                          )}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           {productQuery.data.product.sku} · Lead time{" "}

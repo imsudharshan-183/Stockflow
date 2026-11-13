@@ -43,7 +43,14 @@ import {
   statusLabel,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Action, Recommendation, RecommendationQuery, RecommendationStatus } from "@stockflow/core";
+import {
+  formatProductDisplayName,
+  matchesProductQuery,
+  type Action,
+  type Recommendation,
+  type RecommendationQuery,
+  type RecommendationStatus,
+} from "@stockflow/core";
 
 export function QueuePage() {
   const { user } = useAuth();
@@ -122,8 +129,7 @@ export function QueuePage() {
     if (!q) return serverRows;
     return serverRows.filter(
       (row) =>
-        row.sku.toLowerCase().includes(q) ||
-        row.productName.toLowerCase().includes(q) ||
+        matchesProductQuery(row, q) ||
         row.branchName.toLowerCase().includes(q) ||
         (row.donorBranchName?.toLowerCase().includes(q) ?? false),
     );
@@ -541,11 +547,13 @@ export function QueuePage() {
                             <TooltipTrigger
                               render={
                                 <div className="truncate font-semibold text-foreground">
-                                  {row.productName}
+                                  {formatProductDisplayName(row.productName, row.sku)}
                                 </div>
                               }
                             />
-                            <TooltipContent side="top">{row.productName}</TooltipContent>
+                            <TooltipContent side="top">
+                              {formatProductDisplayName(row.productName, row.sku)}
+                            </TooltipContent>
                           </Tooltip>
                           <div
                             className="truncate text-xs text-muted-foreground"

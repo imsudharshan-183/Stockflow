@@ -100,8 +100,10 @@ function buildProducts(): Product[] {
     if (cost <= 0) cost = 0.01;
     const leadJitter = (index % 3) - 1;
     const leadTimeDays = Math.min(21, Math.max(1, category.leadTimeDays + leadJitter));
-    let name = productName(index);
-    if (seen.has(name)) name = `${name} ${skuCode(index)}`;
+    const name = productName(index);
+    if (seen.has(name)) {
+      throw new Error(`Duplicate product name generated at index ${index}: ${name}`);
+    }
     seen.add(name);
     products.push({
       sku: skuCode(index),

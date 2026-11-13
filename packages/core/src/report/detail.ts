@@ -1,4 +1,5 @@
 import type { Dataset } from "../seed/types.js";
+import { formatProductDisplayName } from "../seed/catalog.js";
 import {
   BranchDetailSchema,
   ProductDetailSchema,
@@ -118,7 +119,12 @@ export function buildProductDetail(
     })),
   }));
 
-  return ProductDetailSchema.parse({ product, policy, positions: views, series });
+  const normalizedProduct = {
+    ...product,
+    name: formatProductDisplayName(product.name, product.sku),
+  };
+
+  return ProductDetailSchema.parse({ product: normalizedProduct, policy, positions: views, series });
 }
 
 function recommendationFor(

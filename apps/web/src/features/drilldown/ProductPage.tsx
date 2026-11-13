@@ -1,4 +1,9 @@
-import type { Policy, PositionView, SeriesPoint } from "@stockflow/core";
+import {
+  formatProductDisplayName,
+  type Policy,
+  type PositionView,
+  type SeriesPoint,
+} from "@stockflow/core";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
@@ -76,7 +81,7 @@ export function ProductPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title={detail.product.name}
+        title={formatProductDisplayName(detail.product.name, detail.product.sku)}
         subtitle={`${detail.product.sku} · ${detail.product.category} · Retail ${formatMoneyFull(detail.product.price)} · Cost ${formatMoneyFull(detail.product.cost)} · Lead time ${formatNumber(detail.product.leadTimeDays)} days`}
         actions={
           <Link

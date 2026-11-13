@@ -26,6 +26,8 @@ pnpm seed:mongo
 
 That writes the dataset and the `(branchId, sku, date)` index. It does not print the URI. A set URI that fails to connect stops the process.
 
+Whenever catalog product names or seed definitions change (see [docs/NAMING.md](docs/NAMING.md)), re-run `pnpm seed:mongo` against your MongoDB instance so the stored `StockflowMeta` catalog and cached `StockflowPlan` recommendations reflect the updated product names. In-memory mode (`MONGODB_URI` unset) regenerates the catalog automatically on startup.
+
 ## Tests
 
 ```bash

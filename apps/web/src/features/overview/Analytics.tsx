@@ -12,7 +12,12 @@ import {
 } from "@/lib/format";
 import { TOKENS } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
-import type { Action, KpiSummary, Recommendation } from "@stockflow/core";
+import {
+  formatProductDisplayName,
+  type Action,
+  type KpiSummary,
+  type Recommendation,
+} from "@stockflow/core";
 
 const ACTION_CONFIG: Record<
   Action,
@@ -140,12 +145,21 @@ export function Analytics({
                 className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0"
               >
                 <div className="min-w-0">
-                  <Link
-                    to={`/products/${sku.sku}`}
-                    className="block truncate font-medium text-foreground transition-colors hover:text-primary hover:underline"
-                  >
-                    {sku.name}
-                  </Link>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Link
+                          to={`/products/${sku.sku}`}
+                          className="block truncate font-medium text-foreground transition-colors hover:text-primary hover:underline"
+                        >
+                          {formatProductDisplayName(sku.name, sku.sku)}
+                        </Link>
+                      }
+                    />
+                    <TooltipContent side="top">
+                      {formatProductDisplayName(sku.name, sku.sku)}
+                    </TooltipContent>
+                  </Tooltip>
                   <span className="font-mono text-[11px] text-muted-foreground">
                     {sku.sku}
                   </span>
