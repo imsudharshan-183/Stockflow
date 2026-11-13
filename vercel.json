@@ -1,0 +1,21 @@
+{
+  "services": {
+    "web": {
+      "root": "apps/web",
+      "rewrites": [
+        { "source": "/queue", "destination": "/index.html" },
+        { "source": "/audit", "destination": "/index.html" },
+        { "source": "/branches/(.*)", "destination": "/index.html" },
+        { "source": "/products/(.*)", "destination": "/index.html" }
+      ]
+    },
+    "api": {
+      "root": "apps/api",
+      "entrypoint": "src/index.ts"
+    }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": { "service": "api" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}

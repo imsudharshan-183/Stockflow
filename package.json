@@ -1,0 +1,25 @@
+{
+  "name": "stockflow",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "seed:mongo": "pnpm --filter @stockflow/api seed:mongo",
+    "seed:users": "pnpm --filter @stockflow/api seed:users",
+    "test": "pnpm -r --if-present test",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "build": "pnpm -r --if-present build",
+    "format": "prettier --write ."
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "eslint": "^9.39.1",
+    "prettier": "^3.6.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

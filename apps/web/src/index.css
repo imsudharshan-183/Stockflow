@@ -1,0 +1,96 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #f8f6ff;
+  --foreground: #1f1b3a;
+  --card: #ffffff;
+  --card-foreground: #1f1b3a;
+  --popover: #ffffff;
+  --popover-foreground: #1f1b3a;
+  --primary: #6d5bd0;
+  --primary-foreground: #ffffff;
+  --secondary: #ede9fe;
+  --secondary-foreground: #1f1b3a;
+  --muted: #6b6785;
+  --muted-foreground: #6b6785;
+  --accent: #ede9fe;
+  --accent-foreground: #1f1b3a;
+  --destructive: #d4566b;
+  --border: #e7e2f8;
+  --input: #e7e2f8;
+  --ring: #8b5cf6;
+  --chart-1: #7c6fd6;
+  --chart-2: #4fb3a9;
+  --chart-3: #f2a488;
+  --radius: 16px;
+  --bg: #f8f6ff;
+  --surface: #ffffff;
+  --ink: #1f1b3a;
+  --line: #e7e2f8;
+  --success: #2fa37c;
+  --warn: #d9962b;
+  --danger: #d4566b;
+  --info: #4f86e8;
+  --lavender-50: #f5f3ff;
+  --lavender-100: #ede9fe;
+  --lavender-200: #ddd6fe;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--foreground);
+  background: linear-gradient(180deg, #f8f6ff 0%, #ede9fe 55%, #f8f6ff 100%);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+}
+
+.brand-gradient {
+  background-image: linear-gradient(90deg, #6d5bd0, #8b5cf6, #c084fc);
+}
+
+[data-slot="button"].bg-primary {
+  background-image: linear-gradient(90deg, #6d5bd0, #8b5cf6, #c084fc);
+  color: white;
+}
+
+[data-slot="card"] {
+  gap: 0.75rem;
+  padding-top: 1rem;
+  padding-bottom: 1rem;
+}
+
+[data-slot="card-header"],
+[data-slot="card-content"],
+[data-slot="card-footer"] {
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+
+[data-slot="sheet-overlay"] {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(31, 27, 58, 0.4);
+}
+
+[data-slot="sheet-content"] {
+  background: #ffffff;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  height: 100vh;
+  width: min(24rem, 92vw);
+  overflow: auto;
+  padding: 1rem;
+}
