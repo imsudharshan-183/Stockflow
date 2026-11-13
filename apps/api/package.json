@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "seed:mongo": "tsx src/seed-mongo.ts",
     "seed:users": "tsx src/seed-users.ts",
+    "fixtures:update": "tsx src/test/updateFixtures.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit"

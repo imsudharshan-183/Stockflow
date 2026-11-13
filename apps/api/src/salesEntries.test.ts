@@ -1,203 +1,243 @@
-import { beforeEach, describe, expect, it } from "vitest";
-import {
-  clearMemorySalesEntries,
-  clearRecomputeCallLog,
-  getRecomputeCallLog,
-} from "./db.js";
-import { buildApp } from "./plugins/app.js";
-import { InMemoryRepository } from "./repositories/memory.js";
-import { StockService } from "./services/stockService.js";
+import type { FastifyInstance } from "fastify";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { clearMemorySalesEntries, clearRecomputeCallLog, getRecomputeCallLog } from "./db.js";
+import { buildMultipartPayload, json, setupApp } from "./test/helpers.js";
 
-async function createTestServer() {
-  const repo = InMemoryRepository.create();
-  const service = await StockService.create(repo);
-  const app = await buildApp(service, { AUTH_ENABLED: false });
-  return app;
+const HEADER = "branchId,sku,date,unitsSold,onHand";
+const FIVE_MB = 5 * 1024 * 1024;
+
+let app: FastifyInstance;
+
+beforeAll(async () => {
+  app = (await setupApp({ authEnabled: false })).app;
+});
+afterAll(async () => app.close());
+beforeEach(() => {
+  clearMemorySalesEntries();
+  clearRecomputeCallLog();
+});
+
+async function post(payload: unknown) {
+  const res = await app.inject({ method: "POST", url: "/api/sales-entries", payload: payload as object });
+  return { status: res.statusCode, body: json<Record<string, unknown>>(res.payload) };
 }
 
-function buildMultipartPayload(fieldName: string, filename: string, content: string | Buffer) {
-  const boundary = "----StockFlowTestBoundary7MA4YWxkTrZu0gW";
-  const prefix = Buffer.from(
-    `--${boundary}\r\nContent-Disposition: form-data; name="${fieldName}"; filename="${filename}"\r\nContent-Type: text/csv\r\n\r\n`,
-    "utf8",
-  );
-  const bodyBuf = typeof content === "string" ? Buffer.from(content, "utf8") : content;
-  const suffix = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+async function importCsv(content: string | Buffer, field = "file") {
+  const { payload, contentType } = buildMultipartPayload(field, "sales.csv", content);
+  const res = await app.inject({
+    method: "POST",
+    url: "/api/sales-entries/import",
+    headers: { "content-type": contentType },
+    payload,
+  });
   return {
-    payload: Buffer.concat([prefix, bodyBuf, suffix]),
-    contentType: `multipart/form-data; boundary=${boundary}`,
+    status: res.statusCode,
+    body: json<{ inserted: number; updated: number; errors: Array<{ row: number; message: string }>; error?: string }>(
+      res.payload,
+    ),
   };
 }
 
-describe("Sales Entries API (POST /api/sales-entries & /api/sales-entries/import)", () => {
-  beforeEach(() => {
-    clearMemorySalesEntries();
-    clearRecomputeCallLog();
+const pairs = () => getRecomputeCallLog().map((c) => `${c.branchId}:${c.sku}`);
+const valid = { branchId: "BR-001", sku: "SKU-00001", date: "2026-11-13", unitsSold: 5, onHand: 20 };
+
+describe("POST /api/sales-entries validation", () => {
+  it.each([
+    ["body is an array", [], "Request body must be a JSON object"],
+    ["branchId missing", { ...valid, branchId: undefined }, "Field 'branchId' is required"],
+    ["branchId null", { ...valid, branchId: null }, "Field 'branchId' is required"],
+    ["branchId empty", { ...valid, branchId: "" }, "Field 'branchId' is required"],
+    ["branchId blank", { ...valid, branchId: "   " }, "Field 'branchId' must be a non-empty string"],
+    ["branchId number", { ...valid, branchId: 7 }, "Field 'branchId' must be a non-empty string"],
+    ["sku missing", { ...valid, sku: undefined }, "Field 'sku' is required"],
+    ["sku blank", { ...valid, sku: "  " }, "Field 'sku' must be a non-empty string"],
+    ["sku number", { ...valid, sku: 1 }, "Field 'sku' must be a non-empty string"],
+    ["date missing", { ...valid, date: undefined }, "Field 'date' is required"],
+    ["date US format", { ...valid, date: "11/13/2026" }, "Field 'date' must be a valid date string in YYYY-MM-DD format"],
+    ["date impossible", { ...valid, date: "2026-02-30" }, "Field 'date' must be a valid date string in YYYY-MM-DD format"],
+    ["date with time", { ...valid, date: "2026-11-13T00:00:00Z" }, "Field 'date' must be a valid date string in YYYY-MM-DD format"],
+    ["unitsSold missing", { ...valid, unitsSold: undefined }, "Field 'unitsSold' is required"],
+    ["unitsSold negative", { ...valid, unitsSold: -1 }, "Field 'unitsSold' must be a non-negative number (>= 0)"],
+    ["unitsSold string in JSON", { ...valid, unitsSold: "5" }, "Field 'unitsSold' must be a non-negative number (>= 0)"],
+    ["onHand missing", { ...valid, onHand: undefined }, "Field 'onHand' is required"],
+    ["onHand negative", { ...valid, onHand: -5 }, "Field 'onHand' must be a non-negative number (>= 0)"],
+    ["onHand boolean", { ...valid, onHand: true }, "Field 'onHand' must be a non-negative number (>= 0)"],
+  ])("400 when %s", async (_label, payload, message) => {
+    const r = await post(payload);
+    expect(r.status).toBe(400);
+    expect(r.body).toEqual({ error: message });
+    expect(getRecomputeCallLog()).toHaveLength(0);
   });
 
-  it("validates each field with a specific 400 message on POST /api/sales-entries", async () => {
-    const app = await createTestServer();
-
-    const missingBranch = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: { sku: "SKU-00001", date: "2026-11-13", unitsSold: 5, onHand: 20 },
-    });
-    expect(missingBranch.statusCode).toBe(400);
-    expect(JSON.parse(missingBranch.payload).error).toContain("branchId");
-
-    const missingSku = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: { branchId: "BR-001", date: "2026-11-13", unitsSold: 5, onHand: 20 },
-    });
-    expect(missingSku.statusCode).toBe(400);
-    expect(JSON.parse(missingSku.payload).error).toContain("sku");
-
-    const invalidDate = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "11/13/2026",
-        unitsSold: 5,
-        onHand: 20,
-      },
-    });
-    expect(invalidDate.statusCode).toBe(400);
-    expect(JSON.parse(invalidDate.payload).error).toContain("date");
-
-    const negativeSold = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "2026-11-13",
-        unitsSold: -1,
-        onHand: 20,
-      },
-    });
-    expect(negativeSold.statusCode).toBe(400);
-    expect(JSON.parse(negativeSold.payload).error).toContain("unitsSold");
-
-    const negativeOnHand = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "2026-11-13",
-        unitsSold: 4,
-        onHand: -5,
-      },
-    });
-    expect(negativeOnHand.statusCode).toBe(400);
-    expect(JSON.parse(negativeOnHand.payload).error).toContain("onHand");
+  it("reports the first invalid field in order branchId, sku, date, unitsSold, onHand", async () => {
+    const r = await post({ date: "bad", unitsSold: -1 });
+    expect(r.body.error).toBe("Field 'branchId' is required");
   });
 
-  it("upserts on (branchId, sku, date), returns 201, and calls recomputeForSku", async () => {
-    const app = await createTestServer();
+  it("accepts zeros", async () => {
+    const r = await post({ ...valid, unitsSold: 0, onHand: 0 });
+    expect(r.status).toBe(201);
+  });
+});
 
-    const firstRes = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "2026-11-13",
-        unitsSold: 7,
-        onHand: 42,
-      },
-    });
-    expect(firstRes.statusCode).toBe(201);
-    const firstDoc = JSON.parse(firstRes.payload);
-    expect(firstDoc).toMatchObject({
-      branchId: "BR-001",
-      sku: "SKU-00001",
-      date: "2026-11-13",
-      unitsSold: 7,
-      onHand: 42,
-    });
-    expect(firstDoc.updatedAt).toBeDefined();
-    expect(getRecomputeCallLog()).toHaveLength(1);
-    expect(getRecomputeCallLog()[0]).toMatchObject({ branchId: "BR-001", sku: "SKU-00001" });
-
-    // Re-submitting same branch+SKU+date corrects the entry
-    const secondRes = await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "2026-11-13",
-        unitsSold: 12,
-        onHand: 37,
-      },
-    });
-    expect(secondRes.statusCode).toBe(201);
-    const secondDoc = JSON.parse(secondRes.payload);
-    expect(secondDoc.unitsSold).toBe(12);
-    expect(secondDoc.onHand).toBe(37);
-    expect(getRecomputeCallLog()).toHaveLength(2);
+describe("POST /api/sales-entries upsert on (branchId, sku, date)", () => {
+  it("201, returns the stored entry, recomputes the pair", async () => {
+    const r = await post(valid);
+    expect(r.status).toBe(201);
+    expect(r.body).toMatchObject(valid);
+    expect(typeof r.body.updatedAt).toBe("string");
+    expect(pairs()).toEqual(["BR-001:SKU-00001"]);
   });
 
-  it("imports CSV via POST /api/sales-entries/import, collects per-row errors, and deduplicates recomputeForSku", async () => {
-    const app = await createTestServer();
+  it("trims identifiers so ' BR-001 ' and 'BR-001' are the same key", async () => {
+    const r = await post({ ...valid, branchId: " BR-001 ", sku: " SKU-00001 " });
+    expect(r.body).toMatchObject({ branchId: "BR-001", sku: "SKU-00001" });
+    const imp = await importCsv(`${HEADER}\nBR-001,SKU-00001,2026-11-13,9,9`);
+    expect(imp.body).toMatchObject({ inserted: 0, updated: 1 });
+  });
 
-    // Seed one existing entry so we can verify both `inserted` and `updated` counts
-    await app.inject({
-      method: "POST",
-      url: "/api/sales-entries",
-      payload: {
-        branchId: "BR-001",
-        sku: "SKU-00001",
-        date: "2026-11-10",
-        unitsSold: 3,
-        onHand: 50,
-      },
-    });
+  it("same key updates; a different date, branch, or SKU inserts", async () => {
+    await post(valid);
+    const second = await post({ ...valid, unitsSold: 12, onHand: 37 });
+    expect(second.body).toMatchObject({ unitsSold: 12, onHand: 37 });
+    const imp = await importCsv(
+      [
+        HEADER,
+        "BR-001,SKU-00001,2026-11-13,1,1", // same key -> update
+        "BR-001,SKU-00001,2026-11-14,1,1", // new date
+        "BR-002,SKU-00001,2026-11-13,1,1", // new branch
+        "BR-001,SKU-00002,2026-11-13,1,1", // new sku
+      ].join("\n"),
+    );
+    expect(imp.body).toEqual({ inserted: 3, updated: 1, errors: [] });
+  });
+});
+
+describe("POST /api/sales-entries/import", () => {
+  it("mixed file: counts inserted, updated, and per-row errors; recompute once per distinct pair", async () => {
+    await post({ branchId: "BR-001", sku: "SKU-00001", date: "2026-11-10", unitsSold: 3, onHand: 50 });
     clearRecomputeCallLog();
 
     const csv = [
-      "branchId,sku,date,unitsSold,onHand",
-      "BR-001,SKU-00001,2026-11-10,5,48", // updates existing row (row 1)
-      "BR-001,SKU-00001,2026-11-11,6,42", // inserts new row for SAME (BR-001, SKU-00001) (row 2)
-      "BR-002,SKU-00002,bad-date,4,20", // invalid date (row 3)
-      "BR-002,SKU-00002,2026-11-11,-3,20", // negative unitsSold (row 4)
-      "BR-002,SKU-00003,2026-11-11,8,30", // inserts new row for (BR-002, SKU-00003) (row 5)
+      HEADER,
+      "BR-001,SKU-00001,2026-11-10,5,48", // 1 update
+      "BR-001,SKU-00001,2026-11-11,6,42", // 2 insert, same pair
+      "BR-002,SKU-00002,bad-date,4,20", // 3 error
+      "BR-002,SKU-00002,2026-11-11,-3,20", // 4 error
+      "BR-002,SKU-00003,2026-11-11,8,30", // 5 insert
+      ",SKU-00004,2026-11-11,1,1", // 6 error
+      "BR-003,,2026-11-11,1,1", // 7 error
+      "BR-003,SKU-00005,,1,1", // 8 error
+      "BR-003,SKU-00005,2026-11-11,,1", // 9 error
+      "BR-003,SKU-00005,2026-11-11,abc,1", // 10 error (non-numeric)
+      "BR-003,SKU-00005,2026-11-11,1,", // 11 error
+      "BR-003,SKU-00005,2026-11-11,1,-1", // 12 error
+      "BR-001,SKU-00001,2026-11-12,7,35", // 13 insert, same pair again
     ].join("\n");
 
-    const { payload, contentType } = buildMultipartPayload("file", "sales.csv", csv);
+    const r = await importCsv(csv);
+    expect(r.status).toBe(200);
+    expect(r.body.inserted).toBe(3);
+    expect(r.body.updated).toBe(1);
+    expect(r.body.errors).toEqual([
+      { row: 3, message: "Field 'date' must be a valid date string in YYYY-MM-DD format" },
+      { row: 4, message: "Field 'unitsSold' must be a non-negative number (>= 0)" },
+      { row: 6, message: "Field 'branchId' is required" },
+      { row: 7, message: "Field 'sku' is required" },
+      { row: 8, message: "Field 'date' is required" },
+      { row: 9, message: "Field 'unitsSold' is required" },
+      { row: 10, message: "Field 'unitsSold' must be a non-negative number (>= 0)" },
+      { row: 11, message: "Field 'onHand' is required" },
+      { row: 12, message: "Field 'onHand' must be a non-negative number (>= 0)" },
+    ]);
+    // BR-002:SKU-00002 and BR-003:SKU-00005 only had bad rows: no recompute for them.
+    expect(pairs()).toEqual(["BR-001:SKU-00001", "BR-002:SKU-00003"]);
+  });
+
+  it("duplicate rows in one file: first inserts, second updates, one recompute", async () => {
+    const r = await importCsv([HEADER, "BR-001,SKU-00001,2026-11-13,5,20", "BR-001,SKU-00001,2026-11-13,6,19"].join("\n"));
+    expect(r.body).toEqual({ inserted: 1, updated: 1, errors: [] });
+    expect(pairs()).toEqual(["BR-001:SKU-00001"]);
+  });
+
+  it("handles CRLF, a UTF-8 BOM, quoted cells, reordered and extra columns, and trailing blank lines", async () => {
+    const csv =
+      "\uFEFFsku,note,onHand,date,unitsSold,branchId\r\n" +
+      '"SKU-00001","hello, world",20,2026-11-13,5,"BR-001"\r\n' +
+      ' SKU-00002 ,"say ""hi""",10,2026-11-13,2, BR-001 \r\n' +
+      "\r\n\r\n";
+    const r = await importCsv(csv);
+    expect(r.body).toEqual({ inserted: 2, updated: 0, errors: [] });
+    expect(pairs()).toEqual(["BR-001:SKU-00001", "BR-001:SKU-00002"]);
+  });
+
+  // Current behaviour: header problems are reported per row with 200, not as a file-level 400.
+  // What is guaranteed (and asserted) is that nothing is written and nothing is recomputed.
+  it("wrong header: nothing written, every row reported, no recompute", async () => {
+    const r = await importCsv(["branch,product,day,sold,stock", "BR-001,SKU-00001,2026-11-13,5,20", "BR-002,SKU-00001,2026-11-13,5,20"].join("\n"));
+    expect(r.status).toBe(200);
+    expect(r.body.inserted).toBe(0);
+    expect(r.body.updated).toBe(0);
+    expect(r.body.errors).toEqual([
+      { row: 1, message: "Field 'branchId' is required" },
+      { row: 2, message: "Field 'branchId' is required" },
+    ]);
+    expect(getRecomputeCallLog()).toHaveLength(0);
+  });
+
+  it.each([
+    ["empty file", ""],
+    ["header only", `${HEADER}\n`],
+  ])("%s: zero counts, no errors, no recompute", async (_label, csv) => {
+    const r = await importCsv(csv);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ inserted: 0, updated: 0, errors: [] });
+    expect(getRecomputeCallLog()).toHaveLength(0);
+  });
+
+  it("accepts a file of exactly 5MB", async () => {
+    const head = `${HEADER}\nBR-001,SKU-00001,2026-11-13,5,20\n`;
+    const file = Buffer.concat([Buffer.from(head), Buffer.alloc(FIVE_MB - Buffer.byteLength(head), "\n")]);
+    expect(file.byteLength).toBe(FIVE_MB);
+    const r = await importCsv(file);
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({ inserted: 1, updated: 0, errors: [] });
+  });
+
+  it("413 for a file one byte over 5MB, nothing written", async () => {
+    const head = `${HEADER}\nBR-001,SKU-00001,2026-11-13,5,20\n`;
+    const file = Buffer.concat([Buffer.from(head), Buffer.alloc(FIVE_MB + 1 - Buffer.byteLength(head), "\n")]);
+    const r = await importCsv(file);
+    expect(r.status).toBe(413);
+    expect(r.body.error).toBe("Uploaded file exceeds the 5MB limit");
+    expect(getRecomputeCallLog()).toHaveLength(0);
+  });
+
+  it("413 when the request body exceeds the parser limit", async () => {
+    const r = await importCsv(Buffer.alloc(6 * 1024 * 1024, "\n"));
+    expect(r.status).toBe(413);
+  });
+
+  it("400 for a JSON body instead of multipart", async () => {
+    const res = await app.inject({ method: "POST", url: "/api/sales-entries/import", payload: { file: "x" } });
+    expect(res.statusCode).toBe(400);
+    expect(json(res.payload)).toEqual({ error: "Expected multipart/form-data with a 'file' field" });
+  });
+
+  it("400 for multipart without a boundary", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/sales-entries/import",
-      headers: { "content-type": contentType },
-      payload,
+      headers: { "content-type": "multipart/form-data" },
+      payload: Buffer.from("whatever"),
     });
+    expect(res.statusCode).toBe(400);
+    expect(json(res.payload)).toEqual({ error: "Missing multipart/form-data boundary" });
+  });
 
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.payload);
-    expect(body.inserted).toBe(2);
-    expect(body.updated).toBe(1);
-    expect(body.errors).toEqual([
-      {
-        row: 3,
-        message: "Field 'date' must be a valid date string in YYYY-MM-DD format",
-      },
-      {
-        row: 4,
-        message: "Field 'unitsSold' must be a non-negative number (>= 0)",
-      },
-    ]);
-
-    // recomputeForSku should be called ONCE for (BR-001, SKU-00001) and ONCE for (BR-002, SKU-00003) = 2 calls total
-    const calls = getRecomputeCallLog();
-    expect(calls).toHaveLength(2);
-    expect(calls.map((c) => `${c.branchId}:${c.sku}`)).toEqual([
-      "BR-001:SKU-00001",
-      "BR-002:SKU-00003",
-    ]);
+  it("400 when the part is not named 'file'", async () => {
+    const r = await importCsv(`${HEADER}\nBR-001,SKU-00001,2026-11-13,5,20`, "upload");
+    expect(r.status).toBe(400);
+    expect(r.body.error).toBe("Missing required file field named 'file'");
   });
 });

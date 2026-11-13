@@ -1,6 +1,4 @@
 import { describe, expect, it } from "vitest";
-import fs from "node:fs";
-import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { AuditEntry } from "@stockflow/core";
 import { InMemoryRepository } from "./repositories/memory.js";
@@ -154,7 +152,9 @@ describe("API Auth and Scoping", () => {
     expect(staffAudit.statusCode).toBe(403);
   });
 
-  it("applies branch scoping for transfers (visible if donor OR receiver)", async () => {
+  // Transfer (donor OR receiver) scoping lives in transferScope.test.ts: the seeded catalog
+  // produces no TRANSFER actions, so a loop over seeded recommendations never exercised it.
+  it("applies branch scoping to reorders and markdowns for a manager", async () => {
     const { app } = await setupTestApp(true);
     // Marcus Vance manages Midwest: BR-001, BR-002
     const manager = await loginUser(app, "manager.midwest@stockflow.dev", "Manager@12345");
@@ -165,20 +165,12 @@ describe("API Auth and Scoping", () => {
       headers: { authorization: `Bearer ${manager.body.token}` },
     });
     expect(recsRes.statusCode).toBe(200);
-    const recs = JSON.parse(recsRes.payload).recommendations;
+    const recs: Array<{ action: string; branchId: string }> = JSON.parse(recsRes.payload).recommendations;
 
     expect(recs.length).toBeGreaterThan(0);
+    expect(new Set(recs.map((r) => r.action))).toEqual(new Set(["REORDER", "MARKDOWN"]));
     for (const rec of recs) {
-      if (rec.action === "TRANSFER") {
-        const touches =
-          rec.branchId === "BR-001" ||
-          rec.branchId === "BR-002" ||
-          rec.donorBranchId === "BR-001" ||
-          rec.donorBranchId === "BR-002";
-        expect(touches).toBe(true);
-      } else {
-        expect(["BR-001", "BR-002"]).toContain(rec.branchId);
-      }
+      expect(["BR-001", "BR-002"]).toContain(rec.branchId);
     }
   });
 
@@ -246,44 +238,7 @@ describe("API Auth and Scoping", () => {
     });
   });
 
-  it("matches pre-auth snapshot when AUTH_ENABLED=false", async () => {
-    const { app } = await setupTestApp(false);
-
-    const recsRes = await app.inject({ method: "GET", url: "/api/recommendations" });
-    const kpisRes = await app.inject({ method: "GET", url: "/api/kpis" });
-
-    const snapshotDir = path.resolve(process.cwd(), "temp_snapshot");
-    if (fs.existsSync(path.join(snapshotDir, "recs_before.json"))) {
-      const recsBefore = fs.readFileSync(path.join(snapshotDir, "recs_before.json"), "utf8");
-      const kpisBefore = fs.readFileSync(path.join(snapshotDir, "kpis_before.json"), "utf8");
-
-      expect(JSON.parse(recsRes.payload)).toEqual(JSON.parse(recsBefore));
-      expect(JSON.parse(kpisRes.payload)).toEqual(JSON.parse(kpisBefore));
-    }
-  });
-
-  it("matches pre-auth snapshot for admin when AUTH_ENABLED=true", async () => {
-    const { app } = await setupTestApp(true);
-    const admin = await loginUser(app, "admin@stockflow.dev", "Admin@12345");
-
-    const recsRes = await app.inject({
-      method: "GET",
-      url: "/api/recommendations",
-      headers: { authorization: `Bearer ${admin.body.token}` },
-    });
-    const kpisRes = await app.inject({
-      method: "GET",
-      url: "/api/kpis",
-      headers: { authorization: `Bearer ${admin.body.token}` },
-    });
-
-    const snapshotDir = path.resolve(process.cwd(), "temp_snapshot");
-    if (fs.existsSync(path.join(snapshotDir, "recs_before.json"))) {
-      const recsBefore = fs.readFileSync(path.join(snapshotDir, "recs_before.json"), "utf8");
-      const kpisBefore = fs.readFileSync(path.join(snapshotDir, "kpis_before.json"), "utf8");
-
-      expect(JSON.parse(recsRes.payload)).toEqual(JSON.parse(recsBefore));
-      expect(JSON.parse(kpisRes.payload)).toEqual(JSON.parse(kpisBefore));
-    }
-  });
+  // The fixture snapshot tests moved to snapshot.test.ts. They used to read a git-ignored
+  // temp_snapshot/ folder inside `if (fs.existsSync(...))`, so on a clean checkout they
+  // passed without asserting anything.
 });
