@@ -8,7 +8,7 @@
     "seed:users": "pnpm --filter @stockflow/api seed:users",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "eslint .",
+    "lint": "eslint . && node scripts/check-ui.mjs",
     "build": "pnpm -r --if-present build",
     "format": "prettier --write ."
   },

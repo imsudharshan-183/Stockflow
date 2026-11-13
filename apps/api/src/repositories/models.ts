@@ -126,3 +126,18 @@ refreshTokenSchema.index({ token: 1 }, { unique: true });
 
 export const UserModel = mongoose.model("StockflowUser", userSchema);
 export const RefreshTokenModel = mongoose.model("StockflowRefreshToken", refreshTokenSchema);
+
+const salesEntrySchema = new Schema(
+  {
+    branchId: { type: String, required: true, trim: true },
+    sku: { type: String, required: true, trim: true },
+    date: { type: String, required: true, trim: true },
+    unitsSold: { type: Number, required: true, min: 0 },
+    onHand: { type: Number, required: true, min: 0 },
+    updatedAt: { type: Date, required: true, default: () => new Date() },
+  },
+  { collection: "sales_entries" },
+);
+salesEntrySchema.index({ branchId: 1, sku: 1, date: 1 }, { unique: true });
+
+export const SalesEntryModel = mongoose.model("SalesEntry", salesEntrySchema);

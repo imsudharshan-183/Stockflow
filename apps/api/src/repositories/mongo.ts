@@ -14,7 +14,7 @@ import {
 } from "@stockflow/core";
 import mongoose from "mongoose";
 import { z } from "zod";
-import { ActionModel, AuditModel, FactModel, MetaModel, MetaShape, PlanModel, SeriesModel, SeriesShape, UserModel, RefreshTokenModel } from "./models.js";
+import { ActionModel, AuditModel, FactModel, MetaModel, MetaShape, PlanModel, SeriesModel, SeriesShape, UserModel, RefreshTokenModel, SalesEntryModel } from "./models.js";
 import type { StockRepository } from "./types.js";
 import { MongoUserRepository } from "./mongoUser.js";
 import { getInitialSeedUsers } from "./seedData.js";
@@ -61,6 +61,7 @@ export class MongoRepository implements StockRepository {
         .then(async () => {
           await FactModel.createIndexes();
           await SeriesModel.createIndexes();
+          await SalesEntryModel.createIndexes();
         });
       pending.catch(() => {
         if (globalCache.__stockflowMongo?.pending === pending) delete globalCache.__stockflowMongo;

@@ -5,6 +5,7 @@ import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { readEnv, type Env } from "../config/env.js";
 import { registerAuthRoutes } from "../routes/auth.js";
+import { registerSalesEntriesRoutes } from "../routes/salesEntries.js";
 import { registerStockRoutes } from "../routes/stock.js";
 import { registerUsersRoutes } from "../routes/users.js";
 import { AuthService } from "../services/authService.js";
@@ -65,6 +66,7 @@ export async function buildApp(
       registerAuthRoutes(scope, authService, authGuards, env);
       registerUsersRoutes(scope, service.userRepo, authService, authGuards);
       registerStockRoutes(scope, service, authGuards);
+      registerSalesEntriesRoutes(scope);
     },
     { prefix: "/api" },
   );
