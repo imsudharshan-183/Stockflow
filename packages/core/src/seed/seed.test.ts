@@ -5,6 +5,9 @@ import { buildProductDetail, buildRecommendations } from "../report/index.js";
 import { at, round2 } from "../round.js";
 import { InventorySnapshotSchema, SalesDailySchema } from "../schemas/index.js";
 import {
+  BAHRAIN_BRANCHES,
+  BHD_PRICE_TIERS,
+  CATEGORY_PRICE_TIER,
   CHRONIC_BRANCH_IDS,
   DAY_COUNT,
   EXCESS_BRANCH_IDS,
@@ -15,28 +18,56 @@ import {
   PROMO_DAY_START,
   PROMO_SKU,
   formatProductDisplayName,
+  haversineDistanceKm,
   matchesProductQuery,
+  type CatalogCategory,
 } from "./catalog.js";
 import { generateDataset } from "./generate.js";
 
 const data = generateDataset();
 
 describe("seed", () => {
-  it("builds the catalog and stays deterministic", () => {
+  it("builds the Bahrain catalog with tiered non-round BHD pricing and stays deterministic", () => {
     expect(data.branches).toHaveLength(15);
     expect(data.branches[0]?.id).toBe("BR-001");
-    expect(data.branches[0]?.name).toBe("Chicago - Loop");
+    expect(data.branches[0]?.name).toBe("Manama - CBD");
+    expect(data.branches[1]?.id).toBe("BR-002");
+    expect(data.branches[1]?.name).toBe("Manama - Juffair");
     expect(data.branches[14]?.id).toBe("BR-015");
+    expect(data.branches[14]?.name).toBe("Saar");
     expect(data.products).toHaveLength(PRODUCT_COUNT);
     expect(data.products[0]?.sku).toBe("SKU-00001");
     expect(data.dates).toHaveLength(DAY_COUNT);
     expect(new Set(data.products.map((product) => product.category)).size).toBe(12);
+
+    // Verify all 15 branches have Bahrain coordinates and pairwise distances in 2..45 km
+    for (let i = 0; i < BAHRAIN_BRANCHES.length; i++) {
+      const a = at(BAHRAIN_BRANCHES, i, "branchA");
+      expect(a.coordinates).toBeDefined();
+      const [latA, lngA] = a.coordinates!;
+      expect(latA).toBeGreaterThan(25.9);
+      expect(latA).toBeLessThan(26.4);
+      expect(lngA).toBeGreaterThan(50.3);
+      expect(lngA).toBeLessThan(50.8);
+      for (let j = i + 1; j < BAHRAIN_BRANCHES.length; j++) {
+        const b = at(BAHRAIN_BRANCHES, j, "branchB");
+        const distKm = haversineDistanceKm(a.coordinates!, b.coordinates!);
+        expect(distKm).toBeGreaterThanOrEqual(2);
+        expect(distKm).toBeLessThanOrEqual(45);
+      }
+    }
+
     for (const product of data.products) {
-      expect(product.price).toBeGreaterThanOrEqual(2);
-      expect(product.price).toBeLessThanOrEqual(150);
+      const tier = CATEGORY_PRICE_TIER[product.category as CatalogCategory];
+      const range = BHD_PRICE_TIERS[tier];
+      expect(product.price).toBeGreaterThanOrEqual(range.min);
+      expect(product.price).toBeLessThanOrEqual(range.max);
+      expect(Number.isInteger(product.price)).toBe(false);
+      expect(product.price).toBeGreaterThan(product.cost);
+      expect(product.cost).toBeGreaterThan(0);
       const share = product.cost / product.price;
-      expect(share).toBeGreaterThanOrEqual(0.54);
-      expect(share).toBeLessThanOrEqual(0.76);
+      expect(share).toBeGreaterThanOrEqual(0.55 - 1e-9);
+      expect(share).toBeLessThanOrEqual(0.75 + 1e-9);
     }
     expect(generateDataset()).toEqual(data);
   });

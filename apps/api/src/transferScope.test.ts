@@ -4,9 +4,8 @@ import type { AuditList, Recommendation, RecommendationList, User } from "@stock
 import { FixedDatasetRepository, SEED_USERS, bearer, json, setupApp, tokenFor, transferDataset } from "./test/helpers.js";
 
 /**
- * The seeded catalog produces no TRANSFER actions at all (the engine's $12/unit transfer cost
- * never pays off there), so transfer scoping is exercised on a hand-built dataset:
- * donor BR-001 (Midwest), receiver BR-005 (West), bystander BR-009.
+ * Transfer scoping is exercised on a deterministic hand-built dataset:
+ * donor BR-001 (Manama - CBD), receiver BR-005 (Muharraq - Hidd), bystander BR-009 (Tubli).
  */
 describe("transfer scoping (donor OR receiver in scope)", () => {
   let app: FastifyInstance;
@@ -47,9 +46,9 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
 
   it.each([
     ["admin", SEED_USERS.admin, true],
-    ["manager whose branch is the donor", SEED_USERS.managerMidwest, true],
+    ["manager whose branch is the donor", SEED_USERS.managerManama, true],
     ["manager whose branch is the receiver", SEED_USERS.managerWest, true],
-    ["staff at the donor branch", SEED_USERS.staffChicago, true],
+    ["staff at the donor branch", SEED_USERS.staffManama, true],
     ["staff at an unrelated branch", SEED_USERS.staffLincoln, false],
   ] as const)("%s sees it: %s", async (_label, user, visible) => {
     expect((await visibleIds(user)).includes(transfer.id)).toBe(visible);
@@ -69,7 +68,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     const res = await app.inject({
       method: "POST",
       url: `/api/recommendations/${transfer.id}/approve`,
-      headers: bearer(tokenFor(app, SEED_USERS.staffChicago)),
+      headers: bearer(tokenFor(app, SEED_USERS.staffManama)),
     });
     expect(res.statusCode).toBe(403);
   });
@@ -78,7 +77,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     const res = await app.inject({
       method: "POST",
       url: `/api/recommendations/${transfer.id}/approve`,
-      headers: bearer(tokenFor(app, SEED_USERS.managerMidwest)),
+      headers: bearer(tokenFor(app, SEED_USERS.managerManama)),
     });
     expect(res.statusCode).toBe(200);
     expect(json<Recommendation>(res.payload).status).toBe("APPROVED");
@@ -86,7 +85,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     const donorAudit = await app.inject({
       method: "GET",
       url: "/api/audit",
-      headers: bearer(tokenFor(app, SEED_USERS.managerMidwest)),
+      headers: bearer(tokenFor(app, SEED_USERS.managerManama)),
     });
     expect(donorAudit.statusCode).toBe(200);
     const donorEntries = json<AuditList>(donorAudit.payload).entries;
@@ -95,7 +94,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
       recommendationId: transfer.id,
       branchId: "BR-005",
       donorBranchId: "BR-001",
-      actedBy: { userId: SEED_USERS.managerMidwest.id, role: "manager" },
+      actedBy: { userId: SEED_USERS.managerManama.id, role: "manager" },
     });
 
     const receiverAudit = await app.inject({

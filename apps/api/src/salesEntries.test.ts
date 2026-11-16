@@ -272,17 +272,17 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
     expect(imp.statusCode).toBe(401);
   });
 
-  it("enforces branch scope on POST /api/sales-entries (403 out-of-scope, 201 in-scope)", async () => {
-    const staffToken = tokenFor(authedApp, SEED_USERS.staffChicago); // BR-001 only
-    const mgrToken = tokenFor(authedApp, SEED_USERS.managerMidwest); // BR-001, BR-002
+  it("enforces sales:enter permission and branch scope on POST /api/sales-entries", async () => {
+    const staffToken = tokenFor(authedApp, SEED_USERS.staffManama); // BR-001 only, no sales:enter
+    const mgrToken = tokenFor(authedApp, SEED_USERS.managerManama); // BR-001, BR-002
 
-    const staffOos = await authedApp.inject({
+    const staffAttempt = await authedApp.inject({
       method: "POST",
       url: "/api/sales-entries",
       headers: bearer(staffToken),
-      payload: { ...valid, branchId: "BR-002" },
+      payload: { ...valid, branchId: "BR-001" },
     });
-    expect(staffOos.statusCode).toBe(403);
+    expect(staffAttempt.statusCode).toBe(403);
 
     const mgrOos = await authedApp.inject({
       method: "POST",
@@ -292,31 +292,35 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
     });
     expect(mgrOos.statusCode).toBe(403);
 
-    const staffOk = await authedApp.inject({
+    const mgrOk = await authedApp.inject({
       method: "POST",
       url: "/api/sales-entries",
-      headers: bearer(staffToken),
+      headers: bearer(mgrToken),
       payload: { ...valid, branchId: "BR-001" },
     });
-    expect(staffOk.statusCode).toBe(201);
+    expect(mgrOk.statusCode).toBe(201);
   });
 
-  it("enforces branch scope on POST /api/sales-entries/import without writing partial rows on 403", async () => {
-    const mgrToken = tokenFor(authedApp, SEED_USERS.managerMidwest); // BR-001, BR-002
+  it("reports out-of-scope CSV rows as row errors without failing in-scope rows", async () => {
+    const mgrToken = tokenFor(authedApp, SEED_USERS.managerManama); // BR-001, BR-002
     const mixedScopeCsv = [
       HEADER,
       "BR-001,SKU-00001,2026-11-13,5,20",
       "BR-005,SKU-00001,2026-11-13,5,20", // out-of-scope
     ].join("\n");
     const bad = buildMultipartPayload("file", "sales.csv", mixedScopeCsv);
-    const badRes = await authedApp.inject({
+    const mixedRes = await authedApp.inject({
       method: "POST",
       url: "/api/sales-entries/import",
       headers: { ...bearer(mgrToken), "content-type": bad.contentType },
       payload: bad.payload,
     });
-    expect(badRes.statusCode).toBe(403);
-    expect(getRecomputeCallLog()).toHaveLength(0);
+    expect(mixedRes.statusCode).toBe(200);
+    expect(json(mixedRes.payload)).toEqual({
+      inserted: 1,
+      updated: 0,
+      errors: [{ row: 2, message: "Branch 'BR-005' is outside your assigned scope" }],
+    });
 
     const inScopeCsv = [
       HEADER,
@@ -331,6 +335,89 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
       payload: good.payload,
     });
     expect(goodRes.statusCode).toBe(200);
-    expect(json(goodRes.payload)).toEqual({ inserted: 2, updated: 0, errors: [] });
+    expect(json(goodRes.payload)).toEqual({ inserted: 1, updated: 1, errors: [] });
+  });
+
+  it("supports GET, PATCH, DELETE, and template.csv with validation and scope checks", async () => {
+    const mgrToken = tokenFor(authedApp, SEED_USERS.managerManama);
+    const staffToken = tokenFor(authedApp, SEED_USERS.staffManama);
+
+    // Staff blocked on GET & template
+    const staffGet = await authedApp.inject({
+      method: "GET",
+      url: "/api/sales-entries",
+      headers: bearer(staffToken),
+    });
+    expect(staffGet.statusCode).toBe(403);
+
+    const tplRes = await authedApp.inject({
+      method: "GET",
+      url: "/api/sales-entries/template.csv",
+      headers: bearer(mgrToken),
+    });
+    expect(tplRes.statusCode).toBe(200);
+    expect(tplRes.payload).toContain("branchId,sku,date,unitsSold,onHand");
+
+    // Future date & unknown branch/SKU rejected
+    const futureRes = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(mgrToken),
+      payload: { ...valid, date: "2099-01-01" },
+    });
+    expect(futureRes.statusCode).toBe(400);
+
+    const badBranchRes = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(mgrToken),
+      payload: { ...valid, branchId: "BR-999" },
+    });
+    expect(badBranchRes.statusCode).toBe(400);
+
+    // Create, list, patch, delete
+    const createdRes = await authedApp.inject({
+      method: "POST",
+      url: "/api/sales-entries",
+      headers: bearer(mgrToken),
+      payload: valid,
+    });
+    expect(createdRes.statusCode).toBe(201);
+    const created = json<{ id: string }>(createdRes.payload);
+
+    const listRes = await authedApp.inject({
+      method: "GET",
+      url: "/api/sales-entries?branch=BR-001&sku=SKU-00001",
+      headers: bearer(mgrToken),
+    });
+    expect(listRes.statusCode).toBe(200);
+    expect(json<{ total: number }>(listRes.payload).total).toBe(1);
+
+    const immutablePatch = await authedApp.inject({
+      method: "PATCH",
+      url: `/api/sales-entries/${encodeURIComponent(created.id)}`,
+      headers: bearer(mgrToken),
+      payload: { sku: "SKU-00002", unitsSold: 10 },
+    });
+    expect(immutablePatch.statusCode).toBe(400);
+
+    const patchRes = await authedApp.inject({
+      method: "PATCH",
+      url: `/api/sales-entries/${encodeURIComponent(created.id)}`,
+      headers: bearer(mgrToken),
+      payload: { unitsSold: 12, onHand: 8 },
+    });
+    expect(patchRes.statusCode).toBe(200);
+    expect(json<{ unitsSold: number; onHand: number }>(patchRes.payload)).toMatchObject({
+      unitsSold: 12,
+      onHand: 8,
+    });
+
+    const delRes = await authedApp.inject({
+      method: "DELETE",
+      url: `/api/sales-entries/${encodeURIComponent(created.id)}`,
+      headers: bearer(mgrToken),
+    });
+    expect(delRes.statusCode).toBe(200);
   });
 });

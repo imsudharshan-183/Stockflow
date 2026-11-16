@@ -1,6 +1,13 @@
 import type { FastifyInstance } from "fastify";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import type { AuditList, KpiSummary, ProductDetail, RecommendationList, User } from "@stockflow/core";
+import {
+  MATERIAL_MIN_NET_BENEFIT,
+  type AuditList,
+  type KpiSummary,
+  type ProductDetail,
+  type RecommendationList,
+  type User,
+} from "@stockflow/core";
 import { AuditModel, RefreshTokenModel } from "./repositories/models.js";
 import { MongoUserRepository } from "./repositories/mongoUser.js";
 import {
@@ -27,7 +34,7 @@ function caller(app: FastifyInstance) {
   };
 }
 
-const MIDWEST = new Set(["BR-001", "BR-002"]);
+const MANAMA = new Set(["BR-001", "BR-002"]);
 const ALL_BRANCH_COUNT = 15;
 
 /* ------------------------------------------------------------------------------------------------
@@ -43,8 +50,8 @@ describe("route matrix: read-only routes", () => {
     call = caller(ctx.app);
     t = {
       admin: tokenFor(ctx.app, SEED_USERS.admin),
-      manager: tokenFor(ctx.app, SEED_USERS.managerMidwest),
-      staff: tokenFor(ctx.app, SEED_USERS.staffChicago),
+      manager: tokenFor(ctx.app, SEED_USERS.managerManama),
+      staff: tokenFor(ctx.app, SEED_USERS.staffManama),
     };
   });
   afterAll(async () => ctx.app.close());
@@ -108,7 +115,7 @@ describe("route matrix: read-only routes", () => {
 
     it("role comes from the database, not from the token claim", async () => {
       // A staff user's token claiming admin must still be treated as staff.
-      const lying = tokenFor(ctx.app, { ...SEED_USERS.staffChicago, role: "admin" });
+      const lying = tokenFor(ctx.app, { ...SEED_USERS.staffManama, role: "admin" });
       expect((await call("GET", "/api/users", lying)).status).toBe(403);
       const me = await call("GET", "/api/auth/me", lying);
       expect((me.body.user as User).role).toBe("staff");
@@ -161,8 +168,8 @@ describe("route matrix: read-only routes", () => {
       expect(r.status).toBe(200);
       const k = r.body as unknown as KpiSummary;
       expect(k.branches.map((b) => b.id).sort()).toEqual(["BR-001", "BR-002"]);
-      expect(k.branchRisk.every((b) => MIDWEST.has(b.branchId))).toBe(true);
-      expect(k.coverGrid.every((c) => MIDWEST.has(c.branchId))).toBe(true);
+      expect(k.branchRisk.every((b) => MANAMA.has(b.branchId))).toBe(true);
+      expect(k.coverGrid.every((c) => MANAMA.has(c.branchId))).toBe(true);
       expect(k.coverGrid.length).toBeGreaterThan(0);
       expect(k.deadStockValue).toBeLessThan(admin.deadStockValue);
       expect(k.cashReleasable).toBeLessThan(admin.cashReleasable);
@@ -172,16 +179,9 @@ describe("route matrix: read-only routes", () => {
       expect(k.backtest.baselineStockoutDays).toBeLessThan(admin.backtest.baselineStockoutDays);
     });
 
-    it("staff is scoped to a single branch", async () => {
-      const mgr = (await call("GET", "/api/kpis", t.manager)).body as unknown as KpiSummary;
+    it("staff is denied /api/kpis (403)", async () => {
       const r = await call("GET", "/api/kpis", t.staff);
-      expect(r.status).toBe(200);
-      const k = r.body as unknown as KpiSummary;
-      expect(k.branches.map((b) => b.id)).toEqual(["BR-001"]);
-      expect(k.coverGrid.every((c) => c.branchId === "BR-001")).toBe(true);
-      expect(k.branchRisk.every((b) => b.branchId === "BR-001")).toBe(true);
-      expect(k.trend[0]!.inventoryValue).toBeLessThan(mgr.trend[0]!.inventoryValue);
-      expect(k.backtest.baselineStockoutDays).toBeLessThan(mgr.backtest.baselineStockoutDays);
+      expect(r.status).toBe(403);
     });
   });
 
@@ -197,7 +197,7 @@ describe("route matrix: read-only routes", () => {
       expect(list.total).toBe(list.recommendations.length);
       expect(new Set(list.recommendations.map((x) => x.branchId)).size).toBe(ALL_BRANCH_COUNT);
       for (const rec of list.recommendations) {
-        expect(rec.netBenefit).toBeGreaterThanOrEqual(25);
+        expect(rec.netBenefit).toBeGreaterThanOrEqual(MATERIAL_MIN_NET_BENEFIT);
         expect(rec.quantity).toBeGreaterThanOrEqual(5);
       }
     });
@@ -208,8 +208,8 @@ describe("route matrix: read-only routes", () => {
       expect(r.status).toBe(200);
       const list = r.body as unknown as RecommendationList;
       expect(list.recommendations.length).toBeGreaterThan(0);
-      expect(list.recommendations.every((x) => MIDWEST.has(x.branchId))).toBe(true);
-      const expected = admin.recommendations.filter((x) => MIDWEST.has(x.branchId)).map((x) => x.id);
+      expect(list.recommendations.every((x) => MANAMA.has(x.branchId))).toBe(true);
+      const expected = admin.recommendations.filter((x) => MANAMA.has(x.branchId)).map((x) => x.id);
       expect(list.recommendations.map((x) => x.id)).toEqual(expected);
     });
 
@@ -275,7 +275,7 @@ describe("route matrix: read-only routes", () => {
       expect(r.status).toBe(200);
       const d = r.body as unknown as ProductDetail;
       expect(d.positions.map((p) => p.branch.id).sort()).toEqual(["BR-001", "BR-002"]);
-      expect(d.series.every((s) => MIDWEST.has(s.branchId))).toBe(true);
+      expect(d.series.every((s) => MANAMA.has(s.branchId))).toBe(true);
     });
     it("staff sees only its branch", async () => {
       const d = (await call("GET", "/api/products/SKU-00001", t.staff)).body as unknown as ProductDetail;
@@ -333,7 +333,7 @@ describe("route matrix: /api/auth", () => {
     const r1 = await app.inject({ method: "POST", url: "/api/auth/refresh", payload: { refreshToken: "bogus" } });
     expect(r1.statusCode).toBe(401);
 
-    const l = await login(app, "manager.midwest@stockflow.dev", "Manager@12345");
+    const l = await login(app, "manager.manama@stockflow.dev", "Manager@12345");
     const raw = String(l.cookie).match(/stockflow_refresh=([^;]+)/)?.[1];
     expect(raw).toBeTruthy();
     const r2 = await app.inject({ method: "POST", url: "/api/auth/refresh", payload: { refreshToken: raw } });
@@ -351,8 +351,8 @@ describe("route matrix: /api/auth", () => {
 
   it("POST /refresh: 401 once the user is deactivated", async () => {
     const { app, repo } = await setupApp();
-    const l = await login(app, "staff.chicago@stockflow.dev", "Staff@12345");
-    await repo.users.update(SEED_USERS.staffChicago.id, { isActive: false });
+    const l = await login(app, "staff.manama@stockflow.dev", "Staff@12345");
+    await repo.users.update(SEED_USERS.staffManama.id, { isActive: false });
     const r = await app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie: String(l.cookie) } });
     expect(r.statusCode).toBe(401);
     await app.close();
@@ -369,9 +369,9 @@ describe("route matrix: /api/auth", () => {
 
   it("an access token stops working as soon as its user is deactivated", async () => {
     const { app, repo } = await setupApp();
-    const token = tokenFor(app, SEED_USERS.staffChicago);
+    const token = tokenFor(app, SEED_USERS.managerManama);
     expect((await app.inject({ method: "GET", url: "/api/kpis", headers: bearer(token) })).statusCode).toBe(200);
-    await repo.users.update(SEED_USERS.staffChicago.id, { isActive: false });
+    await repo.users.update(SEED_USERS.managerManama.id, { isActive: false });
     const r = await app.inject({ method: "GET", url: "/api/kpis", headers: bearer(token) });
     expect(r.statusCode).toBe(401);
     expect(json(r.payload)).toEqual({ error: "Invalid or inactive user" });
@@ -401,8 +401,8 @@ describe("route matrix: /api/users writes", () => {
     ctx = await setupApp();
     call = caller(ctx.app);
     admin = tokenFor(ctx.app, SEED_USERS.admin);
-    manager = tokenFor(ctx.app, SEED_USERS.managerMidwest);
-    staff = tokenFor(ctx.app, SEED_USERS.staffChicago);
+    manager = tokenFor(ctx.app, SEED_USERS.managerManama);
+    staff = tokenFor(ctx.app, SEED_USERS.staffManama);
   });
   afterAll(async () => ctx.app.close());
 
@@ -446,7 +446,7 @@ describe("route matrix: /api/users writes", () => {
   });
 
   it.each([
-    [{ ...newUser, email: "not-an-email" }, "Invalid email"],
+    [{ ...newUser, email: "not-an-email" }, "Invalid email address"],
     [{ ...newUser, email: "a2@stockflow.dev", password: "123" }, "Password must be at least 6 characters"],
     [{ ...newUser, email: "a3@stockflow.dev", role: "owner" }, undefined],
     [{ ...newUser, email: "a4@stockflow.dev", name: "" }, undefined],
@@ -494,7 +494,7 @@ describe("route matrix: /api/users writes", () => {
   });
 
   it("POST reset-password: 400 short, 404 unknown, 403 admin target, 200 swaps the password", async () => {
-    const target = SEED_USERS.staffChicago;
+    const target = SEED_USERS.staffManama;
     expect((await call("POST", `/api/users/${target.id}/reset-password`, admin, { password: "1" })).status).toBe(400);
     expect((await call("POST", "/api/users/usr_nope/reset-password", admin, { password: "Secret@123" })).status).toBe(404);
     expect(
@@ -520,10 +520,10 @@ describe("route matrix: /api/users writes", () => {
   it("DELETE: 404 unknown, 403 admin target, 200 soft-deactivates (user is kept)", async () => {
     expect((await call("DELETE", "/api/users/usr_nope", admin)).status).toBe(404);
     expect((await call("DELETE", `/api/users/${SEED_USERS.admin.id}`, admin)).status).toBe(403);
-    const r = await call("DELETE", `/api/users/${SEED_USERS.staffChicago.id}`, admin);
+    const r = await call("DELETE", `/api/users/${SEED_USERS.staffManama.id}`, admin);
     expect(r.status).toBe(200);
     const list = (await call("GET", "/api/users", admin)).body.users as User[];
-    expect(list.find((u) => u.id === SEED_USERS.staffChicago.id)?.isActive).toBe(false);
+    expect(list.find((u) => u.id === SEED_USERS.staffManama.id)?.isActive).toBe(false);
   });
 });
 
@@ -543,10 +543,10 @@ describe("route matrix: approve / reject / audit", () => {
     const expected = verb === "approve" ? "APPROVED" : "REJECTED";
 
     expect((await call("POST", url(inScope!.id))).status).toBe(401);
-    const staff = await call("POST", url(inScope!.id), tokenFor(app, SEED_USERS.staffChicago));
+    const staff = await call("POST", url(inScope!.id), tokenFor(app, SEED_USERS.staffManama));
     expect(staff.status).toBe(403);
 
-    const manager = tokenFor(app, SEED_USERS.managerMidwest);
+    const manager = tokenFor(app, SEED_USERS.managerManama);
     const out = await call("POST", url(outOfScope!.id), manager);
     expect(out.status).toBe(403);
     expect(out.body).toEqual({ error: "Cannot decide action outside your assigned branches" });
@@ -582,14 +582,14 @@ describe("route matrix: approve / reject / audit", () => {
     }
 
     expect((await call("GET", "/api/audit")).status).toBe(401);
-    expect((await call("GET", "/api/audit", tokenFor(app, SEED_USERS.staffChicago))).status).toBe(403);
+    expect((await call("GET", "/api/audit", tokenFor(app, SEED_USERS.staffManama))).status).toBe(403);
 
     const all = (await call("GET", "/api/audit", admin)).body as unknown as AuditList;
     expect(all.entries.map((e) => e.recommendationId)).toEqual([...ids].reverse());
     expect(all.entries[0]?.actedBy).toEqual({ userId: SEED_USERS.admin.id, name: "System Admin", role: "admin" });
 
-    const midwest = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerMidwest))).body as unknown as AuditList;
-    expect(midwest.entries.map((e) => e.branchId)).toEqual(["BR-001"]);
+    const manama = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerManama))).body as unknown as AuditList;
+    expect(manama.entries.map((e) => e.branchId)).toEqual(["BR-001"]);
     const west = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerWest))).body as unknown as AuditList;
     expect(west.entries.map((e) => e.branchId)).toEqual(["BR-005"]);
     await app.close();
@@ -622,7 +622,7 @@ describe("route matrix: approve / reject / audit", () => {
       sku: "SKU-00001",
       productName: "Sample",
       branchId: "BR-005",
-      branchName: "Santa Monica",
+      branchName: "Muharraq - Hidd",
       donorBranchId: "BR-001",
       netBenefit: 120,
       reasonCodes: ["DONOR_SURPLUS"],

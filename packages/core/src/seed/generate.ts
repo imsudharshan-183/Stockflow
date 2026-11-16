@@ -1,7 +1,10 @@
 import type { Product } from "../schemas/index.js";
-import { round2 } from "../round.js";
+import { round3 } from "../round.js";
 import {
-  BRANCHES,
+  BAHRAIN_BRANCHES,
+  BHD_PRICE_TIERS,
+  CATEGORIES,
+  CATEGORY_PRICE_TIER,
   DAY_COUNT,
   END_DATE,
   PRODUCT_COUNT,
@@ -38,7 +41,10 @@ export function dateRangeEnding(endIso: string, days: number): string[] {
 export function generateDataset(seed = SEED): Dataset {
   const rng = mulberry32(seed);
   const dates = dateRangeEnding(END_DATE, DAY_COUNT);
-  const branches = BRANCHES.map((branch) => ({ ...branch }));
+  const branches = BAHRAIN_BRANCHES.map((branch) => ({
+    ...branch,
+    ...(branch.coordinates ? { coordinates: [...branch.coordinates] as [number, number] } : {}),
+  }));
   const products = buildProducts();
 
   const sales: number[][][] = [];
@@ -92,12 +98,21 @@ function buildProducts(): Product[] {
   const seen = new Set<string>();
   for (let index = 0; index < PRODUCT_COUNT; index++) {
     const category = categoryFor(index);
-    const priceJitter = 0.75 + (index % 11) * 0.05;
-    const price = round2(Math.min(150, Math.max(2, category.basePrice * priceJitter)));
+    const tier = CATEGORY_PRICE_TIER[category.name];
+    const tierRange = BHD_PRICE_TIERS[tier];
+    const slot = Math.floor(index / CATEGORIES.length);
+    const pointIndex = (slot * 3 + (index % CATEGORIES.length)) % tierRange.pricePoints.length;
+    const rawPrice = tierRange.pricePoints[pointIndex] ?? category.basePrice;
+    const price = round3(Math.min(tierRange.max, Math.max(tierRange.min, rawPrice)));
     const costShare = 0.55 + (index % 5) * 0.05;
-    let cost = round2(price * costShare);
-    if (cost >= price) cost = round2(price * 0.55);
-    if (cost <= 0) cost = 0.01;
+    let cost =
+      costShare === 0.55
+        ? Math.ceil((price * 0.55 - 1e-9) * 1000) / 1000
+        : costShare === 0.75
+          ? Math.floor((price * 0.75 + 1e-9) * 1000) / 1000
+          : round3(price * costShare);
+    if (cost >= price) cost = round3(price * 0.55);
+    if (cost <= 0) cost = 0.005;
     const leadJitter = (index % 3) - 1;
     const leadTimeDays = Math.min(21, Math.max(1, category.leadTimeDays + leadJitter));
     const name = productName(index);

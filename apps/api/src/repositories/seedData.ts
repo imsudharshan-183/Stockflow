@@ -1,10 +1,27 @@
+import { BAHRAIN_BRANCHES } from "@stockflow/core";
 import bcryptjs from "bcryptjs";
 import type { UserRecord } from "./userTypes.js";
 
+const passwordHashCache = new Map<string, string>();
+
+function cachedHash(password: string): string {
+  const existing = passwordHashCache.get(password);
+  if (existing) return existing;
+  const computed = bcryptjs.hashSync(password, 10);
+  passwordHashCache.set(password, computed);
+  return computed;
+}
+
+function branchId(id: string): string {
+  const found = BAHRAIN_BRANCHES.find((b) => b.id === id);
+  if (!found) throw new Error(`Unknown branch ID ${id} in BAHRAIN_BRANCHES`);
+  return found.id;
+}
+
 export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[] {
-  const adminHash = bcryptjs.hashSync(adminPassword, 10);
-  const managerHash = bcryptjs.hashSync("Manager@12345", 10);
-  const staffHash = bcryptjs.hashSync("Staff@12345", 10);
+  const adminHash = cachedHash(adminPassword);
+  const managerHash = cachedHash("Manager@12345");
+  const staffHash = cachedHash("Staff@12345");
   const now = "2026-01-01T00:00:00.000Z";
 
   return [
@@ -21,10 +38,10 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
     {
       id: "usr_mgr_01",
       name: "Marcus Vance",
-      email: "manager.midwest@stockflow.dev",
+      email: "manager.manama@stockflow.dev",
       passwordHash: managerHash,
       role: "manager",
-      branchIds: ["BR-001", "BR-002"],
+      branchIds: [branchId("BR-001"), branchId("BR-002")],
       isActive: true,
       createdAt: now,
     },
@@ -34,17 +51,22 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
       email: "manager.west@stockflow.dev",
       passwordHash: managerHash,
       role: "manager",
-      branchIds: ["BR-005", "BR-006", "BR-008", "BR-011"],
+      branchIds: [
+        branchId("BR-005"),
+        branchId("BR-006"),
+        branchId("BR-008"),
+        branchId("BR-011"),
+      ],
       isActive: true,
       createdAt: now,
     },
     {
       id: "usr_stf_01",
       name: "Alex Chen",
-      email: "staff.chicago@stockflow.dev",
+      email: "staff.manama@stockflow.dev",
       passwordHash: staffHash,
       role: "staff",
-      branchIds: ["BR-001"],
+      branchIds: [branchId("BR-001")],
       isActive: true,
       createdAt: now,
     },
@@ -54,7 +76,7 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
       email: "staff.lincoln@stockflow.dev",
       passwordHash: staffHash,
       role: "staff",
-      branchIds: ["BR-002"],
+      branchIds: [branchId("BR-002")],
       isActive: true,
       createdAt: now,
     },
@@ -64,7 +86,7 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
       email: "staff.santamonica@stockflow.dev",
       passwordHash: staffHash,
       role: "staff",
-      branchIds: ["BR-005"],
+      branchIds: [branchId("BR-005")],
       isActive: true,
       createdAt: now,
     },

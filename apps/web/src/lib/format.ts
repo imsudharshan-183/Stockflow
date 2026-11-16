@@ -1,24 +1,8 @@
 import type { Action, ReasonCode, RecommendationStatus } from "@stockflow/core";
 
-const moneyCompact = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-
-const moneyWhole = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 0,
-  maximumFractionDigits: 0,
-});
-
-const moneyCents = new Intl.NumberFormat("en-US", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
+const moneyBhd = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 3,
+  maximumFractionDigits: 3,
 });
 
 const pct = new Intl.NumberFormat("en-US", {
@@ -53,26 +37,23 @@ const stamp = new Intl.DateTimeFormat("en-US", {
 });
 
 /**
- * Compact currency for headers and KPI cards ($37.3K, $1.2M).
- * Values under $1,000 use whole dollars ($318); non-zero values under $1 show cents ($0.45).
+ * Bahraini Dinar (BHD) currency formatter with 3 decimal places (fils) and a BD label
+ * (e.g. BD 3.250, BD 1,240.500).
  */
 export function formatMoney(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0";
-  const abs = Math.abs(value);
-  if (abs < 1) return moneyCents.format(value);
-  if (abs < 1000) return moneyWhole.format(Math.round(value));
-  return moneyCompact.format(value);
+  if (!Number.isFinite(value) || value === 0) return "BD 0.000";
+  const sign = value < 0 ? "-" : "";
+  return `${sign}BD ${moneyBhd.format(Math.abs(value))}`;
 }
 
 /**
- * Whole dollars with separators for tables and detail views ($318, $1,240).
- * No cents anywhere unless a non-zero value is under $1.
+ * Bahraini Dinar (BHD) currency formatter with 3 decimal places (fils) and a BD label
+ * for tables and detail views (e.g. BD 0.950, BD 3.250, BD 1,240.500).
  */
 export function formatMoneyFull(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "$0";
-  const abs = Math.abs(value);
-  if (abs < 1) return moneyCents.format(value);
-  return moneyWhole.format(Math.round(value));
+  if (!Number.isFinite(value) || value === 0) return "BD 0.000";
+  const sign = value < 0 ? "-" : "";
+  return `${sign}BD ${moneyBhd.format(Math.abs(value))}`;
 }
 
 export function formatPct(value: number): string {

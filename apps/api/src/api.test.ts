@@ -92,11 +92,11 @@ describe("API Auth and Scoping", () => {
 
   it("rejects inactive users", async () => {
     const { app, repo } = await setupTestApp(true);
-    const user = await repo.users.findByEmail("staff.chicago@stockflow.dev");
+    const user = await repo.users.findByEmail("staff.manama@stockflow.dev");
     expect(user).toBeDefined();
     await repo.users.update(user!.id, { isActive: false });
 
-    const loginRes = await loginUser(app, "staff.chicago@stockflow.dev", "Staff@12345");
+    const loginRes = await loginUser(app, "staff.manama@stockflow.dev", "Staff@12345");
     expect(loginRes.status).toBe(403);
     expect(loginRes.body.error).toBe("Account is deactivated");
   });
@@ -104,8 +104,8 @@ describe("API Auth and Scoping", () => {
   it("enforces route-level role permissions", async () => {
     const { app } = await setupTestApp(true);
     const admin = await loginUser(app, "admin@stockflow.dev", "Admin@12345");
-    const manager = await loginUser(app, "manager.midwest@stockflow.dev", "Manager@12345");
-    const staff = await loginUser(app, "staff.chicago@stockflow.dev", "Staff@12345");
+    const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345");
+    const staff = await loginUser(app, "staff.manama@stockflow.dev", "Staff@12345");
 
     // /api/users: admin only
     const adminUsers = await app.inject({
@@ -152,12 +152,10 @@ describe("API Auth and Scoping", () => {
     expect(staffAudit.statusCode).toBe(403);
   });
 
-  // Transfer (donor OR receiver) scoping lives in transferScope.test.ts: the seeded catalog
-  // produces no TRANSFER actions, so a loop over seeded recommendations never exercised it.
-  it("applies branch scoping to reorders and markdowns for a manager", async () => {
+  it("applies branch scoping to transfers, reorders, and markdowns for a manager", async () => {
     const { app } = await setupTestApp(true);
-    // Marcus Vance manages Midwest: BR-001, BR-002
-    const manager = await loginUser(app, "manager.midwest@stockflow.dev", "Manager@12345");
+    // Marcus Vance manages Manama: BR-001, BR-002
+    const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345");
 
     const recsRes = await app.inject({
       method: "GET",
@@ -165,21 +163,30 @@ describe("API Auth and Scoping", () => {
       headers: { authorization: `Bearer ${manager.body.token}` },
     });
     expect(recsRes.statusCode).toBe(200);
-    const recs: Array<{ action: string; branchId: string }> = JSON.parse(recsRes.payload).recommendations;
+    const recs: Array<{ action: string; branchId: string; donorBranchId: string | null }> = JSON.parse(
+      recsRes.payload,
+    ).recommendations;
 
     expect(recs.length).toBeGreaterThan(0);
-    expect(new Set(recs.map((r) => r.action))).toEqual(new Set(["REORDER", "MARKDOWN"]));
+    expect(new Set(recs.map((r) => r.action))).toEqual(new Set(["TRANSFER", "REORDER", "MARKDOWN"]));
     for (const rec of recs) {
-      expect(["BR-001", "BR-002"]).toContain(rec.branchId);
+      if (rec.action === "TRANSFER") {
+        expect(
+          ["BR-001", "BR-002"].includes(rec.branchId) ||
+            (rec.donorBranchId !== null && ["BR-001", "BR-002"].includes(rec.donorBranchId)),
+        ).toBe(true);
+      } else {
+        expect(["BR-001", "BR-002"]).toContain(rec.branchId);
+      }
     }
   });
 
   it("prevents manager from approving out-of-scope actions and forbids staff entirely", async () => {
     const { app, service } = await setupTestApp(true);
-    const manager = await loginUser(app, "manager.midwest@stockflow.dev", "Manager@12345"); // BR-001, BR-002
-    const staff = await loginUser(app, "staff.chicago@stockflow.dev", "Staff@12345"); // BR-001
+    const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345"); // BR-001, BR-002
+    const staff = await loginUser(app, "staff.manama@stockflow.dev", "Staff@12345"); // BR-001
 
-    // Find an action for BR-005 (West branch, outside Midwest)
+    // Find an action for BR-005 (Hidd branch, outside Manama cluster)
     const allRecs = service.list({});
     const westRec = allRecs.recommendations.find(
       (r) => r.branchId === "BR-005" && r.donorBranchId !== "BR-001" && r.donorBranchId !== "BR-002",
@@ -209,15 +216,15 @@ describe("API Auth and Scoping", () => {
 
   it("records actedBy {userId, name, role} in audit trail upon approve", async () => {
     const { app, service } = await setupTestApp(true);
-    const manager = await loginUser(app, "manager.midwest@stockflow.dev", "Manager@12345");
+    const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345");
 
     const allRecs = service.list({});
-    const midwestRec = allRecs.recommendations.find((r) => r.branchId === "BR-001");
-    expect(midwestRec).toBeDefined();
+    const manamaRec = allRecs.recommendations.find((r) => r.branchId === "BR-001");
+    expect(manamaRec).toBeDefined();
 
     const approveRes = await app.inject({
       method: "POST",
-      url: `/api/recommendations/${midwestRec!.id}/approve`,
+      url: `/api/recommendations/${manamaRec!.id}/approve`,
       headers: { authorization: `Bearer ${manager.body.token}` },
     });
     expect(approveRes.statusCode).toBe(200);
@@ -229,9 +236,9 @@ describe("API Auth and Scoping", () => {
     });
     expect(auditRes.statusCode).toBe(200);
     const auditEntries: AuditEntry[] = JSON.parse(auditRes.payload).entries;
-    const midwestEntry = auditEntries.find((e) => e.recommendationId === midwestRec!.id);
-    expect(midwestEntry).toBeDefined();
-    expect(midwestEntry!.actedBy).toEqual({
+    const manamaEntry = auditEntries.find((e) => e.recommendationId === manamaRec!.id);
+    expect(manamaEntry).toBeDefined();
+    expect(manamaEntry!.actedBy).toEqual({
       userId: manager.body.user.id,
       name: manager.body.user.name,
       role: "manager",

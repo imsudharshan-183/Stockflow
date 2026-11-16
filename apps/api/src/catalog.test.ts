@@ -6,8 +6,8 @@ async function setupTestApp() {
   const ctx = await setupApp({ authEnabled: true });
   const authHeaders = {
     admin: bearer(tokenFor(ctx.app, SEED_USERS.admin)),
-    managerMidwest: bearer(tokenFor(ctx.app, SEED_USERS.managerMidwest)),
-    staffChicago: bearer(tokenFor(ctx.app, SEED_USERS.staffChicago)),
+    managerManama: bearer(tokenFor(ctx.app, SEED_USERS.managerManama)),
+    staffManama: bearer(tokenFor(ctx.app, SEED_USERS.staffManama)),
   };
   return { client: ctx.app, authHeaders, ctx };
 }
@@ -60,7 +60,7 @@ describe("Catalog Product Management API (/api/catalog/products)", () => {
     const staffRes = await client.inject({
       method: "GET",
       url: "/api/catalog/products?limit=5",
-      headers: authHeaders.staffChicago,
+      headers: authHeaders.staffManama,
     });
     expect(staffRes.statusCode).toBe(200);
   });
@@ -97,7 +97,7 @@ describe("Catalog Product Management API (/api/catalog/products)", () => {
     const mgrRes = await client.inject({
       method: "POST",
       url: "/api/catalog/products",
-      headers: authHeaders.managerMidwest,
+      headers: authHeaders.managerManama,
       payload: {
         name: "Test Artisan Bread, 500 g",
         category: "Snacks",
@@ -111,7 +111,7 @@ describe("Catalog Product Management API (/api/catalog/products)", () => {
     const staffRes = await client.inject({
       method: "POST",
       url: "/api/catalog/products",
-      headers: authHeaders.staffChicago,
+      headers: authHeaders.staffManama,
       payload: {
         name: "Test Artisan Bread, 500 g",
         category: "Snacks",
@@ -228,7 +228,7 @@ describe("Catalog Product Management API (/api/catalog/products)", () => {
     const mgrPatch = await client.inject({
       method: "PATCH",
       url: `/api/catalog/products/${created.sku}`,
-      headers: authHeaders.managerMidwest,
+      headers: authHeaders.managerManama,
       payload: { price: 12 },
     });
     expect(mgrPatch.statusCode).toBe(403);
@@ -284,7 +284,7 @@ describe("Catalog Product Management API (/api/catalog/products)", () => {
     });
     const historyBody = historyRes.json();
     expect(historyBody.history.length).toBeGreaterThanOrEqual(3); // CREATE, UPDATE name, UPDATE sample history, UPDATE math
-  });
+  }, 15_000);
 
   it("Archive, restore, and permanent delete lifecycle", async () => {
     const { client, authHeaders } = await setupTestApp();

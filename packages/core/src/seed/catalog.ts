@@ -1,12 +1,84 @@
 import type { Branch } from "../schemas/index.js";
 
+export const CATALOG_CATEGORIES = [
+  "Beverages",
+  "Snacks",
+  "Dairy",
+  "Household",
+  "Personal Care",
+  "Stationery",
+  "Toys",
+  "Pet Supplies",
+  "Kitchenware",
+  "Home Decor",
+  "Health & Wellness",
+  "Accessories",
+] as const;
+
+export type CatalogCategory = (typeof CATALOG_CATEGORIES)[number];
+
+export type PriceTier = "LOW" | "MID" | "HIGH";
+
+export interface PriceTierRange {
+  readonly min: number;
+  readonly max: number;
+  /** Market-style non-round BHD price points (3 decimal places / fils) within [min, max]. */
+  readonly pricePoints: readonly number[];
+}
+
+export const BHD_PRICE_TIERS: Record<PriceTier, PriceTierRange> = {
+  LOW: {
+    min: 0.5,
+    max: 4.0,
+    pricePoints: [
+      0.55, 0.65, 0.75, 0.85, 0.95, 1.15, 1.25, 1.45,
+      1.65, 1.85, 2.15, 2.35, 2.65, 2.95, 3.25, 3.75,
+    ],
+  },
+  MID: {
+    min: 2.0,
+    max: 15.0,
+    pricePoints: [
+      2.25, 2.75, 3.25, 3.85, 4.45, 5.25, 5.9, 6.45,
+      7.25, 7.9, 8.75, 9.45, 10.5, 11.75, 13.25, 14.5,
+    ],
+  },
+  HIGH: {
+    min: 15.0,
+    max: 120.0,
+    pricePoints: [
+      15.9, 18.5, 21.75, 24.5, 28.9, 32.5, 37.9, 42.5,
+      48.9, 54.5, 62.75, 71.5, 82.9, 94.5, 106.75, 118.5,
+    ],
+  },
+};
+
+/**
+ * Strictly typed mapping from the 12 catalog categories to their native BHD price tier.
+ * Any missing or misspelled category key fails typecheck at compile time.
+ */
+export const CATEGORY_PRICE_TIER: Record<CatalogCategory, PriceTier> = {
+  Beverages: "LOW",
+  Snacks: "LOW",
+  Dairy: "LOW",
+  "Personal Care": "LOW",
+  Household: "MID",
+  Stationery: "MID",
+  "Health & Wellness": "MID",
+  "Pet Supplies": "MID",
+  Toys: "HIGH",
+  Kitchenware: "HIGH",
+  "Home Decor": "HIGH",
+  Accessories: "HIGH",
+};
+
 export interface CategoryItemSpec {
   name: string;
   variants: readonly [string, string, string, string, string, string];
 }
 
 export interface CategorySpec {
-  name: string;
+  name: CatalogCategory;
   basePrice: number;
   leadTimeDays: number;
   meanDemand: number;
@@ -16,7 +88,7 @@ export interface CategorySpec {
 }
 
 interface RawCategorySpec {
-  name: string;
+  name: CatalogCategory;
   basePrice: number;
   leadTimeDays: number;
   meanDemand: number;
@@ -27,7 +99,7 @@ interface RawCategorySpec {
 const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   {
     name: "Beverages",
-    basePrice: 4,
+    basePrice: 1.45,
     leadTimeDays: 4,
     meanDemand: 5,
     brands: ["Aurelia", "Clearwater", "Sunridge", "Northfield"],
@@ -44,7 +116,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Snacks",
-    basePrice: 3.5,
+    basePrice: 1.25,
     leadTimeDays: 4,
     meanDemand: 4.2,
     brands: ["Harvest Mill", "Northfield", "Sunridge", "Meadowbrook"],
@@ -61,7 +133,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Dairy",
-    basePrice: 5,
+    basePrice: 1.85,
     leadTimeDays: 2,
     meanDemand: 3.8,
     brands: ["Meadowbrook", "Cloverdale", "Northfield", "Aldervale"],
@@ -78,7 +150,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Household",
-    basePrice: 8,
+    basePrice: 5.25,
     leadTimeDays: 6,
     meanDemand: 2,
     brands: ["Northfield", "Clearwater", "Harbor & Pine", "Crestwood"],
@@ -95,7 +167,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Personal Care",
-    basePrice: 7,
+    basePrice: 2.65,
     leadTimeDays: 7,
     meanDemand: 1.6,
     brands: ["Aurelia", "Solstice", "Veritas", "Clearwater"],
@@ -112,7 +184,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Stationery",
-    basePrice: 4.5,
+    basePrice: 3.85,
     leadTimeDays: 8,
     meanDemand: 1.2,
     brands: ["Veritas", "Kestrel", "Alder & Co", "Crestwood"],
@@ -129,7 +201,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Toys",
-    basePrice: 18,
+    basePrice: 24.5,
     leadTimeDays: 10,
     meanDemand: 0.7,
     brands: ["Bluepeak", "Northfield", "Crestwood", "Sunridge"],
@@ -146,7 +218,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Pet Supplies",
-    basePrice: 14,
+    basePrice: 9.45,
     leadTimeDays: 9,
     meanDemand: 0.8,
     brands: ["Timberline", "Meadowbrook", "Bluepeak", "Northfield"],
@@ -163,7 +235,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Kitchenware",
-    basePrice: 16,
+    basePrice: 32.5,
     leadTimeDays: 11,
     meanDemand: 0.55,
     brands: ["Crestwood", "Alder & Co", "Harbor & Pine", "Veritas"],
@@ -180,7 +252,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Home Decor",
-    basePrice: 22,
+    basePrice: 48.9,
     leadTimeDays: 12,
     meanDemand: 0.4,
     brands: ["Harbor & Pine", "Solstice", "Aurelia", "Alder & Co"],
@@ -197,7 +269,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Health & Wellness",
-    basePrice: 12,
+    basePrice: 8.75,
     leadTimeDays: 8,
     meanDemand: 0.9,
     brands: ["Veritas", "Clearwater", "Solstice", "Aurelia"],
@@ -214,7 +286,7 @@ const RAW_CATEGORIES: readonly RawCategorySpec[] = [
   },
   {
     name: "Accessories",
-    basePrice: 15,
+    basePrice: 28.9,
     leadTimeDays: 9,
     meanDemand: 0.6,
     brands: ["Harbor & Pine", "Kestrel", "Alder & Co", "Crestwood"],
@@ -236,23 +308,45 @@ export const CATEGORIES: readonly CategorySpec[] = RAW_CATEGORIES.map((category)
   nouns: category.items.map((item) => item.name),
 }));
 
-export const BRANCHES: readonly Branch[] = [
-  { id: "BR-001", name: "Chicago - Loop", city: "Chicago", region: "Midwest" },
-  { id: "BR-002", name: "Chicago - Lincoln Park", city: "Chicago", region: "Midwest" },
-  { id: "BR-003", name: "New York - Midtown", city: "New York", region: "Northeast" },
-  { id: "BR-004", name: "New York - Brooklyn", city: "New York", region: "Northeast" },
-  { id: "BR-005", name: "Los Angeles - Santa Monica", city: "Los Angeles", region: "West" },
-  { id: "BR-006", name: "Los Angeles - Silver Lake", city: "Los Angeles", region: "West" },
-  { id: "BR-007", name: "Houston - Midtown", city: "Houston", region: "South" },
-  { id: "BR-008", name: "Phoenix - Arcadia", city: "Phoenix", region: "West" },
-  { id: "BR-009", name: "Philadelphia - Rittenhouse", city: "Philadelphia", region: "Northeast" },
-  { id: "BR-010", name: "San Antonio - Alamo Heights", city: "San Antonio", region: "South" },
-  { id: "BR-011", name: "San Diego - La Jolla", city: "San Diego", region: "West" },
-  { id: "BR-012", name: "Dallas - Uptown", city: "Dallas", region: "South" },
-  { id: "BR-013", name: "Austin - East Side", city: "Austin", region: "South" },
-  { id: "BR-014", name: "Seattle - Capitol Hill", city: "Seattle", region: "West" },
-  { id: "BR-015", name: "Denver - LoDo", city: "Denver", region: "West" },
+/**
+ * Single source of truth for the 15-branch Bahrain retail network:
+ * 3 in Manama (CBD, Juffair, Seef), 2 in Muharraq/Hidd, and 10 across
+ * Riffa, Isa Town, Sitra, Tubli, A'ali, Budaiya, Zallaq, Jasra, Hamad Town, and Saar.
+ */
+export const BAHRAIN_BRANCHES: readonly Branch[] = [
+  { id: "BR-001", name: "Manama - CBD", city: "Manama", region: "Capital", coordinates: [26.2285, 50.586] },
+  { id: "BR-002", name: "Manama - Juffair", city: "Manama", region: "Capital", coordinates: [26.2111, 50.6011] },
+  { id: "BR-003", name: "Manama - Seef", city: "Manama", region: "Capital", coordinates: [26.2397, 50.5369] },
+  { id: "BR-004", name: "Muharraq - Central", city: "Muharraq", region: "Muharraq", coordinates: [26.2572, 50.6119] },
+  { id: "BR-005", name: "Muharraq - Hidd", city: "Hidd", region: "Muharraq", coordinates: [26.244, 50.655] },
+  { id: "BR-006", name: "Riffa", city: "Riffa", region: "Southern", coordinates: [26.1226, 50.555] },
+  { id: "BR-007", name: "Isa Town", city: "Isa Town", region: "Southern", coordinates: [26.1656, 50.5524] },
+  { id: "BR-008", name: "Sitra", city: "Sitra", region: "Capital", coordinates: [26.1547, 50.6206] },
+  { id: "BR-009", name: "Tubli", city: "Tubli", region: "Capital", coordinates: [26.1869, 50.5494] },
+  { id: "BR-010", name: "A'ali", city: "A'ali", region: "Northern", coordinates: [26.158, 50.521] },
+  { id: "BR-011", name: "Budaiya", city: "Budaiya", region: "Northern", coordinates: [26.2128, 50.4472] },
+  { id: "BR-012", name: "Zallaq", city: "Zallaq", region: "Southern", coordinates: [26.0465, 50.4833] },
+  { id: "BR-013", name: "Jasra", city: "Jasra", region: "Northern", coordinates: [26.1616, 50.452] },
+  { id: "BR-014", name: "Hamad Town", city: "Hamad Town", region: "Northern", coordinates: [26.1153, 50.5069] },
+  { id: "BR-015", name: "Saar", city: "Saar", region: "Northern", coordinates: [26.195, 50.48] },
 ];
+
+export const BRANCHES: readonly Branch[] = BAHRAIN_BRANCHES;
+
+export function haversineDistanceKm(
+  a: readonly [number, number],
+  b: readonly [number, number],
+): number {
+  const earthRadiusKm = 6371;
+  const dLat = ((b[0] - a[0]) * Math.PI) / 180;
+  const dLng = ((b[1] - a[1]) * Math.PI) / 180;
+  const lat1 = (a[0] * Math.PI) / 180;
+  const lat2 = (b[0] * Math.PI) / 180;
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h = sinDLat * sinDLat + Math.cos(lat1) * Math.cos(lat2) * sinDLng * sinDLng;
+  return 2 * earthRadiusKm * Math.asin(Math.min(1, Math.sqrt(h)));
+}
 
 /** Under-replenished fast movers. */
 export const CHRONIC_BRANCH_IDS = ["BR-004", "BR-005", "BR-009"] as const;

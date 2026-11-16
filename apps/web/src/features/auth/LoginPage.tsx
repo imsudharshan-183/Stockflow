@@ -16,20 +16,23 @@ import { useAuth } from "./AuthContext";
 const DEMO_ACCOUNTS = [
   {
     role: "admin" as const,
-    label: "Admin (All 15 branches)",
+    label: "Admin",
+    tagline: "Admin — network-wide (all 15 branches, full executive & financial BD KPIs)",
     email: "admin@stockflow.dev",
     pass: "Admin@12345",
   },
   {
     role: "manager" as const,
-    label: "Manager (Midwest — 3 branches)",
-    email: "manager.midwest@stockflow.dev",
+    label: "Manager",
+    tagline: "Manager — Manama cluster (BR-001 & BR-002: Manama - CBD & Juffair, scoped BD + pending backlog)",
+    email: "manager.manama@stockflow.dev",
     pass: "Manager@12345",
   },
   {
     role: "staff" as const,
-    label: "Staff (Chicago Loop — read-only)",
-    email: "staff.chicago@stockflow.dev",
+    label: "Staff",
+    tagline: "Staff — Manama - CBD store (BR-001 shelf stock & cover days, no financial BD)",
+    email: "staff.manama@stockflow.dev",
     pass: "Staff@12345",
   },
 ];
@@ -157,10 +160,13 @@ export function LoginPage() {
                         <Badge tone={acct.role} className="px-2 py-0 text-[10px]">
                           {acct.role}
                         </Badge>
-                        <span className="truncate font-medium text-foreground">
+                        <span className="truncate font-semibold text-foreground">
                           {acct.label}
                         </span>
                       </div>
+                      <p className="mt-0.5 truncate text-[11px] font-medium text-foreground/80">
+                        {acct.tagline}
+                      </p>
                       <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                         {acct.email} · {acct.pass}
                       </p>
