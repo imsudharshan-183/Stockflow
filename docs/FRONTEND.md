@@ -24,10 +24,10 @@
 | Route | Component | Access | Purpose |
 |---|---|---|---|
 | `/login` | `LoginPage` | Public | Role-assigned sign-in + collapsible demo account selector (`VITE_SHOW_DEMO_ACCOUNTS`) |
-| `/` | `OverviewPage` | `admin`, `manager`, `staff` | Differentiated view: `AdminOverview` (network `BD` KPIs, 15-branch Bahrain heatmap), `ManagerOverview` (cluster operational & financial KPIs plus pending `stock_alerts` approval table), `StaffProductStats` (non-financial store inventory & status badges for `staff`) |
+| `/` | `OverviewPage` | `admin`, `manager`, `staff` | Differentiated view: `AdminOverview` (network `BD` KPIs, 15-branch Bahrain heatmap), `ManagerOverview` (cluster operational & financial KPIs plus pending `stock_alerts` approval table with category pills), `StaffProductStats` (non-financial store inventory, categorized flagging on non-`NEW` rows, and `Recent Branch Stock Alerts` history for `staff`) |
 | `/queue` | `QueuePage` | `admin`, `manager` | Ranked action queue, action tabs, filters, freight breakdown drawer, batch bar; blocked for `staff` |
 | `/branches/:id` | `BranchPage` | `admin`, `manager` | Branch KPIs, sales & stock chart, projected `In transit` / `Reserved` stock badges, actions touching branch; blocked for `staff` (redirects to `/`) |
-| `/products` | `ProductsPage` | `admin`, `manager`, `staff` (`Store Inventory`) | Role-branched: `admin`/`manager` see network catalog & filters (Add/Edit/Archive/CSV controls admin-only); `staff` render `StaffProductStats` (non-financial store inventory with `Flag critical stock` on `AT_RISK` items) |
+| `/products` | `ProductsPage` | `admin`, `manager`, `staff` (`Store Inventory`) | Role-branched: `admin`/`manager` see network catalog & filters (Add/Edit/Archive/CSV controls admin-only); `staff` render `StaffProductStats` (non-financial store inventory, `Flag stock` on non-`NEW` rows, and alert decision history) |
 | `/products/:sku` | `ProductPage` | `admin`, `manager`, `staff` (scoped) | SKU policy breakdown, sales/stock/cover charts, branch position table with `StockDeltaBadges` (`In transit` / `Reserved`) |
 | `/data` | `DataEntryPage` | `admin`, `manager` | Daily sales entry form, recent entries, and bulk CSV import; blocked for `staff` |
 | `/audit` | `AuditPage` | `admin`, `manager` | Searchable decision audit log with reason-code badges; blocked for `staff` |

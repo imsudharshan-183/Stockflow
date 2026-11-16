@@ -202,6 +202,12 @@ const stockAlertSchema = new Schema(
     branchName: { type: String, required: false },
     sku: { type: String, required: true, index: true },
     productName: { type: String, required: false },
+    category: {
+      type: String,
+      required: true,
+      enum: ["CRITICAL_LOW", "DAMAGED_SHRINKAGE", "COUNT_MISMATCH"],
+      default: "CRITICAL_LOW",
+    },
     flaggedBy: { type: actedBySchema, required: true },
     flaggedAt: { type: String, required: true },
     note: { type: String, required: true },

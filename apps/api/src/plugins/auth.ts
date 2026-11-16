@@ -30,6 +30,9 @@ export interface AuthContext {
   requirePermission: (
     action: PermissionAction,
   ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
+  requireAnyPermission: (
+    actions: readonly PermissionAction[],
+  ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
   requireRole: (
     roles: Role[],
   ) => (request: FastifyRequest, reply: FastifyReply) => Promise<void>;
@@ -62,11 +65,15 @@ export function createAuthGuards(env: Env, userRepo: UserRepository): AuthContex
   };
 
   const requirePermission = (action: PermissionAction) => {
+    return requireAnyPermission([action]);
+  };
+
+  const requireAnyPermission = (actions: readonly PermissionAction[]) => {
     return async (request: FastifyRequest, reply: FastifyReply): Promise<void> => {
       await authenticate(request, reply);
       if (reply.sent) return;
 
-      if (!can(request.currentUser.role, action)) {
+      if (!actions.some((action) => can(request.currentUser.role, action))) {
         return reply.code(403).send({ error: "Forbidden: Insufficient permissions" });
       }
     };
@@ -86,6 +93,7 @@ export function createAuthGuards(env: Env, userRepo: UserRepository): AuthContex
   return {
     authenticate,
     requirePermission,
+    requireAnyPermission,
     requireRole,
   };
 }

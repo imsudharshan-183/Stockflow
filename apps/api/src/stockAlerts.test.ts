@@ -67,7 +67,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
       expect(forbidCreate.statusCode).toBe(403);
     }
 
-    // 3. Own-branch staff creates PENDING critical stock alerts in BR-001 and BR-005 -> 201
+    // 3. Own-branch staff creates PENDING stock alerts with default CRITICAL_LOW and explicit categories -> 201
     const createRes = await app.inject({
       method: "POST",
       url: "/api/stock-alerts",
@@ -82,10 +82,39 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     const createdAlert = StockAlertSchema.parse(JSON.parse(createRes.payload));
     expect(createdAlert.branchId).toBe("BR-001");
     expect(createdAlert.sku).toBe("SKU-90002");
+    expect(createdAlert.category).toBe("CRITICAL_LOW");
     expect(createdAlert.status).toBe("PENDING");
     expect(createdAlert.decidedBy).toBeNull();
     expect(createdAlert.decidedAt).toBeNull();
     expect(createdAlert.flaggedBy.role).toBe("staff");
+
+    const damageRes = await app.inject({
+      method: "POST",
+      url: "/api/stock-alerts",
+      headers: staffManamaHeader,
+      payload: {
+        branchId: "BR-001",
+        sku: "SKU-90001",
+        category: "DAMAGED_SHRINKAGE",
+        note: "Two cartons damaged during morning unload",
+      },
+    });
+    expect(damageRes.statusCode).toBe(201);
+    const damagedAlert = StockAlertSchema.parse(JSON.parse(damageRes.payload));
+    expect(damagedAlert.category).toBe("DAMAGED_SHRINKAGE");
+
+    const invalidCatRes = await app.inject({
+      method: "POST",
+      url: "/api/stock-alerts",
+      headers: staffManamaHeader,
+      payload: {
+        branchId: "BR-001",
+        sku: "SKU-90001",
+        category: "INVALID_CATEGORY",
+        note: "Should fail category validation",
+      },
+    });
+    expect(invalidCatRes.statusCode).toBe(400);
 
     const createHiddRes = await app.inject({
       method: "POST",
@@ -94,27 +123,59 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
       payload: {
         branchId: "BR-005",
         sku: "SKU-90001",
-        note: "Critical display gap in Hidd",
+        category: "COUNT_MISMATCH",
+        note: "Physical shelf count 6 units short vs system",
       },
     });
     expect(createHiddRes.statusCode).toBe(201);
     const hiddAlert = StockAlertSchema.parse(JSON.parse(createHiddRes.payload));
+    expect(hiddAlert.category).toBe("COUNT_MISMATCH");
 
-    // 4. GET /api/stock-alerts respects branch scoping for staff & manager vs full list for admin
-    const staffList = StockAlertListSchema.parse(
-      JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: staffManamaHeader })).payload),
-    );
-    expect(staffList.alerts.map((a) => a.id)).toEqual([createdAlert.id]);
+    // 4. GET /api/stock-alerts allows staff & manager (branch-scoped) vs network for admin, and rejects out-of-scope ?branchId=
+    const staffGetRes = await app.inject({ method: "GET", url: "/api/stock-alerts", headers: staffManamaHeader });
+    expect(staffGetRes.statusCode).toBe(200);
+    const staffList = StockAlertListSchema.parse(JSON.parse(staffGetRes.payload));
+    expect(staffList.alerts.map((a) => a.id).sort()).toEqual([createdAlert.id, damagedAlert.id].sort());
+    expect(staffList.alerts.some((a) => a.branchId === "BR-005")).toBe(false);
+
+    const staffOwnBranchQueryRes = await app.inject({
+      method: "GET",
+      url: "/api/stock-alerts?branchId=BR-001",
+      headers: staffManamaHeader,
+    });
+    expect(staffOwnBranchQueryRes.statusCode).toBe(200);
+    expect(StockAlertListSchema.parse(JSON.parse(staffOwnBranchQueryRes.payload)).alerts).toHaveLength(2);
+
+    const staffOutOfScopeQueryRes = await app.inject({
+      method: "GET",
+      url: "/api/stock-alerts?branchId=BR-005",
+      headers: staffManamaHeader,
+    });
+    expect(staffOutOfScopeQueryRes.statusCode).toBe(403);
+
+    const mgrOutOfScopeQueryRes = await app.inject({
+      method: "GET",
+      url: "/api/stock-alerts?branchId=BR-005",
+      headers: managerManamaHeader,
+    });
+    expect(mgrOutOfScopeQueryRes.statusCode).toBe(403);
 
     const mgrList = StockAlertListSchema.parse(
       JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: managerManamaHeader })).payload),
     );
-    expect(mgrList.alerts.map((a) => a.id)).toEqual([createdAlert.id]);
+    expect(mgrList.alerts.map((a) => a.id).sort()).toEqual([createdAlert.id, damagedAlert.id].sort());
 
     const adminList = StockAlertListSchema.parse(
       JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: adminHeader })).payload),
     );
-    expect(adminList.alerts.map((a) => a.id).sort()).toEqual([createdAlert.id, hiddAlert.id].sort());
+    expect(adminList.alerts.map((a) => a.id).sort()).toEqual(
+      [createdAlert.id, damagedAlert.id, hiddAlert.id].sort(),
+    );
+
+    const adminHiddFiltered = StockAlertListSchema.parse(
+      JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts?branchId=BR-005", headers: adminHeader })).payload),
+    );
+    expect(adminHiddFiltered.alerts.map((a) => a.id)).toEqual([hiddAlert.id]);
 
     // 5. Staff cannot approve or reject -> 403
     const staffDecideRes = await app.inject({
@@ -132,7 +193,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     });
     expect(outOfScopeMgrRes.statusCode).toBe(403);
 
-    // 7. In-scope manager approves BR-001 alert -> 200 with attribution
+    // 7. In-scope manager approves BR-001 alert -> 200 with attribution, and staff sees resolution via GET /api/stock-alerts
     const approveRes = await app.inject({
       method: "PATCH",
       url: `/api/stock-alerts/${createdAlert.id}/approve`,
@@ -143,6 +204,14 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     expect(approvedAlert.status).toBe("APPROVED");
     expect(approvedAlert.decidedBy?.role).toBe("manager");
     expect(approvedAlert.decidedAt).toBeTruthy();
+
+    const staffAfterDecisionList = StockAlertListSchema.parse(
+      JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: staffManamaHeader })).payload),
+    );
+    const staffResolvedView = staffAfterDecisionList.alerts.find((a) => a.id === createdAlert.id);
+    expect(staffResolvedView?.status).toBe("APPROVED");
+    expect(staffResolvedView?.category).toBe("CRITICAL_LOW");
+    expect(staffResolvedView?.decidedBy?.name).toBe(approvedAlert.decidedBy?.name);
 
     // 8. Once decided, alert is immutable — repeat approve or reject returns 409 Conflict
     const repeatRejectRes = await app.inject({

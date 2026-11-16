@@ -1,4 +1,10 @@
-import { CreateStockAlertSchema, ErrorBodySchema, StockAlertListSchema, StockAlertSchema } from "@stockflow/core";
+import {
+  CreateStockAlertSchema,
+  ErrorBodySchema,
+  StockAlertListSchema,
+  StockAlertQuerySchema,
+  StockAlertSchema,
+} from "@stockflow/core";
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { AuthContext } from "../plugins/auth.js";
@@ -12,6 +18,15 @@ import {
 
 const PathIdSchema = z.object({ id: z.string().min(1) });
 
+function cleanQuery(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== "object") return {};
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (value !== "" && value !== undefined && value !== null) cleaned[key] = value;
+  }
+  return cleaned;
+}
+
 export function registerStockAlertsRoutes(
   app: FastifyInstance,
   service: StockService,
@@ -19,10 +34,20 @@ export function registerStockAlertsRoutes(
 ): void {
   app.get(
     "/stock-alerts",
-    { preHandler: [authGuards.authenticate] },
-    async (request) => {
-      const result = await service.listStockAlerts(request.currentUser);
-      return StockAlertListSchema.parse(result);
+    // DECISION: Both staff (read own submitted branch alerts) and manager/admin (review queue)
+    // share this endpoint, with non-admin branch scoping and ?branchId= guard enforced below.
+    { preHandler: [authGuards.requireAnyPermission(["stock:flag", "stock:flag:decide"])] },
+    async (request, reply) => {
+      const query = StockAlertQuerySchema.parse(cleanQuery(request.query));
+      try {
+        const result = await service.listStockAlerts(request.currentUser, query.branchId);
+        return StockAlertListSchema.parse(result);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
     },
   );
 

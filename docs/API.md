@@ -48,6 +48,6 @@ All endpoints are mounted under `/api`. Protected routes require a valid JWT acc
 - `GET /api/users`, `POST /api/users`, `PATCH /api/users/:id`, `POST /api/users/:id/reset-password`, `DELETE /api/users/:id` — Admin-only (`users:manage`) with strict hierarchy enforcement (`DELETE` deactivates the account and revokes active refresh tokens).
 
 ## Stock Alerts (`/api/stock-alerts/*`)
-- `GET /api/stock-alerts` — Scoped list of staff critical-stock flags (staff sees own branch, manager sees assigned cluster, admin sees network).
-- `POST /api/stock-alerts` — Staff-only create (`stock:flag`, `branchId` must be in caller scope, `{ branchId, sku, note }`), returns `201`.
+- `GET /api/stock-alerts` — Scoped list of store stock alerts (`stock:flag` or `stock:flag:decide`; staff sees own branch, manager sees assigned cluster, admin sees network). Supports optional `?branchId=` filter (`403 Forbidden` when out of caller's branch scope).
+- `POST /api/stock-alerts` — Staff-only create (`stock:flag`, `branchId` must be in caller scope, `{ branchId, sku, category?, note }` with `category: "CRITICAL_LOW" | "DAMAGED_SHRINKAGE" | "COUNT_MISMATCH"` defaulting to `"CRITICAL_LOW"`), returns `201`.
 - `PATCH /api/stock-alerts/:id/approve` / `reject` — Scoped `manager`/`admin` decision (`stock:flag:decide`, `isBranchInScope`), immutable once decided (`409` on repeat decision).

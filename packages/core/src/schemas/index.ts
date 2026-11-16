@@ -546,12 +546,20 @@ export type LocationTrendResponse = z.infer<typeof LocationTrendResponseSchema>;
 export const StockAlertStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
 export type StockAlertStatus = z.infer<typeof StockAlertStatusSchema>;
 
+export const StockAlertCategorySchema = z.enum([
+  "CRITICAL_LOW",
+  "DAMAGED_SHRINKAGE",
+  "COUNT_MISMATCH",
+]);
+export type StockAlertCategory = z.infer<typeof StockAlertCategorySchema>;
+
 export const StockAlertSchema = z.object({
   id: z.string().min(1),
   branchId: z.string().min(1),
   branchName: z.string().min(1).optional(),
   sku: z.string().min(1),
   productName: z.string().min(1).optional(),
+  category: StockAlertCategorySchema.default("CRITICAL_LOW"),
   flaggedBy: ActedBySchema,
   flaggedAt: z.string().min(1),
   note: z.string().min(1).max(500),
@@ -564,9 +572,15 @@ export type StockAlert = z.infer<typeof StockAlertSchema>;
 export const CreateStockAlertSchema = z.object({
   branchId: z.string().min(1),
   sku: z.string().min(1),
+  category: StockAlertCategorySchema.default("CRITICAL_LOW"),
   note: z.string().trim().min(1, "Note is required").max(500),
 });
-export type CreateStockAlert = z.infer<typeof CreateStockAlertSchema>;
+export type CreateStockAlert = z.input<typeof CreateStockAlertSchema>;
+
+export const StockAlertQuerySchema = z.object({
+  branchId: z.string().trim().min(1).optional(),
+});
+export type StockAlertQuery = z.infer<typeof StockAlertQuerySchema>;
 
 export const StockAlertListSchema = z.object({
   alerts: z.array(StockAlertSchema),

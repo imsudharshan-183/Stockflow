@@ -1973,11 +1973,15 @@ export class StockService {
     }
   }
 
-  async listStockAlerts(user?: User): Promise<StockAlertList> {
+  async listStockAlerts(user?: User, branchId?: string): Promise<StockAlertList> {
     await this.ensureInitialized();
+    if (branchId && user && !isBranchInScope(user, branchId)) {
+      throw new DecisionForbiddenError("Cannot view stock alerts outside your assigned branches");
+    }
     const all = await this.repo.listStockAlerts();
-    const alerts =
-      !user || user.role === "admin"
+    const alerts = branchId
+      ? all.filter((alert) => alert.branchId === branchId)
+      : !user || user.role === "admin"
         ? all
         : all.filter((alert) => isBranchInScope(user, alert.branchId));
     return StockAlertListSchema.parse({ alerts });
@@ -1986,10 +1990,10 @@ export class StockService {
   async createStockAlert(input: CreateStockAlert, user: User): Promise<StockAlert> {
     await this.ensureInitialized();
     if (!can(user.role, "stock:flag")) {
-      throw new DecisionForbiddenError("Only branch staff can flag critical stock");
+      throw new DecisionForbiddenError("Only branch staff can flag stock alerts");
     }
     if (!isBranchInScope(user, input.branchId)) {
-      throw new DecisionForbiddenError("Cannot flag critical stock outside your assigned branch");
+      throw new DecisionForbiddenError("Cannot flag stock outside your assigned branch");
     }
 
     const branch = this.data.branches.find((b) => b.id === input.branchId);
@@ -2007,6 +2011,7 @@ export class StockService {
       branchName: branch.name,
       sku: product.sku,
       productName: product.name,
+      category: input.category ?? "CRITICAL_LOW",
       flaggedBy: { userId: user.id, name: user.name, role: user.role },
       flaggedAt: new Date().toISOString(),
       note: input.note.trim(),

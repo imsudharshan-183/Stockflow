@@ -251,6 +251,10 @@ Store floor staff observing physical shelf stockouts or urgent merchandising ano
 4. **Frontend Controls (`StaffProductStats.tsx` & `ManagerOverview.tsx`)**:
    - Added a **Flag critical stock** dialog action on `AT_RISK` rows in `StaffProductStats.tsx` (wired on `/products` for `staff`) and a scoped pending-alerts review table in `ManagerOverview.tsx` using shared UI primitives (`Button`, `Badge`, `Table`, `Dialog`, `Card`, `Input`).
 
+### Addendum (Alert Categories & Staff Closed-Loop Alert History)
+- Expanded `stock_alerts` with a `category` enum (`"CRITICAL_LOW" | "DAMAGED_SHRINKAGE" | "COUNT_MISMATCH"`, defaulting to `"CRITICAL_LOW"` in Zod & Mongoose for backward compatibility) and allowed staff to flag any non-`NEW` SKU row (`AT_RISK` defaults to `CRITICAL_LOW`; `HEALTHY`/`OVERSTOCK` default to `COUNT_MISMATCH`), surfacing category pills alongside the note in `ManagerOverview.tsx`.
+- Tightened `GET /api/stock-alerts` with `authGuards.requireAnyPermission(["stock:flag", "stock:flag:decide"])` and optional `?branchId=` scope verification (`403 Forbidden` if outside caller scope), and added a **Recent Branch Stock Alerts** history table in `StaffProductStats.tsx` showing SKU, category, note, submitted timestamp, decision status badge, and resolving manager name (`decidedBy.name`).
+
 ---
 
 ## ADR-013: Non-Mutating `committedDeltas` Approval Ledger, Pure `project()`, and `409` Over-Allocation Conflict Guard

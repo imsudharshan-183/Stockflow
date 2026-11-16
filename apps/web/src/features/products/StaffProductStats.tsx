@@ -3,6 +3,11 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Package, Search, X } from "lu
 import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
+import {
+  STOCK_ALERT_CATEGORIES,
+  StockAlertCategoryBadge,
+  StockAlertStatusBadge,
+} from "@/components/shared/StockAlertBadges";
 import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
@@ -30,7 +35,7 @@ import {
 import { useAuth } from "@/features/auth/AuthContext";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
-import { formatCover, formatNumber } from "@/lib/format";
+import { formatCover, formatDateTime, formatNumber } from "@/lib/format";
 import {
   BAHRAIN_BRANCHES,
   CATALOG_CATEGORIES,
@@ -39,6 +44,7 @@ import {
   type Product,
   type ProductListQuery,
   type StockAlert,
+  type StockAlertCategory,
 } from "@stockflow/core";
 
 const CATEGORIES = ["All categories", ...CATALOG_CATEGORIES] as const;
@@ -64,6 +70,7 @@ export function StaffProductStats() {
   const [selectedCategory, setSelectedCategory] = useState<string>("All categories");
   const [page, setPage] = useState(1);
   const [flagTarget, setFlagTarget] = useState<Product | null>(null);
+  const [flagCategory, setFlagCategory] = useState<StockAlertCategory>("CRITICAL_LOW");
   const [flagNote, setFlagNote] = useState("");
   const limit = 25;
 
@@ -94,25 +101,30 @@ export function StaffProductStats() {
   const flagMutation = useMutation({
     mutationFn: api.createStockAlert,
     onSuccess: async (created) => {
-      toast.success(`Flagged critical stock for ${created.sku}`);
+      toast.success(`Submitted stock alert for ${created.sku}`);
       setFlagTarget(null);
+      setFlagCategory("CRITICAL_LOW");
       setFlagNote("");
       await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts });
     },
     onError: (err: Error) => toast.error(err.message),
   });
 
+  const branchAlerts = useMemo(
+    () => (alertsQuery.data?.alerts ?? []).filter((alert) => alert.branchId === staffBranchId),
+    [alertsQuery.data?.alerts, staffBranchId],
+  );
+
   const alertBySku = useMemo(() => {
     const map = new Map<string, StockAlert>();
-    for (const alert of alertsQuery.data?.alerts ?? []) {
-      if (alert.branchId !== staffBranchId) continue;
+    for (const alert of branchAlerts) {
       const existing = map.get(alert.sku);
       if (!existing || alert.status === "PENDING") {
         map.set(alert.sku, alert);
       }
     }
     return map;
-  }, [alertsQuery.data?.alerts, staffBranchId]);
+  }, [branchAlerts]);
 
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
@@ -144,6 +156,7 @@ export function StaffProductStats() {
     flagMutation.mutate({
       branchId: staffBranchId,
       sku: flagTarget.sku,
+      category: flagCategory,
       note: flagNote.trim(),
     });
   };
@@ -276,7 +289,7 @@ export function StaffProductStats() {
                 const badge = statusBadgeConfig(p.stats?.status);
                 const displayName = formatProductDisplayName(p.name, p.sku);
                 const alert = alertBySku.get(p.sku);
-                const isAtRisk = p.stats?.status === "AT_RISK";
+                const canFlag = Boolean(p.stats && p.stats.status !== "NEW");
 
                 return (
                   <TableRow key={p.sku}>
@@ -311,7 +324,7 @@ export function StaffProductStats() {
                       <Badge tone={badge.tone}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="px-2.5 text-right">
-                      {!isAtRisk ? (
+                      {!canFlag ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : alert?.status === "PENDING" ? (
                         <Badge tone="pending">Pending review</Badge>
@@ -321,11 +334,14 @@ export function StaffProductStats() {
                           size="sm"
                           onClick={() => {
                             setFlagTarget(p);
+                            setFlagCategory(
+                              p.stats?.status === "AT_RISK" ? "CRITICAL_LOW" : "COUNT_MISMATCH",
+                            );
                             setFlagNote("");
                           }}
                         >
                           <AlertTriangle className="size-3.5" aria-hidden="true" />
-                          Flag critical stock
+                          Flag stock
                         </Button>
                       )}
                     </TableCell>
@@ -367,20 +383,96 @@ export function StaffProductStats() {
         </TableCardFooter>
       </TableCard>
 
+      <TableCard>
+        <TableToolbar>
+          <div>
+            <h2 className="text-sm font-semibold text-foreground">Recent Branch Stock Alerts</h2>
+            <p className="text-xs text-muted-foreground">
+              Alerts submitted at {staffBranchId} and manager review outcomes
+            </p>
+          </div>
+          <Badge variant="secondary">
+            {formatNumber(branchAlerts.length)} {branchAlerts.length === 1 ? "alert" : "alerts"}
+          </Badge>
+        </TableToolbar>
+
+        {alertsQuery.isPending ? (
+          <TableSkeleton rows={3} />
+        ) : alertsQuery.isError ? (
+          <div className="p-6">
+            <ErrorBlock
+              message={alertsQuery.error.message || "Failed to load branch stock alerts"}
+              onRetry={() => void alertsQuery.refetch()}
+            />
+          </div>
+        ) : branchAlerts.length === 0 ? (
+          <div className="p-6">
+            <EmptyBlock
+              title="No branch alerts submitted"
+              body="Flag any shortage, damaged stock, or count mismatch above to notify your cluster manager."
+            />
+          </div>
+        ) : (
+          <Table className="min-w-[720px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>SKU</TableHead>
+                <TableHead>Category</TableHead>
+                <TableHead>Note</TableHead>
+                <TableHead>Submitted</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {branchAlerts.map((item) => (
+                <TableRow key={item.id}>
+                  <TableCell>
+                    <p className="font-mono text-xs font-medium text-foreground">{item.sku}</p>
+                    {item.productName ? (
+                      <p className="max-w-[200px] truncate text-xs text-muted-foreground">
+                        {formatProductDisplayName(item.productName, item.sku)}
+                      </p>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    <StockAlertCategoryBadge category={item.category} />
+                  </TableCell>
+                  <TableCell className="max-w-xs truncate text-foreground">{item.note}</TableCell>
+                  <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
+                    {formatDateTime(item.flaggedAt)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StockAlertStatusBadge status={item.status} />
+                      {item.status !== "PENDING" && item.decidedBy ? (
+                        <span className="text-xs text-muted-foreground">
+                          by {item.decidedBy.name}
+                        </span>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </TableCard>
+
       <Dialog
         open={Boolean(flagTarget)}
         onOpenChange={(open) => {
           if (!open) {
             setFlagTarget(null);
+            setFlagCategory("CRITICAL_LOW");
             setFlagNote("");
           }
         }}
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Flag critical stock</DialogTitle>
+            <DialogTitle>Flag stock alert</DialogTitle>
             <DialogDescription>
-              Notify your cluster manager about critical shelf shortage for{" "}
+              Notify your cluster manager about a floor stock issue for{" "}
               <span className="font-medium text-foreground">
                 {flagTarget ? `${flagTarget.sku} · ${formatProductDisplayName(flagTarget.name, flagTarget.sku)}` : ""}
               </span>{" "}
@@ -390,12 +482,30 @@ export function StaffProductStats() {
 
           <form onSubmit={handleFlagSubmit} className="space-y-4">
             <div className="space-y-1.5">
+              <label htmlFor="stock-alert-category" className="text-xs font-medium text-foreground">
+                Alert category
+              </label>
+              <select
+                id="stock-alert-category"
+                value={flagCategory}
+                onChange={(e) => setFlagCategory(e.target.value as StockAlertCategory)}
+                className="h-9 w-full rounded-lg border border-border bg-card px-3 text-sm font-medium text-foreground transition-colors hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-primary focus-visible:outline-none"
+              >
+                {STOCK_ALERT_CATEGORIES.map((cat) => (
+                  <option key={cat.value} value={cat.value}>
+                    {cat.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
               <label htmlFor="critical-stock-note" className="text-xs font-medium text-foreground">
                 Floor observation note
               </label>
               <Input
                 id="critical-stock-note"
-                placeholder="e.g., Front display nearly empty before weekend demand"
+                placeholder="e.g., Front display nearly empty, damaged units, or count mismatch"
                 value={flagNote}
                 onChange={(e) => setFlagNote(e.target.value)}
                 maxLength={500}
@@ -409,6 +519,7 @@ export function StaffProductStats() {
                 variant="outline"
                 onClick={() => {
                   setFlagTarget(null);
+                  setFlagCategory("CRITICAL_LOW");
                   setFlagNote("");
                 }}
               >

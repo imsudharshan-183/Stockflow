@@ -3,6 +3,7 @@ import { ArrowRight, Boxes, Check, CircleDollarSign, ListOrdered, TriangleAlert,
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { StockAlertCategoryBadge } from "@/components/shared/StockAlertBadges";
 import { EmptyBlock } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -158,7 +159,7 @@ export function ManagerOverview({ report, recommendations }: ManagerOverviewProp
       <Card className="rounded-2xl border border-border bg-card shadow-card">
         <CardHeader className="flex flex-row items-center justify-between gap-4 border-b border-border/70 pb-4">
           <div>
-            <CardTitle>Pending branch critical-stock alerts</CardTitle>
+            <CardTitle>Pending branch stock alerts</CardTitle>
             <CardDescription>
               Staff floor escalations in your assigned branches awaiting approval or rejection.
             </CardDescription>
@@ -171,18 +172,18 @@ export function ManagerOverview({ report, recommendations }: ManagerOverviewProp
           {pendingAlerts.length === 0 ? (
             <div className="p-6">
               <EmptyBlock
-                title="No pending critical-stock alerts"
+                title="No pending branch stock alerts"
                 body="Branch staff escalations in your assigned stores will appear here for cluster review."
               />
             </div>
           ) : (
-            <Table className="min-w-[720px]">
+            <Table className="min-w-[760px]">
               <TableHeader>
                 <TableRow>
                   <TableHead>Branch</TableHead>
                   <TableHead>SKU</TableHead>
                   <TableHead>Flagged by</TableHead>
-                  <TableHead>Note</TableHead>
+                  <TableHead>Category &amp; note</TableHead>
                   <TableHead>Submitted</TableHead>
                   <TableHead className="text-right">Decision</TableHead>
                 </TableRow>
@@ -197,7 +198,12 @@ export function ManagerOverview({ report, recommendations }: ManagerOverviewProp
                       {alert.sku}
                     </TableCell>
                     <TableCell className="text-muted-foreground">{alert.flaggedBy.name}</TableCell>
-                    <TableCell className="max-w-xs truncate text-foreground">{alert.note}</TableCell>
+                    <TableCell className="max-w-md">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StockAlertCategoryBadge category={alert.category} />
+                        <span className="truncate text-foreground">{alert.note}</span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {formatDateTime(alert.flaggedAt)}
                     </TableCell>

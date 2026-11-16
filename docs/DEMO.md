@@ -24,5 +24,5 @@ pnpm reset:decisions --yes
 4. **Action Queue, Live Inventory Projection & Audit (`/queue`, `/audit`)**:
    - Inspect a transfer's Bahrain distance-aware freight breakdown (`fixed + distance + per-unit`) in the recommendation drawer, approve it, confirm live **Reserved** (donor) / **In transit** (receiver) badges update on `/branches/:id` and `/products/:sku`, and verify the immutable audit trail on `/audit`.
 5. **Role Switching & Staff Escalations**:
-   - Sign in as `staff.manama@stockflow.dev` (locked to `BR-001`, read-only landing), open `/products` (`Store Inventory`), and click **Flag critical stock** on an `AT_RISK` item.
-   - Sign in as `manager.manama@stockflow.dev` (scoped to `BR-001`/`BR-002`, out-of-scope `/branches/BR-005` blocked) and approve or reject the escalated item under **Pending branch critical-stock alerts** on `/`.
+   - Sign in as `staff.manama@stockflow.dev` (locked to `BR-001`, non-financial store inventory), click **Flag stock** on any non-`NEW` SKU row, choose an alert category (`Critical low`, `Damaged / shrinkage`, or `Count mismatch`), enter a note, and submit.
+   - Sign in as `manager.manama@stockflow.dev` (scoped to `BR-001`/`BR-002`, out-of-scope `/branches/BR-005` blocked) and approve or reject the escalated item (with its category pill) under **Pending branch stock alerts** on `/`, then switch back to staff to confirm **Recent Branch Stock Alerts** shows the resolved status and manager name.
