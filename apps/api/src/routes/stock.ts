@@ -1,4 +1,6 @@
 import {
+  BatchDecideRequestSchema,
+  BatchDecideResponseSchema,
   BranchDetailSchema,
   ErrorBodySchema,
   HealthSchema,
@@ -10,7 +12,7 @@ import {
 } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
 import type { AuthContext } from "../plugins/auth.js";
-import { DecisionForbiddenError, type StockService } from "../services/stockService.js";
+import { DecisionConflictError, DecisionForbiddenError, type StockService } from "../services/stockService.js";
 
 export function registerStockRoutes(
   app: FastifyInstance,
@@ -23,16 +25,29 @@ export function registerStockRoutes(
 
   app.get(
     "/kpis",
-    { preHandler: [authGuards.authenticate] },
-    async (request) => service.kpis(request.currentUser),
+    { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
+    async (request, reply) => {
+      await service.ensureFreshPlan({ syncDecisions: false });
+      const q = cleanQuery(request.query) as { branch?: string };
+      try {
+        return service.kpis(request.currentUser, q.branch);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
+    },
   );
 
   app.get(
     "/audit",
     { preHandler: [authGuards.requirePermission("audit:read")] },
     async (request, reply) => {
+      await service.ensureFreshPlan({ syncDecisions: false, syncAudit: true });
+      const q = cleanQuery(request.query) as { branch?: string };
       try {
-        return service.listAudit(request.currentUser);
+        return service.listAudit(request.currentUser, q.branch);
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
           return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
@@ -46,6 +61,7 @@ export function registerStockRoutes(
     "/recommendations",
     { preHandler: [authGuards.authenticate] },
     async (request) => {
+      await service.ensureFreshPlan();
       const query = RecommendationQuerySchema.parse(cleanQuery(request.query));
       return service.list(query, request.currentUser);
     },
@@ -55,6 +71,7 @@ export function registerStockRoutes(
     "/branches/:id",
     { preHandler: [authGuards.authenticate] },
     async (request, reply) => {
+      await service.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
       if (!isBranchInScope(request.currentUser, id)) {
         return reply.code(403).send(ErrorBodySchema.parse({ error: "Access to branch forbidden" }));
@@ -69,6 +86,7 @@ export function registerStockRoutes(
     "/products/:sku",
     { preHandler: [authGuards.authenticate] },
     async (request, reply) => {
+      await service.ensureFreshPlan();
       const { sku } = pathSku.parse(request.params);
       const detail = service.product(sku, request.currentUser);
       if (!detail) return reply.code(404).send(ErrorBodySchema.parse({ error: "Product not found" }));
@@ -91,6 +109,19 @@ export function registerStockRoutes(
       return decide(service, request.params, "REJECTED", request.currentUser, reply);
     },
   );
+
+  app.post(
+    "/recommendations/batch/decide",
+    { preHandler: [authGuards.requirePermission("recommendations:decide")] },
+    async (request) => {
+      await service.ensureFreshPlan({ syncDecisions: false });
+      const body = BatchDecideRequestSchema.parse(request.body);
+      const status = body.decision === "approve" ? "APPROVED" : "REJECTED";
+      const reasonCode = body.decision === "reject" ? body.reasonCode : undefined;
+      const results = await service.decideBatch(body.ids, status, request.currentUser, reasonCode);
+      return BatchDecideResponseSchema.parse({ results });
+    },
+  );
 }
 
 const pathId = RecommendationSchema.pick({ id: true });
@@ -103,6 +134,7 @@ async function decide(
   user: User,
   reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } },
 ): Promise<unknown> {
+  await service.ensureFreshPlan({ syncDecisions: false });
   const { id } = pathId.parse(params);
   try {
     const updated = await service.decide(id, status, user);
@@ -113,6 +145,9 @@ async function decide(
   } catch (err) {
     if (err instanceof DecisionForbiddenError) {
       return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+    }
+    if (err instanceof DecisionConflictError) {
+      return reply.code(409).send(ErrorBodySchema.parse({ error: err.message }));
     }
     throw err;
   }
