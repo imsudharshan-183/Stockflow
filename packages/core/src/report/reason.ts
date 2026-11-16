@@ -1,5 +1,5 @@
 import type { Action, ReasonCode } from "../schemas/index.js";
-import { round2 } from "../round.js";
+import { round2, round3 } from "../round.js";
 
 export interface ReasonInput {
   action: Action;
@@ -13,14 +13,18 @@ export interface ReasonInput {
   lostMarginAvoided: number;
   carryingCostSaved: number;
   transferCost: number;
+  distanceKm?: number | null;
+  fixedTransferCost?: number;
+  distanceTransferCost?: number;
+  unitTransferCost?: number;
   markdownCost: number;
   reasonCodes: readonly ReasonCode[];
 }
 
-function dollars(value: number): string {
-  const rounded = round2(value);
+function bhd(value: number): string {
+  const rounded = round3(value);
   const sign = rounded < 0 ? "-" : "";
-  return `${sign}$${Math.abs(rounded).toFixed(2)}`;
+  return `${sign}BD ${Math.abs(rounded).toFixed(3)}`;
 }
 
 function coverText(coverDays: number | null): string {
@@ -32,19 +36,25 @@ function coverText(coverDays: number | null): string {
 export function describeRecommendation(input: ReasonInput): string {
   const cover = coverText(input.coverDays);
   const point = round2(input.reorderPoint).toFixed(2);
-  const benefit = `Net benefit ${dollars(input.netBenefit)}`;
+  const benefit = `Net benefit ${bhd(input.netBenefit)}`;
 
   if (input.action === "TRANSFER") {
     const donor = input.donorBranchName ?? "the donor branch";
+    const hasDist = input.distanceKm !== null && input.distanceKm !== undefined && input.distanceKm > 0;
+    const distLabel = hasDist ? ` (${input.distanceKm!.toFixed(1)} km)` : "";
+    const hasBreakdown = input.fixedTransferCost !== undefined;
+    const freightBreakdown = hasBreakdown
+      ? ` (${bhd(input.fixedTransferCost!)} fixed + ${bhd(input.distanceTransferCost ?? 0)} distance + ${bhd(input.unitTransferCost ?? 0)} handling)`
+      : "";
     const freight = input.reasonCodes.includes("FREIGHT_LIMITS_QTY")
       ? " The quantity stops where another unit would cost more to move than it saves."
       : "";
-    return `Transfer ${input.quantity} units of ${input.productName} from ${donor} to ${input.branchName}. ${input.branchName} has ${cover}, below its reorder point of ${point} units. ${benefit}: lost margin avoided ${dollars(input.lostMarginAvoided)}, carrying cost saved ${dollars(input.carryingCostSaved)}, transfer cost ${dollars(input.transferCost)}.${freight}`;
+    return `Transfer ${input.quantity} units of ${input.productName} from ${donor} to ${input.branchName}${distLabel}. ${input.branchName} has ${cover}, below its reorder point of ${point} units. ${benefit}: lost margin avoided ${bhd(input.lostMarginAvoided)}, carrying cost saved ${bhd(input.carryingCostSaved)}, freight cost ${bhd(input.transferCost)}${freightBreakdown}.${freight}`;
   }
 
   if (input.action === "REORDER") {
-    return `Reorder ${input.quantity} units of ${input.productName} for ${input.branchName}. The branch has ${cover}, below its reorder point of ${point} units, and no surplus transfer covers the gap. ${benefit}, from lost margin avoided ${dollars(input.lostMarginAvoided)}.`;
+    return `Reorder ${input.quantity} units of ${input.productName} for ${input.branchName}. The branch has ${cover}, below its reorder point of ${point} units, and no surplus transfer covers the gap. ${benefit}, from lost margin avoided ${bhd(input.lostMarginAvoided)}.`;
   }
 
-  return `Mark down ${input.quantity} units of ${input.productName} at ${input.branchName}. The branch has ${cover}, past the overstock line, and no branch is short of this SKU. ${benefit}: carrying cost saved ${dollars(input.carryingCostSaved)}, markdown margin given up ${dollars(input.markdownCost)}.`;
+  return `Mark down ${input.quantity} units of ${input.productName} at ${input.branchName}. The branch has ${cover}, past the overstock line, and no branch is short of this SKU. ${benefit}: carrying cost saved ${bhd(input.carryingCostSaved)}, markdown margin given up ${bhd(input.markdownCost)}.`;
 }

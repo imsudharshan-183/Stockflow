@@ -1,10 +1,15 @@
 /**
  * Pairs surplus with shortage.
- * Inputs: receiver need, donor surplus, price and cost. Output: ordered transfers and the receivers' stock after them.
- * Formula: net benefit = lost margin avoided + carrying cost saved - transfer cost. Quantity stops where another unit saves less holding cost than freight.
+ * Inputs: receiver need, donor surplus, price, cost, and branch coordinates.
+ * Output: ordered transfers and the receivers' stock after them.
+ * Formula: net benefit = lost margin avoided + carrying cost saved - TotalTransferCost(Q, D),
+ * where TotalTransferCost(Q, D) = C_fixed + (C_km * D) + (C_unit * Q).
+ * Marginal quantity stops where another unit saves less holding cost than C_unit.
  */
 import type { Policy } from "../schemas/index.js";
-import { round2 } from "../round.js";
+import { round2, round3 } from "../round.js";
+import { haversineDistanceKm } from "../seed/catalog.js";
+import { totalTransferCostBreakdown } from "./config.js";
 import { holdingWindowDays } from "./classify.js";
 import type { MatchCosts, MatchResult, Matcher, PartyState, TransferQuote } from "./strategies.js";
 
@@ -14,6 +19,10 @@ interface Quote {
   lostMarginAvoided: number;
   carryingCostSaved: number;
   transferCost: number;
+  distanceKm: number;
+  fixedTransferCost: number;
+  distanceTransferCost: number;
+  unitTransferCost: number;
   freightLimited: boolean;
 }
 
@@ -46,6 +55,10 @@ export const greedyMatcher: Matcher = {
         lostMarginAvoided: best.quote.lostMarginAvoided,
         carryingCostSaved: best.quote.carryingCostSaved,
         transferCost: best.quote.transferCost,
+        distanceKm: best.quote.distanceKm,
+        fixedTransferCost: best.quote.fixedTransferCost,
+        distanceTransferCost: best.quote.distanceTransferCost,
+        unitTransferCost: best.quote.unitTransferCost,
         freightLimited: best.quote.freightLimited,
         receiverOnHandBefore: receiver.onHand,
         donorOnHandBefore: donor.onHand,
@@ -97,13 +110,29 @@ function quoteTransfer(donor: PartyState, receiver: PartyState, costs: MatchCost
   const quantity = freightLimited ? Math.min(qMax, Math.floor(receiver.lostUnits)) : qMax;
   if (quantity < costs.policy.minTransferQty) return null;
 
+  const distanceKm =
+    donor.coordinates && receiver.coordinates
+      ? round2(haversineDistanceKm(donor.coordinates, receiver.coordinates))
+      : 0;
+  const freight = totalTransferCostBreakdown(quantity, distanceKm, costs.policy);
   const margin = costs.price - costs.unitCost;
-  const lostMarginAvoided = round2(Math.min(quantity, receiver.lostUnits) * margin);
-  const carryingCostSaved = round2(quantity * carryPerUnit);
-  const transferCost = round2(quantity * costs.policy.transferCostPerUnit);
-  const netBenefit = round2(lostMarginAvoided + carryingCostSaved - transferCost);
+  const lostMarginAvoided = round3(Math.min(quantity, receiver.lostUnits) * margin);
+  const carryingCostSaved = round3(quantity * carryPerUnit);
+  const transferCost = freight.totalCost;
+  const netBenefit = round3(lostMarginAvoided + carryingCostSaved - transferCost);
   if (netBenefit <= 0) return null;
-  return { quantity, netBenefit, lostMarginAvoided, carryingCostSaved, transferCost, freightLimited };
+  return {
+    quantity,
+    netBenefit,
+    lostMarginAvoided,
+    carryingCostSaved,
+    transferCost,
+    distanceKm,
+    fixedTransferCost: freight.fixedCost,
+    distanceTransferCost: freight.distanceCost,
+    unitTransferCost: freight.unitCost,
+    freightLimited,
+  };
 }
 
 function applyTransfer(donor: PartyState, receiver: PartyState, quantity: number, policy: Policy): void {

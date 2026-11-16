@@ -4,8 +4,9 @@
  * Formula: transfers come only from Matcher; leftover shortage is a reorder; overstock with no receiver is a markdown.
  */
 import type { Dataset } from "../seed/types.js";
-import type { Policy, ReasonCode } from "../schemas/index.js";
-import { round2 } from "../round.js";
+import type { Branch, Policy, ReasonCode } from "../schemas/index.js";
+import { BAHRAIN_BRANCHES } from "../seed/catalog.js";
+import { round3 } from "../round.js";
 import { MIN_ACTION_UNITS } from "./config.js";
 import { assessNetwork, coverDaysOf, holdingWindowDays, type Position } from "./classify.js";
 import type { Forecaster, Matcher, PartyState, TransferQuote } from "./strategies.js";
@@ -21,6 +22,10 @@ export interface ActionDraft {
   lostMarginAvoided: number;
   carryingCostSaved: number;
   transferCost: number;
+  distanceKm: number | null;
+  fixedTransferCost: number;
+  distanceTransferCost: number;
+  unitTransferCost: number;
   markdownCost: number;
   onHand: number;
   velocity: number;
@@ -33,8 +38,17 @@ export interface ActionDraft {
   lostUnits: number;
 }
 
+const BAHRAIN_COORDS_BY_ID = new Map(
+  BAHRAIN_BRANCHES.filter((b) => b.coordinates).map((b) => [b.id, b.coordinates!]),
+);
+
+function resolveCoordinates(branch: Branch | undefined): readonly [number, number] | undefined {
+  if (!branch) return undefined;
+  return branch.coordinates ?? BAHRAIN_COORDS_BY_ID.get(branch.id);
+}
+
 // DECISION: reorder and markdown stay here, not inside Matcher, so a new matcher cannot change the fallback rules.
-// The $25 materiality cutoff stays out of this function so the golden quantities do not move.
+// The BD 9.500 materiality cutoff stays out of this function so the golden quantities do not move.
 export function recommend(
   data: Dataset,
   policy: Policy,
@@ -44,13 +58,14 @@ export function recommend(
   onHandOverride?: readonly (readonly number[])[],
 ): ActionDraft[] {
   const assessed = assessNetwork(data, policy, forecaster, dayIndex, onHandOverride);
+  const branchCoords = data.branches.map((branch) => resolveCoordinates(branch));
   const drafts: ActionDraft[] = [];
 
   for (let skuIndex = 0; skuIndex < data.products.length; skuIndex += 1) {
     const product = data.products[skuIndex];
     const row = assessed[skuIndex];
     if (!product || !row) continue;
-    drafts.push(...planSku(row, product.price, product.cost, product.leadTimeDays, policy, matcher));
+    drafts.push(...planSku(row, branchCoords, product.price, product.cost, product.leadTimeDays, policy, matcher));
   }
 
   drafts.sort(compareDrafts);
@@ -59,16 +74,19 @@ export function recommend(
 
 function planSku(
   row: readonly Position[],
+  branchCoords: readonly (readonly [number, number] | undefined)[],
   price: number,
   cost: number,
   leadTimeDays: number,
   policy: Policy,
   matcher: Matcher,
 ): ActionDraft[] {
-  const receivers = row.filter((position) => position.status === "AT_RISK").map((position) => toParty(position, "receiver"));
+  const receivers = row
+    .filter((position) => position.status === "AT_RISK")
+    .map((position) => toParty(position, "receiver", branchCoords[position.branchIndex]));
   const donors = row
     .filter((position) => position.status === "OVERSTOCK" && position.surplus > 0)
-    .map((position) => toParty(position, "donor"));
+    .map((position) => toParty(position, "donor", branchCoords[position.branchIndex]));
   const matched = matcher.match(receivers, donors, { price, unitCost: cost, policy });
   const drafts: ActionDraft[] = [];
   const received = new Set<number>();
@@ -88,7 +106,7 @@ function planSku(
     const quantity = Math.ceil(target - receiver.onHand);
     if (quantity <= 0) continue;
     const lostUnitsNow = Math.max(0, position.velocity * leadTimeDays - receiver.onHand);
-    const lostMarginAvoided = round2(Math.min(quantity, lostUnitsNow) * (price - cost));
+    const lostMarginAvoided = round3(Math.min(quantity, lostUnitsNow) * (price - cost));
     const reasonCodes: ReasonCode[] = ["BELOW_REORDER_POINT", "REORDER_TO_TARGET"];
     if (donors.length === 0 || !received.has(receiver.branchIndex)) reasonCodes.push("NO_DONOR");
     if (lostMarginAvoided > 0) reasonCodes.push("LOST_SALES_AT_RISK");
@@ -98,6 +116,10 @@ function planSku(
         lostMarginAvoided,
         carryingCostSaved: 0,
         transferCost: 0,
+        distanceKm: null,
+        fixedTransferCost: 0,
+        distanceTransferCost: 0,
+        unitTransferCost: 0,
         markdownCost: 0,
         reasonCodes,
         onHand: receiver.onHand,
@@ -122,6 +144,10 @@ function planSku(
         draftFrom(position, "MARKDOWN", position.branchIndex, null, donor.surplus, {
           ...economics,
           transferCost: 0,
+          distanceKm: null,
+          fixedTransferCost: 0,
+          distanceTransferCost: 0,
+          unitTransferCost: 0,
           reasonCodes,
           onHand: donor.onHand,
           coverDays: donor.coverDays,
@@ -152,6 +178,10 @@ function transferDraft(position: Position, transfer: TransferQuote): ActionDraft
     lostMarginAvoided: transfer.lostMarginAvoided,
     carryingCostSaved: transfer.carryingCostSaved,
     transferCost: transfer.transferCost,
+    distanceKm: transfer.distanceKm,
+    fixedTransferCost: transfer.fixedTransferCost,
+    distanceTransferCost: transfer.distanceTransferCost,
+    unitTransferCost: transfer.unitTransferCost,
     markdownCost: 0,
     reasonCodes,
     onHand: transfer.receiverOnHandBefore,
@@ -173,14 +203,18 @@ function markdownEconomics(
   const sellPrice = price * (1 - policy.markdownDiscount);
   const fullPriceUnits = Math.min(quantity, donor.velocity * hold);
   const versusWaiting = quantity * (sellPrice - cost) - fullPriceUnits * (price - cost);
-  const carryingCostSaved = round2(quantity * cost * policy.annualHoldingRate * (hold / policy.deadStockHoldDays));
-  const lostMarginAvoided = versusWaiting > 0 ? round2(versusWaiting) : 0;
-  const markdownCost = versusWaiting < 0 ? round2(-versusWaiting) : 0;
-  const netBenefit = round2(lostMarginAvoided + carryingCostSaved - markdownCost);
+  const carryingCostSaved = round3(quantity * cost * policy.annualHoldingRate * (hold / policy.deadStockHoldDays));
+  const lostMarginAvoided = versusWaiting > 0 ? round3(versusWaiting) : 0;
+  const markdownCost = versusWaiting < 0 ? round3(-versusWaiting) : 0;
+  const netBenefit = round3(lostMarginAvoided + carryingCostSaved - markdownCost);
   return { netBenefit, lostMarginAvoided, carryingCostSaved, markdownCost };
 }
 
-function toParty(position: Position, role: PartyState["role"]): PartyState {
+function toParty(
+  position: Position,
+  role: PartyState["role"],
+  coordinates?: readonly [number, number],
+): PartyState {
   return {
     branchIndex: position.branchIndex,
     onHand: position.onHand,
@@ -191,6 +225,7 @@ function toParty(position: Position, role: PartyState["role"]): PartyState {
     leadTimeDays: position.leadTimeDays,
     coverDays: position.coverDays,
     role,
+    ...(coordinates ? { coordinates } : {}),
   };
 }
 
@@ -205,6 +240,10 @@ function draftFrom(
     lostMarginAvoided: number;
     carryingCostSaved: number;
     transferCost: number;
+    distanceKm: number | null;
+    fixedTransferCost: number;
+    distanceTransferCost: number;
+    unitTransferCost: number;
     markdownCost: number;
     reasonCodes: ReasonCode[];
     onHand: number;
@@ -225,6 +264,10 @@ function draftFrom(
     lostMarginAvoided: money.lostMarginAvoided,
     carryingCostSaved: money.carryingCostSaved,
     transferCost: money.transferCost,
+    distanceKm: money.distanceKm,
+    fixedTransferCost: money.fixedTransferCost,
+    distanceTransferCost: money.distanceTransferCost,
+    unitTransferCost: money.unitTransferCost,
     markdownCost: money.markdownCost,
     onHand: money.onHand,
     velocity: position.velocity,

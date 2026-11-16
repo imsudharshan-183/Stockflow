@@ -34,8 +34,14 @@ export {
   DEFAULT_POLICY,
   MATERIAL_MIN_NET_BENEFIT,
   STOCKOUT_RATE_DAYS,
+  TRANSFER_COST_PER_KM,
+  TRANSFER_COST_PER_UNIT,
+  TRANSFER_FIXED_COST,
   ewmaAlpha,
+  totalTransferCost,
+  totalTransferCostBreakdown,
 } from "./config.js";
+export type { TransferCostBreakdown } from "./config.js";
 export { coverDaysOf } from "./classify.js";
 export type { Position } from "./classify.js";
 export type { ActionDraft } from "./recommend.js";

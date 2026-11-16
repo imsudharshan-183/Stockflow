@@ -1,6 +1,6 @@
 import type { Dataset } from "../seed/types.js";
 import { KpiSummarySchema, type KpiSummary, type Policy, type Recommendation } from "../schemas/index.js";
-import { at, round2 } from "../round.js";
+import { at, round2, round3 } from "../round.js";
 import { DEAD_VELOCITY_PER_DAY, STOCKOUT_RATE_DAYS } from "../engine/config.js";
 import { assessPositions, backtest, type Position } from "../engine/index.js";
 import { isStockoutDay } from "../engine/velocity.js";
@@ -59,8 +59,8 @@ function buildKpiSummary(data: Dataset, policy: Policy, positions: Position[][])
     return {
       date,
       stockoutRate: cells === 0 ? 0 : stockouts / cells,
-      salesValue: round2(salesValue),
-      inventoryValue: round2(inventoryValue),
+      salesValue: round3(salesValue),
+      inventoryValue: round3(inventoryValue),
     };
   });
 
@@ -74,9 +74,9 @@ function buildKpiSummary(data: Dataset, policy: Policy, positions: Position[][])
   return KpiSummarySchema.parse({
     asOf: data.asOf,
     stockoutRate: window.length === 0 ? 0 : roundRate(window),
-    deadStockValue: round2(deadStockValue),
-    lostSalesAtRisk: round2(lostSalesAtRisk),
-    cashReleasable: round2(cashReleasable),
+    deadStockValue: round3(deadStockValue),
+    lostSalesAtRisk: round3(lostSalesAtRisk),
+    cashReleasable: round3(cashReleasable),
     backtest: backtest(data, policy),
     trend,
     branches: data.branches,
@@ -112,7 +112,7 @@ function riskByBranch(data: Dataset, positions: Position[][]) {
       branchId: branch.id,
       branchName: branch.name,
       stockoutRate: cells === 0 ? 0 : stockouts / cells,
-      revenueAtRisk: round2(revenueAtRisk),
+      revenueAtRisk: round3(revenueAtRisk),
     };
   });
   rows.sort((left, right) => right.revenueAtRisk - left.revenueAtRisk || left.branchId.localeCompare(right.branchId));

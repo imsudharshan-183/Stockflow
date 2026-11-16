@@ -1,8 +1,8 @@
-import { round2, round4 } from "../round.js";
+import { round3, round4 } from "../round.js";
 
 export function money(value: number, label: string): number {
   if (!Number.isFinite(value)) throw new Error(`${label} is not finite`);
-  return round2(value);
+  return round3(value);
 }
 
 export function stat(value: number, label: string): number {

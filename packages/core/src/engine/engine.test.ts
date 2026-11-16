@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { at, round2 } from "../round.js";
+import { at, round3 } from "../round.js";
 import { buildRecommendations } from "../report/index.js";
 import {
   RecommendationSchema,
@@ -8,7 +8,8 @@ import {
   type Product,
 } from "../schemas/index.js";
 import type { Dataset } from "../seed/types.js";
-import { DEFAULT_POLICY } from "./config.js";
+import { BAHRAIN_BRANCHES, haversineDistanceKm } from "../seed/catalog.js";
+import { DEFAULT_POLICY, totalTransferCost } from "./config.js";
 import { assessPositions, backtest, planActions } from "./index.js";
 
 const branchA: Branch = { id: "A", name: "Branch A", city: "Mumbai", region: "West" };
@@ -109,11 +110,12 @@ describe("planActions", () => {
     const excessDays = Math.min(DEFAULT_POLICY.deadStockHoldDays, 150 - DEFAULT_POLICY.donorCoverDays);
     const carryPerUnit =
       200 * DEFAULT_POLICY.annualHoldingRate * (excessDays / DEFAULT_POLICY.deadStockHoldDays);
-    const carryingCostSaved = round2(60 * carryPerUnit);
+    const carryingCostSaved = round3(60 * carryPerUnit);
+    const expectedTransferCost = totalTransferCost(60, 0, DEFAULT_POLICY);
     expect(draft.lostMarginAvoided).toBe(25 * (400 - 200));
-    expect(draft.transferCost).toBe(60 * DEFAULT_POLICY.transferCostPerUnit);
+    expect(draft.transferCost).toBe(expectedTransferCost);
     expect(draft.carryingCostSaved).toBe(carryingCostSaved);
-    expect(draft.netBenefit).toBe(round2(5000 + carryingCostSaved - 720));
+    expect(draft.netBenefit).toBe(round3(5000 + carryingCostSaved - expectedTransferCost));
     expect(draft.reasonCodes).toEqual(
       expect.arrayContaining([
         "BELOW_REORDER_POINT",
@@ -132,7 +134,32 @@ describe("planActions", () => {
     expect(recommendation.rank).toBe(1);
     expect(recommendation.status).toBe("PENDING");
     expect(recommendation.reason).toContain("Transfer 60 units");
+    expect(recommendation.reason).toContain("freight cost BD");
     expect(recommendation.reasonCodes.length).toBeGreaterThan(0);
+  });
+
+  it("prices Bahrain transfer freight by Haversine distance and prefers the nearer donor", () => {
+    const manamaCbd = at(BAHRAIN_BRANCHES, 0, "BR-001");
+    const juffair = at(BAHRAIN_BRANCHES, 1, "BR-002");
+    const zallaq = at(BAHRAIN_BRANCHES, 11, "BR-012");
+    const data = buildDataset({
+      branches: [manamaCbd, juffair, zallaq],
+      product: product({ price: 30, cost: 18 }),
+      dates: ["2026-11-11"],
+      sales: [[5], [2], [2]],
+      onHand: [[10], [300], [300]],
+    });
+    const recs = buildRecommendations(data, DEFAULT_POLICY);
+    expect(recs).toHaveLength(1);
+    const rec = at(recs, 0, "recommendation");
+    expect(rec.action).toBe("TRANSFER");
+    expect(rec.donorBranchId).toBe(juffair.id);
+    const expectedKm = Math.round(haversineDistanceKm(juffair.coordinates!, manamaCbd.coordinates!) * 100) / 100;
+    expect(rec.metrics.transferCost).toBe(totalTransferCost(rec.quantity, expectedKm, DEFAULT_POLICY));
+    expect(rec.reason).toContain(`${expectedKm.toFixed(1)} km`);
+    expect(rec.reason).toContain("fixed +");
+    expect(rec.reason).toContain("distance +");
+    expect(rec.reason).toContain("handling");
   });
 
   it("marks down a branch with stock and zero velocity", () => {

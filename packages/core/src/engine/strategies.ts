@@ -37,6 +37,7 @@ export interface PartyState {
   leadTimeDays: number;
   coverDays: number | null;
   role: "receiver" | "donor";
+  coordinates?: readonly [number, number];
 }
 
 export interface MatchCosts {
@@ -53,6 +54,10 @@ export interface TransferQuote {
   lostMarginAvoided: number;
   carryingCostSaved: number;
   transferCost: number;
+  distanceKm: number;
+  fixedTransferCost: number;
+  distanceTransferCost: number;
+  unitTransferCost: number;
   freightLimited: boolean;
   receiverOnHandBefore: number;
   donorOnHandBefore: number;

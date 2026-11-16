@@ -9,7 +9,7 @@ import {
   type ProductDetail,
   type Recommendation,
 } from "../schemas/index.js";
-import { at, round2 } from "../round.js";
+import { at, round3 } from "../round.js";
 import { DEAD_VELOCITY_PER_DAY, STOCKOUT_RATE_DAYS } from "../engine/config.js";
 import type { Position } from "../engine/classify.js";
 import { isStockoutDay } from "../engine/velocity.js";
@@ -58,7 +58,7 @@ export function buildBranchDetail(
     return {
       date,
       salesUnits,
-      salesValue: round2(salesValue),
+      salesValue: round3(salesValue),
       onHandUnits,
       stockoutRate: data.products.length === 0 ? 0 : stockouts / data.products.length,
     };
@@ -71,10 +71,10 @@ export function buildBranchDetail(
   return BranchDetailSchema.parse({
     branch,
     stockoutRate: averageRate(trend.map((point) => point.stockoutRate)),
-    deadStockValue: round2(deadStockValue),
-    cashReleasable: round2(cashReleasable),
-    lostSalesAtRisk: round2(lostSalesAtRisk),
-    inventoryValue: round2(inventoryValue),
+    deadStockValue: round3(deadStockValue),
+    cashReleasable: round3(cashReleasable),
+    lostSalesAtRisk: round3(lostSalesAtRisk),
+    inventoryValue: round3(inventoryValue),
     recommendations: scoped,
     trend,
   });
@@ -105,6 +105,9 @@ export function buildProductDetail(
       inStockDays: position.inStockDays,
       status: position.status,
       lostUnits: stat(position.lostUnits, "lostUnits"),
+      surplus: position.surplus,
+      reserved: "reserved" in position && typeof position.reserved === "number" ? position.reserved : 0,
+      inTransit: "inTransit" in position && typeof position.inTransit === "number" ? position.inTransit : 0,
       recommendation: recommendationFor(recommendations, product.sku, branch.id),
     };
   });

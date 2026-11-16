@@ -1,6 +1,6 @@
 import type { Dataset } from "../seed/types.js";
 import type { BacktestResult, Policy } from "../schemas/index.js";
-import { at, round2 } from "../round.js";
+import { at, round3 } from "../round.js";
 import { greedyMatcher } from "./match.js";
 import { recommend } from "./recommend.js";
 import { ewmaForecaster, isStockoutDay } from "./velocity.js";
@@ -24,7 +24,7 @@ export function backtest(data: Dataset, policy: Policy): BacktestResult {
     baselineStockoutDays,
     engineStockoutDays: simulated.stockoutDays,
     stockoutDaysAvoided: baselineStockoutDays - simulated.stockoutDays,
-    cashReleased: round2(simulated.cashReleased),
+    cashReleased: round3(simulated.cashReleased),
   };
 }
 
