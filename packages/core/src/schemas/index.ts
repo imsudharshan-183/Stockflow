@@ -7,10 +7,25 @@ export const BranchSchema = z.object({
   name: z.string().min(1),
   city: z.string().min(1),
   region: z.string().min(1),
+  coordinates: z.tuple([z.number(), z.number()]).optional(),
 });
 
 export const ProductStatusSchema = z.enum(["active", "awaiting_history", "archived"]);
 export type ProductStatus = z.infer<typeof ProductStatusSchema>;
+
+export const PositionStatusSchema = z.enum(["AT_RISK", "OVERSTOCK", "HEALTHY", "NEW"]);
+export type PositionStatus = z.infer<typeof PositionStatusSchema>;
+
+export const ProductStatsSchema = z.object({
+  onHand: z.number(),
+  velocity: z.number(),
+  coverDays: z.number().nullable(),
+  status: PositionStatusSchema,
+  surplus: z.number().optional(),
+  reserved: z.number().optional(),
+  inTransit: z.number().optional(),
+});
+export type ProductStats = z.infer<typeof ProductStatsSchema>;
 
 export const ProductSchema = z.object({
   sku: z.string().min(1),
@@ -20,6 +35,7 @@ export const ProductSchema = z.object({
   cost: z.number().positive(),
   leadTimeDays: z.number().int().positive(),
   status: ProductStatusSchema.optional(),
+  stats: ProductStatsSchema.optional(),
 });
 
 export const CreateProductSchema = z
@@ -71,13 +87,14 @@ export const ProductChangeRecordSchema = z.object({
     role: z.enum(["admin", "manager", "staff"]),
   }),
   action: z.enum(["CREATE", "UPDATE", "ARCHIVE", "RESTORE"]),
-  changes: z.record(ProductChangeFieldSchema),
+  changes: z.record(z.string(), ProductChangeFieldSchema),
 });
 
 export const ProductListQuerySchema = z.object({
   status: ProductStatusSchema.optional(),
   category: z.string().min(1).optional(),
   search: z.string().optional(),
+  branch: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
@@ -116,7 +133,6 @@ export const InventorySnapshotSchema = z.object({
 
 export const ActionSchema = z.enum(["TRANSFER", "REORDER", "MARKDOWN"]);
 export const StatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
-export const PositionStatusSchema = z.enum(["AT_RISK", "OVERSTOCK", "HEALTHY", "NEW"]);
 
 export const ReasonCodeSchema = z.enum([
   "BELOW_REORDER_POINT",
@@ -141,6 +157,8 @@ export const PolicySchema = z.object({
   receiverCoverDays: z.number().positive(),
   donorCoverDays: z.number().positive(),
   minTransferQty: z.number().int().positive(),
+  transferFixedCost: z.number().nonnegative(),
+  transferCostPerKm: z.number().nonnegative(),
   transferCostPerUnit: z.number().nonnegative(),
   annualHoldingRate: z.number().nonnegative(),
   markdownDiscount: z.number().min(0).max(1),
@@ -219,6 +237,13 @@ export const CoverCellSchema = z.object({
   coverDays: z.number().nullable(),
 });
 
+export const KpiOperationalRollupSchema = z.object({
+  pendingApprovalsCount: z.number().int().nonnegative(),
+  backlogValue: z.number(),
+  atRiskBranchCount: z.number().int().nonnegative(),
+});
+export type KpiOperationalRollup = z.infer<typeof KpiOperationalRollupSchema>;
+
 export const KpiSchema = z.object({
   asOf: IsoDateSchema,
   stockoutRate: z.number(),
@@ -232,6 +257,8 @@ export const KpiSchema = z.object({
   policy: PolicySchema,
   branchRisk: z.array(BranchRiskSchema),
   coverGrid: z.array(CoverCellSchema),
+  operational: KpiOperationalRollupSchema.optional(),
+  scope: z.array(z.string()).optional(),
 });
 
 export const KpiSummarySchema = KpiSchema;
@@ -267,6 +294,9 @@ export const PositionViewSchema = z.object({
   inStockDays: z.number().int().nonnegative(),
   status: PositionStatusSchema,
   lostUnits: z.number(),
+  surplus: z.number().optional(),
+  reserved: z.number().optional(),
+  inTransit: z.number().optional(),
   recommendation: RecommendationSchema.nullable(),
 });
 
@@ -320,7 +350,37 @@ export const AuditEntrySchema = z.object({
   donorBranchId: z.string().min(1).nullable().optional(),
   netBenefit: z.number(),
   reasonCodes: z.array(ReasonCodeSchema),
+  reasonCode: z.string().min(1).optional(),
   actedBy: ActedBySchema.optional(),
+});
+
+export const BatchDecideRequestSchema = z
+  .object({
+    ids: z.array(z.string().min(1)).min(1).max(200),
+    decision: z.enum(["approve", "reject"]),
+    reasonCode: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.decision === "reject") {
+      if (!data.reasonCode || data.reasonCode.trim().length === 0) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["reasonCode"],
+          message: "reasonCode is required when decision is reject",
+        });
+      }
+    }
+  });
+
+export const BatchDecideItemStatusSchema = z.enum(["ok", "forbidden", "not_found", "already_decided"]);
+
+export const BatchDecideItemResultSchema = z.object({
+  id: z.string().min(1),
+  status: BatchDecideItemStatusSchema,
+});
+
+export const BatchDecideResponseSchema = z.object({
+  results: z.array(BatchDecideItemResultSchema),
 });
 
 export const AuditListSchema = z.object({
@@ -331,11 +391,179 @@ export const ErrorBodySchema = z.object({
   error: z.string().min(1),
 });
 
+export const LocationHealthStatusSchema = z.enum(["red", "amber", "green"]);
+export type LocationHealthStatus = z.infer<typeof LocationHealthStatusSchema>;
+
+export const LocationSummaryItemSchema = z.object({
+  branch: BranchSchema,
+  health: LocationHealthStatusSchema,
+  atRiskCount: z.number().int().nonnegative(),
+  overstockCount: z.number().int().nonnegative(),
+  totalSkus: z.number().int().nonnegative(),
+  pendingCount: z.number().int().nonnegative(),
+  stockoutRate: z.number(),
+  lostSalesAtRisk: z.number(),
+  cashReleasable: z.number(),
+});
+export type LocationSummaryItem = z.infer<typeof LocationSummaryItemSchema>;
+
+export const LocationListResponseSchema = z.object({
+  locations: z.array(LocationSummaryItemSchema),
+});
+export type LocationListResponse = z.infer<typeof LocationListResponseSchema>;
+
+export const LocationCoverBandSchema = z.object({
+  band: PositionStatusSchema,
+  count: z.number().int().nonnegative(),
+  share: z.number(),
+});
+export type LocationCoverBand = z.infer<typeof LocationCoverBandSchema>;
+
+export const LocationCategoryHeatmapCellSchema = z.object({
+  category: z.string(),
+  status: PositionStatusSchema,
+  count: z.number().int().nonnegative(),
+  value: z.number(),
+});
+export type LocationCategoryHeatmapCell = z.infer<typeof LocationCategoryHeatmapCellSchema>;
+
+export const LocationTopRiskSkuSchema = z.object({
+  sku: z.string(),
+  name: z.string(),
+  category: z.string(),
+  onHand: z.number(),
+  coverDays: z.number().nullable(),
+  reorderPoint: z.number(),
+  lostSalesAtRisk: z.number(),
+  status: PositionStatusSchema,
+});
+export type LocationTopRiskSku = z.infer<typeof LocationTopRiskSkuSchema>;
+
+export const LocationSummaryResponseSchema = z.object({
+  branch: BranchSchema,
+  asOf: IsoDateSchema,
+  kpis: z.object({
+    stockoutRate: z.number(),
+    skusAtRisk: z.number().int().nonnegative(),
+    overstockValue: z.number(),
+    lostSalesAtRisk: z.number(),
+    cashReleasable: z.number(),
+    pendingDecisions: z.number().int().nonnegative(),
+  }),
+  needsStock: z.array(RecommendationSchema),
+  canGive: z.array(RecommendationSchema),
+  shouldMarkdown: z.array(RecommendationSchema),
+  totals: z.object({
+    needsStockCount: z.number().int().nonnegative(),
+    needsStockValue: z.number(),
+    canGiveCount: z.number().int().nonnegative(),
+    canGiveValue: z.number(),
+    shouldMarkdownCount: z.number().int().nonnegative(),
+    shouldMarkdownValue: z.number(),
+  }),
+  coverBands: z.array(LocationCoverBandSchema),
+  categoryHeatmap: z.array(LocationCategoryHeatmapCellSchema),
+  topAtRiskSkus: z.array(LocationTopRiskSkuSchema),
+});
+export type LocationSummaryResponse = z.infer<typeof LocationSummaryResponseSchema>;
+
+export const LocationInventoryQuerySchema = z.object({
+  search: z.string().optional(),
+  category: z.string().optional(),
+  status: PositionStatusSchema.optional(),
+  sortBy: z.enum(["sku", "name", "category", "onHand", "coverDays", "reorderPoint", "status"]).default("coverDays"),
+  sortDir: z.enum(["asc", "desc"]).default("asc"),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(500).default(25),
+});
+export type LocationInventoryQuery = z.infer<typeof LocationInventoryQuerySchema>;
+
+export const LocationInventoryItemSchema = z.object({
+  sku: z.string(),
+  name: z.string(),
+  category: z.string(),
+  onHand: z.number(),
+  velocity: z.number(),
+  coverDays: z.number().nullable(),
+  reorderPoint: z.number(),
+  status: PositionStatusSchema,
+  surplus: z.number().optional(),
+  reserved: z.number().optional(),
+  inTransit: z.number().optional(),
+  recommendedAction: ActionSchema.nullable(),
+  recommendationId: z.string().nullable(),
+  netBenefit: z.number().nullable(),
+});
+export type LocationInventoryItem = z.infer<typeof LocationInventoryItemSchema>;
+
+export const LocationInventoryResponseSchema = z.object({
+  branch: BranchSchema,
+  items: z.array(LocationInventoryItemSchema),
+  categories: z.array(z.string()),
+  total: z.number().int().nonnegative(),
+  page: z.number().int().positive(),
+  limit: z.number().int().positive(),
+  totalPages: z.number().int().positive(),
+});
+export type LocationInventoryResponse = z.infer<typeof LocationInventoryResponseSchema>;
+
+export const LocationTrendQuerySchema = z.object({
+  sku: z.string().optional(),
+  category: z.string().optional(),
+  range: z.enum(["7", "30", "90"]).default("30"),
+});
+export type LocationTrendQuery = z.infer<typeof LocationTrendQuerySchema>;
+
+export const LocationTrendPointSchema = z.object({
+  date: IsoDateSchema,
+  salesUnits: z.number(),
+  onHandUnits: z.number(),
+});
+export type LocationTrendPoint = z.infer<typeof LocationTrendPointSchema>;
+
+export const LocationTrendResponseSchema = z.object({
+  branch: BranchSchema,
+  sku: z.string().nullable(),
+  category: z.string().nullable(),
+  range: z.enum(["7", "30", "90"]),
+  points: z.array(LocationTrendPointSchema),
+});
+export type LocationTrendResponse = z.infer<typeof LocationTrendResponseSchema>;
+
+export const StockAlertStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+export type StockAlertStatus = z.infer<typeof StockAlertStatusSchema>;
+
+export const StockAlertSchema = z.object({
+  id: z.string().min(1),
+  branchId: z.string().min(1),
+  branchName: z.string().min(1).optional(),
+  sku: z.string().min(1),
+  productName: z.string().min(1).optional(),
+  flaggedBy: ActedBySchema,
+  flaggedAt: z.string().min(1),
+  note: z.string().min(1).max(500),
+  status: StockAlertStatusSchema,
+  decidedBy: ActedBySchema.nullable(),
+  decidedAt: z.string().nullable(),
+});
+export type StockAlert = z.infer<typeof StockAlertSchema>;
+
+export const CreateStockAlertSchema = z.object({
+  branchId: z.string().min(1),
+  sku: z.string().min(1),
+  note: z.string().trim().min(1, "Note is required").max(500),
+});
+export type CreateStockAlert = z.infer<typeof CreateStockAlertSchema>;
+
+export const StockAlertListSchema = z.object({
+  alerts: z.array(StockAlertSchema),
+});
+export type StockAlertList = z.infer<typeof StockAlertListSchema>;
+
 export type Branch = z.infer<typeof BranchSchema>;
 export type Product = z.infer<typeof ProductSchema>;
 export type Action = z.infer<typeof ActionSchema>;
 export type RecommendationStatus = z.infer<typeof StatusSchema>;
-export type PositionStatus = z.infer<typeof PositionStatusSchema>;
 export type ReasonCode = z.infer<typeof ReasonCodeSchema>;
 export type Policy = z.infer<typeof PolicySchema>;
 export type Recommendation = z.infer<typeof RecommendationSchema>;
@@ -364,3 +592,7 @@ export type ProductChangeRecord = z.infer<typeof ProductChangeRecordSchema>;
 export type ProductListQuery = z.infer<typeof ProductListQuerySchema>;
 export type ProductListResponse = z.infer<typeof ProductListResponseSchema>;
 export type ProductDetailWithHistory = z.infer<typeof ProductDetailWithHistorySchema>;
+export type BatchDecideRequest = z.infer<typeof BatchDecideRequestSchema>;
+export type BatchDecideItemStatus = z.infer<typeof BatchDecideItemStatusSchema>;
+export type BatchDecideItemResult = z.infer<typeof BatchDecideItemResultSchema>;
+export type BatchDecideResponse = z.infer<typeof BatchDecideResponseSchema>;

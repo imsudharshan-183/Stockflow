@@ -1,18 +1,22 @@
 import type { FastifyInstance } from "fastify";
-import type {
-  ActionRecord,
-  Analysis,
-  AuditEntry,
-  Branch,
-  Dataset,
-  Product,
-  ProductChangeRecord,
-  Role,
+import {
+  BAHRAIN_BRANCHES,
+  type ActedBy,
+  type ActionRecord,
+  type Analysis,
+  type AuditEntry,
+  type Branch,
+  type Dataset,
+  type Product,
+  type ProductChangeRecord,
+  type Role,
+  type StockAlert,
 } from "@stockflow/core";
 import { buildApp } from "../plugins/app.js";
 import { InMemoryRepository } from "../repositories/memory.js";
+import { MemoryStockAlertStore } from "../repositories/memoryAlerts.js";
 import { InMemoryUserRepository } from "../repositories/memoryUser.js";
-import type { StockRepository } from "../repositories/types.js";
+import type { CachedPlanRecord, SaveDecisionBatchResult, StockRepository } from "../repositories/types.js";
 import type { UserRepository } from "../repositories/userTypes.js";
 import { StockService } from "../services/stockService.js";
 
@@ -21,9 +25,9 @@ export const TEST_JWT_SECRET = "test-secret-at-least-32-characters-long-key";
 /** Seeded users (see repositories/seedData.ts). */
 export const SEED_USERS = {
   admin: { id: "usr_admin_01", email: "admin@stockflow.dev", role: "admin", password: "Admin@12345" },
-  managerMidwest: {
+  managerManama: {
     id: "usr_mgr_01",
-    email: "manager.midwest@stockflow.dev",
+    email: "manager.manama@stockflow.dev",
     role: "manager",
     password: "Manager@12345",
     branchIds: ["BR-001", "BR-002"],
@@ -35,9 +39,9 @@ export const SEED_USERS = {
     password: "Manager@12345",
     branchIds: ["BR-005", "BR-006", "BR-008", "BR-011"],
   },
-  staffChicago: {
+  staffManama: {
     id: "usr_stf_01",
-    email: "staff.chicago@stockflow.dev",
+    email: "staff.manama@stockflow.dev",
     role: "staff",
     password: "Staff@12345",
     branchIds: ["BR-001"],
@@ -120,8 +124,30 @@ export class FixedDatasetRepository implements StockRepository {
   readonly users: UserRepository = new InMemoryUserRepository();
   private readonly actions: ActionRecord[] = [];
   private readonly audit: AuditEntry[] = [];
+  private readonly alertStore = new MemoryStockAlertStore();
+  private dataVersion = 1;
+  private cachedPlan: CachedPlanRecord | null = null;
 
   constructor(private readonly data: Dataset) {}
+
+  peekDatasetSync(): Dataset {
+    return this.data;
+  }
+  peekDataVersionSync(): number {
+    return this.dataVersion;
+  }
+  peekCachedPlanSync(dataVersion: number): CachedPlanRecord | null {
+    return this.cachedPlan?.dataVersion === dataVersion ? this.cachedPlan : null;
+  }
+  saveCachedPlanSync(dataVersion: number, plan: Analysis): void {
+    this.cachedPlan = { dataVersion, computedAt: new Date().toISOString(), plan };
+  }
+  peekActionsSync(): ActionRecord[] {
+    return [...this.actions];
+  }
+  peekAuditSync(): AuditEntry[] {
+    return [...this.audit];
+  }
 
   loadDataset(): Promise<Dataset> {
     return Promise.resolve(this.data);
@@ -132,11 +158,29 @@ export class FixedDatasetRepository implements StockRepository {
   saveAnalysis(): Promise<void> {
     return Promise.resolve();
   }
+  getDataVersion(): Promise<number> {
+    return Promise.resolve(this.dataVersion);
+  }
+  bumpDataVersion(): Promise<number> {
+    this.dataVersion += 1;
+    return Promise.resolve(this.dataVersion);
+  }
+  loadCachedPlan(dataVersion: number): Promise<CachedPlanRecord | null> {
+    return Promise.resolve(this.cachedPlan?.dataVersion === dataVersion ? this.cachedPlan : null);
+  }
+  saveCachedPlan(dataVersion: number, plan: Analysis): Promise<void> {
+    this.cachedPlan = { dataVersion, computedAt: new Date().toISOString(), plan };
+    return Promise.resolve();
+  }
   listActions(): Promise<ActionRecord[]> {
     return Promise.resolve([...this.actions]);
   }
   saveAction(record: ActionRecord): Promise<void> {
     this.actions.push(record);
+    return Promise.resolve();
+  }
+  saveActions(records: ActionRecord[]): Promise<void> {
+    this.actions.push(...records);
     return Promise.resolve();
   }
   listAudit(): Promise<AuditEntry[]> {
@@ -145,6 +189,41 @@ export class FixedDatasetRepository implements StockRepository {
   saveAudit(entry: AuditEntry): Promise<void> {
     this.audit.push(entry);
     return Promise.resolve();
+  }
+  saveAudits(entries: AuditEntry[]): Promise<void> {
+    this.audit.push(...entries);
+    return Promise.resolve();
+  }
+  async saveDecisionBatch(records: ActionRecord[], entries: AuditEntry[]): Promise<SaveDecisionBatchResult> {
+    const persistedIds = new Set<string>();
+    const duplicateIds = new Set<string>();
+    const existing = new Set(this.actions.map((a) => a.recommendationId));
+    const entryByRecId = new Map(entries.map((e) => [e.recommendationId, e]));
+    const toActions: ActionRecord[] = [];
+    const toAudits: AuditEntry[] = [];
+    for (const r of records) {
+      if (existing.has(r.recommendationId) || persistedIds.has(r.recommendationId)) {
+        duplicateIds.add(r.recommendationId);
+        continue;
+      }
+      const entry = entryByRecId.get(r.recommendationId);
+      if (!entry) throw new Error(`Missing audit entry for ${r.recommendationId}`);
+      toActions.push(r);
+      toAudits.push(entry);
+      persistedIds.add(r.recommendationId);
+    }
+    if (toActions.length > 0) {
+      await this.saveAudits(toAudits);
+      await this.saveActions(toActions);
+    }
+    return { persistedIds, duplicateIds };
+  }
+  clearDecisions(): Promise<{ actionsRemoved: number; auditsRemoved: number }> {
+    const actionsRemoved = this.actions.length;
+    const auditsRemoved = this.audit.length;
+    this.actions.length = 0;
+    this.audit.length = 0;
+    return Promise.resolve({ actionsRemoved, auditsRemoved });
   }
   saveProduct(product: Product): Promise<void> {
     const idx = this.data.products.findIndex((p) => p.sku === product.sku);
@@ -169,6 +248,27 @@ export class FixedDatasetRepository implements StockRepository {
       hasSales: false,
     });
   }
+  listStockAlerts(): Promise<StockAlert[]> {
+    return Promise.resolve(this.alertStore.list());
+  }
+  getStockAlert(id: string): Promise<StockAlert | null> {
+    return Promise.resolve(this.alertStore.get(id));
+  }
+  createStockAlert(alert: StockAlert): Promise<StockAlert> {
+    return Promise.resolve(this.alertStore.create(alert));
+  }
+  decideStockAlert(
+    id: string,
+    decision: "APPROVED" | "REJECTED",
+    decidedBy: ActedBy,
+    decidedAt: string,
+  ): Promise<
+    | { status: "decided"; alert: StockAlert }
+    | { status: "not_found" }
+    | { status: "already_decided"; alert: StockAlert }
+  > {
+    return Promise.resolve(this.alertStore.decide(id, decision, decidedBy, decidedAt));
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -178,17 +278,17 @@ const TINY_DAYS = 60;
 
 /**
  * One SKU, three branches:
- *  - BR-001 (Midwest) is overstocked: sells 2/day, holds 300  -> donor
- *  - BR-005 (West) is short: sells 5/day, holds 10            -> transfer receiver
- *  - BR-009 is in nobody's seeded scope and steady
+ *  - BR-001 (Manama) is overstocked: sells 2/day, holds 300 -> donor
+ *  - BR-005 (Hidd) is short: sells 5/day, holds 10          -> transfer receiver
+ *  - BR-009 (Tubli) is in nobody's seeded scope and steady
  * Mirrors the engine's worked example (60 units from B to A).
  */
 export function transferDataset(): Dataset {
-  const branches: Branch[] = [
-    { id: "BR-001", name: "Chicago - Loop", city: "Chicago", region: "Midwest" },
-    { id: "BR-005", name: "Santa Monica", city: "Los Angeles", region: "West" },
-    { id: "BR-009", name: "Miami - Brickell", city: "Miami", region: "South" },
-  ];
+  const branches: Branch[] = ["BR-001", "BR-005", "BR-009"].map((id) => {
+    const found = BAHRAIN_BRANCHES.find((b) => b.id === id);
+    if (!found) throw new Error(`Missing branch ${id} in BAHRAIN_BRANCHES`);
+    return { ...found };
+  });
   const product: Product = {
     sku: "SKU-90001",
     name: "Test Product",

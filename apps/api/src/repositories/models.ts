@@ -8,6 +8,7 @@ const branchSchema = new Schema(
     name: { type: String, required: true },
     city: { type: String, required: true },
     region: { type: String, required: true },
+    coordinates: { type: [Number], default: undefined },
   },
   { _id: false },
 );
@@ -55,7 +56,7 @@ factSchema.index({ branchId: 1, sku: 1, date: 1 }, { unique: true });
 
 const actionSchema = new Schema({
   id: { type: String, required: true, unique: true },
-  recommendationId: { type: String, required: true, index: true },
+  recommendationId: { type: String, required: true, unique: true },
   status: { type: String, required: true },
   decidedAt: { type: String, required: true },
 });
@@ -83,6 +84,7 @@ const auditSchema = new Schema({
   donorBranchId: { type: String, default: null },
   netBenefit: { type: Number, required: true },
   reasonCodes: { type: [String], required: true },
+  reasonCode: { type: String, required: false },
   actedBy: { type: actedBySchema, required: false },
 });
 
@@ -128,6 +130,27 @@ productChangeSchema.index({ sku: 1, at: -1 });
 
 export const MetaModel = mongoose.model("StockflowMeta", metaSchema);
 export const PlanModel = mongoose.model("StockflowPlan", planSchema);
+
+const dataVersionSchema = new Schema(
+  {
+    _id: { type: String, required: true },
+    version: { type: Number, required: true, default: 1 },
+  },
+  { collection: "data_version" },
+);
+
+const planCacheSchema = new Schema(
+  {
+    dataVersion: { type: Number, required: true, unique: true },
+    computedAt: { type: String, required: true },
+    planCompressed: { type: Buffer, required: false },
+    plan: { type: Schema.Types.Mixed, required: false },
+  },
+  { collection: "plan_cache" },
+);
+
+export const DataVersionModel = mongoose.model("StockflowDataVersion", dataVersionSchema);
+export const PlanCacheModel = mongoose.model("StockflowPlanCache", planCacheSchema);
 export const SeriesModel = mongoose.model("StockflowSeries", seriesSchema);
 export const FactModel = mongoose.model("StockflowFact", factSchema);
 export const ActionModel = mongoose.model("StockflowAction", actionSchema);
@@ -149,6 +172,8 @@ const userSchema = new Schema({
 const refreshTokenSchema = new Schema({
   token: { type: String, required: true, unique: true },
   userId: { type: String, required: true, index: true },
+  familyId: { type: String, required: false, index: true },
+  revokedAt: { type: Date, default: null },
   expiresAt: { type: Date, required: true, expires: 0 },
 });
 
@@ -169,3 +194,23 @@ const salesEntrySchema = new Schema(
 salesEntrySchema.index({ branchId: 1, sku: 1, date: 1 }, { unique: true });
 
 export const SalesEntryModel = mongoose.model("SalesEntry", salesEntrySchema);
+
+const stockAlertSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    branchId: { type: String, required: true, index: true },
+    branchName: { type: String, required: false },
+    sku: { type: String, required: true, index: true },
+    productName: { type: String, required: false },
+    flaggedBy: { type: actedBySchema, required: true },
+    flaggedAt: { type: String, required: true },
+    note: { type: String, required: true },
+    status: { type: String, required: true, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
+    decidedBy: { type: actedBySchema, default: null },
+    decidedAt: { type: String, default: null },
+  },
+  { collection: "stock_alerts" },
+);
+stockAlertSchema.index({ branchId: 1, status: 1, flaggedAt: -1 });
+
+export const StockAlertModel = mongoose.model("StockflowStockAlert", stockAlertSchema);

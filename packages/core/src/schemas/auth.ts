@@ -16,6 +16,13 @@ export const PermissionActionSchema = z.enum([
   "users:manage",
   "branches:view_all",
   "products:manage",
+  "dashboard:financial:network",
+  "dashboard:financial:scoped",
+  "dashboard:operational:scoped",
+  "catalog:view",
+  "sales:enter",
+  "stock:flag",
+  "stock:flag:decide",
 ]);
 export type PermissionAction = z.infer<typeof PermissionActionSchema>;
 
@@ -27,14 +34,27 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<PermissionAction>> = {
     "users:manage",
     "branches:view_all",
     "products:manage",
+    "dashboard:financial:network",
+    "dashboard:financial:scoped",
+    "dashboard:operational:scoped",
+    "catalog:view",
+    "sales:enter",
+    "stock:flag:decide",
   ]),
   manager: new Set([
     "recommendations:read",
     "recommendations:decide",
     "audit:read",
+    "dashboard:financial:scoped",
+    "dashboard:operational:scoped",
+    "catalog:view",
+    "sales:enter",
+    "stock:flag:decide",
   ]),
   staff: new Set([
     "recommendations:read",
+    "catalog:view",
+    "stock:flag",
   ]),
 };
 

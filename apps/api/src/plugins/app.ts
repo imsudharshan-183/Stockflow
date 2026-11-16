@@ -1,13 +1,16 @@
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
+import helmet from "@fastify/helmet";
 import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { readEnv, type Env } from "../config/env.js";
 import { registerAuthRoutes } from "../routes/auth.js";
 import { registerCatalogRoutes } from "../routes/catalog.js";
+import { registerLocationRoutes } from "../routes/locations.js";
 import { registerSalesEntriesRoutes } from "../routes/salesEntries.js";
 import { registerStockRoutes } from "../routes/stock.js";
+import { registerStockAlertsRoutes } from "../routes/stockAlerts.js";
 import { registerUsersRoutes } from "../routes/users.js";
 import { AuthService } from "../services/authService.js";
 import { createAuthGuards } from "./auth.js";
@@ -33,19 +36,36 @@ export async function buildApp(
       ACCESS_TOKEN_TTL: "15m",
       REFRESH_TOKEN_TTL: "7d",
       ADMIN_PASSWORD: "Admin@12345",
+      WEB_ORIGIN: "",
     };
   }
   if (envOverrides) {
     env = { ...env, ...envOverrides };
   }
 
-  const app = Fastify({ logger: { level: process.env.NODE_ENV === "test" ? "silent" : "info" } });
+  const app = Fastify({
+    bodyLimit: 1_048_576,
+    logger: { level: process.env.NODE_ENV === "test" ? "silent" : "info" },
+  });
 
-  // Production is one origin, so the browser does not need CORS. Local calls to the API port do.
-  if (process.env.NODE_ENV !== "production") {
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+  });
+
+  const configuredOrigins = env.WEB_ORIGIN.split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0);
+  const allowedOrigins =
+    process.env.NODE_ENV === "production"
+      ? configuredOrigins
+      : [...LOCAL_ORIGINS, ...configuredOrigins];
+
+  // Production with WEB_ORIGIN unset is single-origin, so no CORS headers are emitted.
+  if (allowedOrigins.length > 0) {
     await app.register(cors, {
-      origin: [...LOCAL_ORIGINS],
+      origin: allowedOrigins,
       credentials: true,
+      methods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     });
   }
 
@@ -67,8 +87,10 @@ export async function buildApp(
       registerAuthRoutes(scope, authService, authGuards, env);
       registerUsersRoutes(scope, service.userRepo, authService, authGuards);
       registerStockRoutes(scope, service, authGuards);
+      registerLocationRoutes(scope, service, authGuards);
       registerCatalogRoutes(scope, service, authGuards);
-      registerSalesEntriesRoutes(scope, authGuards);
+      registerSalesEntriesRoutes(scope, service, authGuards);
+      registerStockAlertsRoutes(scope, service, authGuards);
     },
     { prefix: "/api" },
   );

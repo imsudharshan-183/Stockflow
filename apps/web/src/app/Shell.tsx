@@ -1,24 +1,37 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   BarChart3,
   ChevronDown,
+  ClipboardEdit,
+  HelpCircle,
   History,
   ListOrdered,
   LogOut,
+  MapPin,
   Menu,
   Package,
   PanelLeftClose,
   PanelLeftOpen,
+  Search,
   Users,
+  X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
+import { LocationSwitcher, SidebarLocationsList } from "@/app/LocationSidebarParts";
 import { ModeToggle } from "@/components/mode-toggle";
+import { CommandPalette } from "@/components/shared/CommandPalette";
+import { GlossaryDialog } from "@/components/shared/GlossaryDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/features/auth/AuthContext";
+import { queryKeys } from "@/hooks/queryKeys";
+import { useLocationScope } from "@/hooks/useLocationScope";
+import { api } from "@/lib/api";
+import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Role } from "@stockflow/core";
 
@@ -27,6 +40,7 @@ interface NavItem {
   label: string;
   icon: LucideIcon;
   matchPaths?: string[];
+  badgeCount?: number;
 }
 
 function readCollapsedPreference(storageKey: string): boolean {
@@ -45,29 +59,37 @@ function writeCollapsedPreference(storageKey: string, collapsed: boolean): void 
   }
 }
 
-function breadcrumbForPath(pathname: string): { section: string; page: string } {
+function breadcrumbForPath(pathname: string, role?: Role): { section: string; page: string } {
+  if (role === "staff" && (pathname === "/" || pathname.startsWith("/overview"))) {
+    return { section: "Store", page: "My Location" };
+  }
   if (pathname === "/" || pathname.startsWith("/overview")) {
-    return { section: "Operations", page: "Overview" };
+    return { section: "Daily work", page: "Overview" };
   }
   if (pathname.startsWith("/queue")) {
-    return { section: "Operations", page: "Action queue" };
+    return { section: "Daily work", page: "Action queue" };
+  }
+  if (pathname.startsWith("/data")) {
+    return { section: "Inventory", page: "Daily entries" };
   }
   if (pathname.startsWith("/audit")) {
-    return { section: "Governance", page: "Audit log" };
+    return { section: "Review", page: "Audit log" };
   }
   if (pathname.startsWith("/users")) {
-    return { section: "Governance", page: "Users" };
+    return { section: "Admin", page: "Users" };
   }
   if (pathname.startsWith("/branches/")) {
-    const id = pathname.split("/")[2] ?? "Branch";
-    return { section: "Branches", page: id };
+    const id = pathname.split("/")[2] ?? "Location";
+    return { section: "Locations", page: id };
   }
   if (pathname === "/products") {
-    return { section: "Catalog", page: "Products" };
+    return role === "staff"
+      ? { section: "Store", page: "Store inventory" }
+      : { section: "Inventory", page: "Products" };
   }
   if (pathname.startsWith("/products/")) {
     const sku = pathname.split("/")[2] ?? "Product";
-    return { section: "Catalog", page: sku };
+    return { section: "Inventory", page: sku };
   }
   return { section: "StockFlow", page: "Page" };
 }
@@ -86,14 +108,41 @@ function roleBadgeTone(role: Role): "admin" | "manager" | "staff" {
 export function Shell() {
   const { user, logout } = useAuth();
   const location = useLocation();
+  const { selectedLocation, setSelectedLocation, clearLocation, isLocked } = useLocationScope();
 
   const storageKey = `stockflow_sidebar_collapsed:${user?.id ?? "anon"}`;
   const [collapsed, setCollapsed] = useState<boolean>(() => readCollapsedPreference(storageKey));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const userTriggerRef = useRef<HTMLButtonElement>(null);
+
+  const locationsQuery = useQuery({
+    queryKey: queryKeys.locations,
+    queryFn: () => api.locations(),
+    enabled: Boolean(user),
+    staleTime: 60_000,
+  });
+
+  const pendingQueueQuery = useQuery({
+    queryKey: queryKeys.recommendations({
+      status: "PENDING",
+      branch: selectedLocation ?? undefined,
+    }),
+    queryFn: () =>
+      api.recommendations({
+        status: "PENDING",
+        branch: selectedLocation ?? undefined,
+      }),
+    enabled: Boolean(user) && user?.role !== "staff",
+    staleTime: 30_000,
+  });
+
+  const locations = useMemo(() => locationsQuery.data?.locations ?? [], [locationsQuery.data]);
+  const pendingCount = pendingQueueQuery.data?.total ?? 0;
 
   useEffect(() => {
     setCollapsed(readCollapsedPreference(storageKey));
@@ -102,9 +151,20 @@ export function Shell() {
   useEffect(() => {
     setMobileOpen(false);
     setUserMenuOpen(false);
-    const crumb = breadcrumbForPath(location.pathname);
+    const crumb = breadcrumbForPath(location.pathname, user?.role);
     document.title = `${crumb.page} · StockFlow`;
-  }, [location.pathname]);
+  }, [location.pathname, user?.role]);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((prev) => !prev);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   useEffect(() => {
     const onScroll = () => {
@@ -144,22 +204,38 @@ export function Shell() {
     });
   };
 
+  const isStaff = user?.role === "staff";
+  const isAdmin = user?.role === "admin";
   const canViewAudit = user ? user.role === "admin" || user.role === "manager" : true;
   const canManageUsers = user ? user.role === "admin" : false;
 
-  const operationsNav: NavItem[] = [
-    { to: "/", label: "Overview", icon: BarChart3, matchPaths: ["/", "/overview"] },
-    { to: "/queue", label: "Action queue", icon: ListOrdered, matchPaths: ["/queue"] },
-  ];
+  const dailyWorkNav: NavItem[] = isStaff
+    ? [{ to: "/", label: "My Location", icon: MapPin, matchPaths: ["/", "/overview"] }]
+    : [
+        { to: "/", label: "Overview", icon: BarChart3, matchPaths: ["/", "/overview"] },
+        {
+          to: "/queue",
+          label: "Action queue",
+          icon: ListOrdered,
+          matchPaths: ["/queue"],
+          badgeCount: pendingCount,
+        },
+      ];
 
-  const catalogNav: NavItem[] = [
-    { to: "/products", label: "Products", icon: Package, matchPaths: ["/products"] },
-  ];
+  const inventoryNav: NavItem[] = isStaff
+    ? [{ to: "/products", label: "Store inventory", icon: Package, matchPaths: ["/products"] }]
+    : [
+        { to: "/products", label: "Products", icon: Package, matchPaths: ["/products"] },
+        { to: "/data", label: "Daily entries", icon: ClipboardEdit, matchPaths: ["/data"] },
+      ];
 
-  const adminNav: NavItem[] = [
-    ...(canViewAudit ? [{ to: "/audit", label: "Audit log", icon: History, matchPaths: ["/audit"] }] : []),
-    ...(canManageUsers ? [{ to: "/users", label: "Users", icon: Users, matchPaths: ["/users"] }] : []),
-  ];
+  const reviewNav: NavItem[] = canViewAudit
+    ? [{ to: "/audit", label: "Audit log", icon: History, matchPaths: ["/audit"] }]
+    : [];
+
+  const adminNav: NavItem[] = canManageUsers
+    ? [{ to: "/users", label: "Users", icon: Users, matchPaths: ["/users"] }]
+    : [];
 
   const scopeSummary =
     user?.role === "admin"
@@ -168,7 +244,97 @@ export function Shell() {
         ? user.branchIds.join(", ")
         : "No branches";
 
-  const crumb = breadcrumbForPath(location.pathname);
+  const selectedLocationInfo = useMemo(
+    () => locations.find((l) => l.branch.id === selectedLocation) ?? null,
+    [locations, selectedLocation],
+  );
+
+  const crumb = breadcrumbForPath(location.pathname, user?.role);
+
+  const renderNavSections = (isRailCollapsed: boolean) => (
+    <>
+      {!isRailCollapsed ? (
+        <LocationSwitcher
+          locations={locations}
+          selectedLocation={selectedLocation}
+          onSelect={setSelectedLocation}
+          isLocked={isLocked}
+          isAdmin={isAdmin}
+        />
+      ) : null}
+
+      <nav className="flex-1 space-y-4 overflow-y-auto px-2.5 py-4" aria-label="Main sections">
+        <NavGroup
+          title={isStaff ? "Store" : "Daily work"}
+          items={dailyWorkNav}
+          collapsed={isRailCollapsed}
+          pathname={location.pathname}
+          search={location.search}
+        />
+
+        {inventoryNav.length > 0 ? (
+          <NavGroup
+            title="Inventory"
+            items={inventoryNav}
+            collapsed={isRailCollapsed}
+            pathname={location.pathname}
+            search={location.search}
+            divider
+          />
+        ) : null}
+
+        {reviewNav.length > 0 ? (
+          <NavGroup
+            title="Review"
+            items={reviewNav}
+            collapsed={isRailCollapsed}
+            pathname={location.pathname}
+            search={location.search}
+            divider
+          />
+        ) : null}
+
+        {adminNav.length > 0 ? (
+          <NavGroup
+            title="Admin"
+            items={adminNav}
+            collapsed={isRailCollapsed}
+            pathname={location.pathname}
+            search={location.search}
+            divider
+          />
+        ) : null}
+
+        {!isRailCollapsed ? (
+          <SidebarLocationsList locations={locations} pathname={location.pathname} />
+        ) : null}
+      </nav>
+
+      {/* Sidebar Footer: Help + Theme */}
+      <div
+        className={cn(
+          "border-t border-border p-2.5 flex items-center",
+          isRailCollapsed ? "flex-col gap-2" : "justify-between gap-2",
+        )}
+      >
+        <Button
+          type="button"
+          variant="ghost"
+          size={isRailCollapsed ? "icon" : "sm"}
+          onClick={() => setGlossaryOpen(true)}
+          aria-label="Open glossary and help"
+          className={cn(
+            "text-muted-foreground hover:text-foreground",
+            isRailCollapsed ? "size-8" : "h-8 gap-1.5 px-2.5 text-xs",
+          )}
+        >
+          <HelpCircle className="size-4 shrink-0" aria-hidden="true" />
+          {!isRailCollapsed ? <span>Glossary</span> : null}
+        </Button>
+        <ModeToggle />
+      </div>
+    </>
+  );
 
   return (
     <TooltipProvider delay={120}>
@@ -248,58 +414,7 @@ export function Shell() {
             </div>
           )}
 
-          <nav className="flex-1 space-y-5 overflow-y-auto px-2.5 py-4" aria-label="Main sections">
-            <div>
-              {!collapsed ? (
-                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Operations
-                </p>
-              ) : null}
-              <ul className="space-y-1">
-                {operationsNav.map((item) => (
-                  <li key={item.to}>
-                    <SidebarLink item={item} collapsed={collapsed} pathname={location.pathname} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            <div>
-              {!collapsed ? (
-                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Catalog
-                </p>
-              ) : (
-                <div className="my-2 border-t border-border" />
-              )}
-              <ul className="space-y-1">
-                {catalogNav.map((item) => (
-                  <li key={item.to}>
-                    <SidebarLink item={item} collapsed={collapsed} pathname={location.pathname} />
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {adminNav.length > 0 ? (
-              <div>
-                {!collapsed ? (
-                  <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Governance
-                  </p>
-                ) : (
-                  <div className="my-2 border-t border-border" />
-                )}
-                <ul className="space-y-1">
-                  {adminNav.map((item) => (
-                    <li key={item.to}>
-                      <SidebarLink item={item} collapsed={collapsed} pathname={location.pathname} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-          </nav>
+          {renderNavSections(collapsed)}
         </aside>
 
         {/* Mobile Slide-Over Navigation Drawer */}
@@ -315,77 +430,28 @@ export function Shell() {
                 </span>
               </SheetTitle>
             </div>
-            <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4" aria-label="Mobile navigation">
-              <div>
-                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Operations
-                </p>
-                <ul className="space-y-1">
-                  {operationsNav.map((item) => (
-                    <li key={item.to}>
-                      <SidebarLink item={item} collapsed={false} pathname={location.pathname} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div>
-                <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Catalog
-                </p>
-                <ul className="space-y-1">
-                  {catalogNav.map((item) => (
-                    <li key={item.to}>
-                      <SidebarLink item={item} collapsed={false} pathname={location.pathname} />
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              {adminNav.length > 0 ? (
-                <div>
-                  <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Governance
-                  </p>
-                  <ul className="space-y-1">
-                    {adminNav.map((item) => (
-                      <li key={item.to}>
-                        <SidebarLink item={item} collapsed={false} pathname={location.pathname} />
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ) : null}
-            </nav>
-            {user ? (
-              <div className="border-t border-border bg-secondary/40 p-4 text-xs">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold text-foreground">{user.name}</span>
-                  <Badge tone={roleBadgeTone(user.role)}>{user.role}</Badge>
-                </div>
-                <p className="mt-0.5 truncate text-muted-foreground">{user.email}</p>
-                <p className="mt-1 truncate text-muted-foreground">Scope: {scopeSummary}</p>
-              </div>
-            ) : null}
+            {renderNavSections(false)}
           </SheetContent>
         </Sheet>
 
         {/* Main Column */}
         <div className="flex min-w-0 flex-1 flex-col">
-          {/* Slim Top Bar (white, h-14, bottom border, faint shadow when scrolled) */}
+          {/* Slim Top Bar */}
           <header
             className={cn(
-              "sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-card px-4 transition-shadow duration-150 sm:px-6",
+              "sticky top-0 z-30 flex h-14 items-center justify-between gap-2 border-b border-border bg-card px-4 transition-shadow duration-150 sm:gap-3 sm:px-6",
               scrolled ? "shadow-xs" : "",
             )}
           >
-            {/* Left: Mobile menu button + muted breadcrumb */}
-            <div className="flex min-w-0 items-center gap-2.5">
+            {/* Left: Mobile menu button + breadcrumb + active location chip */}
+            <div className="flex min-w-0 flex-1 items-center gap-2 sm:gap-2.5">
               <Tooltip>
                 <TooltipTrigger
                   render={
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-8 rounded-lg md:hidden"
+                      className="size-8 shrink-0 rounded-lg md:hidden"
                       aria-label="Open navigation menu"
                       onClick={() => setMobileOpen(true)}
                     />
@@ -396,95 +462,149 @@ export function Shell() {
                 <TooltipContent side="bottom">Open navigation menu</TooltipContent>
               </Tooltip>
 
-              <nav aria-label="Breadcrumb" className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              <nav
+                aria-label="Breadcrumb"
+                className={cn(
+                  "min-w-0 items-center gap-1.5 text-xs text-muted-foreground",
+                  selectedLocation ? "hidden sm:flex" : "flex",
+                )}
+              >
                 <span className="hidden truncate sm:inline">{crumb.section}</span>
                 <span className="hidden text-disabled sm:inline" aria-hidden="true">
                   /
                 </span>
                 <span className="truncate font-medium text-foreground">{crumb.page}</span>
               </nav>
+
+              {selectedLocation ? (
+                <Badge tone="reorder" className="min-w-0 max-w-full shrink gap-1.5 pl-2 pr-1.5">
+                  <MapPin className="size-3 shrink-0" aria-hidden="true" />
+                  <span className="truncate">
+                    {selectedLocationInfo
+                      ? `${selectedLocationInfo.branch.name} (${selectedLocation})`
+                      : selectedLocation}
+                  </span>
+                  {!isLocked ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={clearLocation}
+                      aria-label="Clear location filter"
+                      className="size-4 shrink-0 rounded-full p-0 hover:bg-primary-soft"
+                    >
+                      <X className="size-3" aria-hidden="true" />
+                    </Button>
+                  ) : null}
+                </Badge>
+              ) : null}
             </div>
 
-            {/* Right: Theme Toggle + Single User Menu Button + Dropdown */}
+            {/* Right: Command Palette Hint + Theme Toggle + User Menu */}
             <div className="flex min-w-0 shrink-0 items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Open command palette"
+                className="hidden h-8 gap-2 rounded-lg border border-border bg-background px-2.5 text-xs text-muted-foreground hover:text-foreground sm:inline-flex"
+              >
+                <Search className="size-3.5" aria-hidden="true" />
+                <span>Jump to...</span>
+                <kbd className="rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  Ctrl K
+                </kbd>
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setPaletteOpen(true)}
+                aria-label="Open command palette"
+                className="size-8 sm:hidden"
+              >
+                <Search className="size-4" aria-hidden="true" />
+              </Button>
+
               <ModeToggle />
 
               {user ? (
                 <div ref={userMenuRef} className="relative flex min-w-0 shrink-0 items-center">
-                <Button
-                  ref={userTriggerRef}
-                  variant="ghost"
-                  onClick={() => setUserMenuOpen((prev) => !prev)}
-                  aria-haspopup="menu"
-                  aria-expanded={userMenuOpen}
-                  aria-label={`Account menu for ${user.name}`}
-                  className="h-9 max-w-[260px] min-w-0 gap-2 rounded-full border border-border bg-card px-2 py-1 text-foreground shadow-xs hover:bg-row-hover min-[900px]:pr-2.5"
-                >
-                  <span
-                    className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-text"
-                    aria-hidden="true"
+                  <Button
+                    ref={userTriggerRef}
+                    variant="ghost"
+                    onClick={() => setUserMenuOpen((prev) => !prev)}
+                    aria-haspopup="menu"
+                    aria-expanded={userMenuOpen}
+                    aria-label={`Account menu for ${user.name}`}
+                    className="h-9 max-w-[260px] min-w-0 gap-2 rounded-full border border-border bg-card px-2 py-1 text-foreground shadow-xs hover:bg-row-hover min-[900px]:pr-2.5"
                   >
-                    {initialsOf(user.name)}
-                  </span>
-                  <span className="hidden min-w-0 items-center gap-1.5 min-[900px]:flex">
-                    <span className="max-w-[120px] truncate text-xs font-medium text-foreground">
-                      {user.name}
+                    <span
+                      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-text"
+                      aria-hidden="true"
+                    >
+                      {initialsOf(user.name)}
                     </span>
-                    <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
-                      {user.role}
-                    </Badge>
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
-                      userMenuOpen ? "rotate-180" : "",
-                    )}
-                    aria-hidden="true"
-                  />
-                </Button>
+                    <span className="hidden min-w-0 items-center gap-1.5 min-[900px]:flex">
+                      <span className="max-w-[120px] truncate text-xs font-medium text-foreground">
+                        {user.name}
+                      </span>
+                      <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
+                        {user.role}
+                      </Badge>
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
+                        userMenuOpen ? "rotate-180" : "",
+                      )}
+                      aria-hidden="true"
+                    />
+                  </Button>
 
-                {userMenuOpen ? (
-                  <div
-                    role="menu"
-                    aria-label="User account details"
-                    className="absolute top-full right-0 z-50 mt-2 w-64 rounded-2xl border border-border bg-card p-3 shadow-pop"
-                  >
-                    <div className="space-y-1 border-b border-border pb-3">
-                      <div className="flex items-center justify-between gap-2">
-                        <p className="truncate text-sm font-semibold text-foreground">{user.name}</p>
-                        <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
-                          {user.role}
-                        </Badge>
+                  {userMenuOpen ? (
+                    <div
+                      role="menu"
+                      aria-label="User account details"
+                      className="absolute top-full right-0 z-50 mt-2 w-64 rounded-2xl border border-border bg-card p-3 shadow-pop"
+                    >
+                      <div className="space-y-1 border-b border-border pb-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-sm font-semibold text-foreground">{user.name}</p>
+                          <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
+                            {user.role}
+                          </Badge>
+                        </div>
+                        <p className="truncate text-xs text-muted-foreground">{user.email}</p>
+                        <div className="pt-1.5">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                            Branch scope
+                          </p>
+                          <p className="mt-0.5 text-xs text-foreground" title={scopeSummary}>
+                            {scopeSummary}
+                          </p>
+                        </div>
                       </div>
-                      <p className="truncate text-xs text-muted-foreground">{user.email}</p>
-                      <div className="pt-1.5">
-                        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Branch scope
-                        </p>
-                        <p className="mt-0.5 text-xs text-foreground" title={scopeSummary}>
-                          {scopeSummary}
-                        </p>
+
+                      <div className="pt-2">
+                        <Button
+                          role="menuitem"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setUserMenuOpen(false);
+                            void logout();
+                          }}
+                          className="h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-xs font-medium text-risk-text hover:bg-risk-bg hover:text-risk-text"
+                        >
+                          <LogOut className="size-3.5" aria-hidden="true" />
+                          Sign out
+                        </Button>
                       </div>
                     </div>
-
-                    <div className="pt-2">
-                      <Button
-                        role="menuitem"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => {
-                          setUserMenuOpen(false);
-                          void logout();
-                        }}
-                        className="h-8 w-full justify-start gap-2 rounded-xl px-2.5 text-xs font-medium text-risk-text hover:bg-risk-bg hover:text-risk-text"
-                      >
-                        <LogOut className="size-3.5" aria-hidden="true" />
-                        Sign out
-                      </Button>
-                    </div>
-                  </div>
-                ) : null}
-              </div>
+                  ) : null}
+                </div>
               ) : null}
             </div>
           </header>
@@ -494,7 +614,45 @@ export function Shell() {
           </main>
         </div>
       </div>
+
+      <GlossaryDialog open={glossaryOpen} onOpenChange={setGlossaryOpen} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </TooltipProvider>
+  );
+}
+
+function NavGroup({
+  title,
+  items,
+  collapsed,
+  pathname,
+  search,
+  divider = false,
+}: {
+  title: string;
+  items: NavItem[];
+  collapsed: boolean;
+  pathname: string;
+  search: string;
+  divider?: boolean;
+}) {
+  return (
+    <div>
+      {!collapsed ? (
+        <p className="mb-1.5 px-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          {title}
+        </p>
+      ) : divider ? (
+        <div className="my-2 border-t border-border" />
+      ) : null}
+      <ul className="space-y-1">
+        {items.map((item) => (
+          <li key={item.to}>
+            <SidebarLink item={item} collapsed={collapsed} pathname={pathname} search={search} />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -502,30 +660,44 @@ function SidebarLink({
   item,
   collapsed,
   pathname,
+  search,
 }: {
   item: NavItem;
   collapsed: boolean;
   pathname: string;
+  search: string;
 }) {
   const Icon = item.icon;
   const isActive = item.matchPaths
     ? item.matchPaths.some((p) => (p === "/" ? pathname === "/" : pathname.startsWith(p)))
     : pathname === item.to;
 
+  // Preserve ?location= query parameter when navigating between scoped pages
+  const params = new URLSearchParams(search);
+  const locationParam = params.get("location");
+  const target = locationParam ? `${item.to}?location=${encodeURIComponent(locationParam)}` : item.to;
+
   const linkElement = (
     <NavLink
-      to={item.to}
+      to={target}
       aria-label={collapsed ? item.label : undefined}
       className={cn(
-        "relative flex h-9 items-center gap-2.5 rounded-xl px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "relative flex h-9 items-center justify-between gap-2 rounded-xl px-3 text-sm font-medium transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         collapsed ? "justify-center px-0" : "",
         isActive
           ? "bg-primary-soft text-primary-text before:absolute before:top-1.5 before:bottom-1.5 before:left-0 before:w-[3px] before:rounded-r-full before:bg-primary"
           : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
       )}
     >
-      <Icon className="size-4 shrink-0" aria-hidden="true" />
-      {!collapsed ? <span className="truncate">{item.label}</span> : null}
+      <span className="flex min-w-0 items-center gap-2.5">
+        <Icon className="size-4 shrink-0" aria-hidden="true" />
+        {!collapsed ? <span className="truncate">{item.label}</span> : null}
+      </span>
+      {!collapsed && item.badgeCount && item.badgeCount > 0 ? (
+        <Badge tone="reorder" className="px-1.5 py-0 text-[11px]">
+          {formatNumber(item.badgeCount)}
+        </Badge>
+      ) : null}
     </NavLink>
   );
 
@@ -533,7 +705,10 @@ function SidebarLink({
     return (
       <Tooltip>
         <TooltipTrigger render={linkElement} />
-        <TooltipContent side="right">{item.label}</TooltipContent>
+        <TooltipContent side="right">
+          {item.label}
+          {item.badgeCount && item.badgeCount > 0 ? ` (${formatNumber(item.badgeCount)})` : ""}
+        </TooltipContent>
       </Tooltip>
     );
   }

@@ -1,10 +1,15 @@
 import {
   AuditListSchema,
+  BatchDecideResponseSchema,
   BranchDetailSchema,
   CreateProductSchema,
   CreateUserSchema,
   ErrorBodySchema,
   KpiSummarySchema,
+  LocationInventoryResponseSchema,
+  LocationListResponseSchema,
+  LocationSummaryResponseSchema,
+  LocationTrendResponseSchema,
   LoginResponseSchema,
   ProductDetailSchema,
   ProductDetailWithHistorySchema,
@@ -12,6 +17,8 @@ import {
   ProductSchema,
   RecommendationListSchema,
   RecommendationSchema,
+  StockAlertListSchema,
+  StockAlertSchema,
   UpdateProductSchema,
   UpdateUserSchema,
   UserListSchema,
@@ -19,8 +26,15 @@ import {
   type AuditList,
   type BranchDetail,
   type CreateProduct,
+  type CreateStockAlert,
   type CreateUser,
   type KpiSummary,
+  type LocationInventoryQuery,
+  type LocationInventoryResponse,
+  type LocationListResponse,
+  type LocationSummaryResponse,
+  type LocationTrendQuery,
+  type LocationTrendResponse,
   type LoginRequest,
   type LoginResponse,
   type Product,
@@ -31,6 +45,8 @@ import {
   type Recommendation,
   type RecommendationList,
   type RecommendationQuery,
+  type StockAlert,
+  type StockAlertList,
   type UpdateProduct,
   type UpdateUser,
   type User,
@@ -174,17 +190,43 @@ export const api = {
     }),
 
   // Stock
-  kpis: (): Promise<KpiSummary> => request("/api/kpis", KpiSummarySchema),
-  audit: (): Promise<AuditList> => request("/api/audit", AuditListSchema),
+  kpis: (branch?: string): Promise<KpiSummary> =>
+    request(withQuery("/api/kpis", branch ? { branch } : {}), KpiSummarySchema),
+  audit: (branch?: string): Promise<AuditList> =>
+    request(withQuery("/api/audit", branch ? { branch } : {}), AuditListSchema),
   recommendations: (query: RecommendationQuery): Promise<RecommendationList> =>
     request(withQuery("/api/recommendations", query as Record<string, unknown>), RecommendationListSchema),
   branch: (id: string): Promise<BranchDetail> =>
     request(`/api/branches/${encodeURIComponent(id)}`, BranchDetailSchema),
+  locations: (): Promise<LocationListResponse> =>
+    request("/api/locations", LocationListResponseSchema),
+  locationSummary: (id: string): Promise<LocationSummaryResponse> =>
+    request(`/api/locations/${encodeURIComponent(id)}/summary`, LocationSummaryResponseSchema),
+  locationInventory: (id: string, query?: Partial<LocationInventoryQuery>): Promise<LocationInventoryResponse> =>
+    request(
+      withQuery(`/api/locations/${encodeURIComponent(id)}/inventory`, (query ?? {}) as Record<string, unknown>),
+      LocationInventoryResponseSchema,
+    ),
+  locationTrend: (id: string, query?: Partial<LocationTrendQuery>): Promise<LocationTrendResponse> =>
+    request(
+      withQuery(`/api/locations/${encodeURIComponent(id)}/trend`, (query ?? {}) as Record<string, unknown>),
+      LocationTrendResponseSchema,
+    ),
   product: (sku: string): Promise<ProductDetail> =>
     request(`/api/products/${encodeURIComponent(sku)}`, ProductDetailSchema),
   decide: (id: string, decision: "approve" | "reject"): Promise<Recommendation> =>
     request(`/api/recommendations/${encodeURIComponent(id)}/${decision}`, RecommendationSchema, {
       method: "POST",
+    }),
+  decideBatch: (
+    ids: readonly string[],
+    decision: "approve" | "reject",
+    reasonCode?: string,
+  ): Promise<{ results: Array<{ id: string; status: "ok" | "forbidden" | "not_found" | "already_decided" }> }> =>
+    request("/api/recommendations/batch/decide", BatchDecideResponseSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: [...ids], decision, ...(reasonCode ? { reasonCode } : {}) }),
     }),
 
   // Catalog Products
@@ -226,11 +268,49 @@ export const api = {
     ),
 
   // Sales entries
+  listSalesEntries: (query?: {
+    branch?: string;
+    sku?: string;
+    from?: string;
+    to?: string;
+    page?: number;
+    limit?: number;
+  }) =>
+    request(
+      withQuery("/api/sales-entries", (query ?? {}) as Record<string, unknown>),
+      z.object({
+        entries: z.array(
+          z.object({
+            id: z.string(),
+            branchId: z.string(),
+            sku: z.string(),
+            date: z.string(),
+            unitsSold: z.number(),
+            onHand: z.number(),
+            updatedAt: z.string(),
+          }),
+        ),
+        total: z.number(),
+        page: z.number(),
+        limit: z.number(),
+        totalPages: z.number(),
+      }),
+    ),
   createSalesEntry: (data: { branchId: string; sku: string; date: string; unitsSold: number; onHand: number }): Promise<unknown> =>
     request("/api/sales-entries", z.unknown(), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
+    }),
+  updateSalesEntry: (id: string, data: { unitsSold: number; onHand: number }): Promise<unknown> =>
+    request(`/api/sales-entries/${encodeURIComponent(id)}`, z.unknown(), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  deleteSalesEntry: (id: string): Promise<{ ok: boolean }> =>
+    request(`/api/sales-entries/${encodeURIComponent(id)}`, z.object({ ok: z.boolean() }), {
+      method: "DELETE",
     }),
   importSalesCsv: (file: File): Promise<{ inserted: number; updated: number; errors: Array<{ row: number; message: string }> }> => {
     const formData = new FormData();
@@ -248,4 +328,22 @@ export const api = {
       },
     );
   },
+
+  // Stock alerts
+  listStockAlerts: (): Promise<StockAlertList> =>
+    request("/api/stock-alerts", StockAlertListSchema),
+  createStockAlert: (payload: CreateStockAlert): Promise<StockAlert> =>
+    request("/api/stock-alerts", StockAlertSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  approveStockAlert: (id: string): Promise<StockAlert> =>
+    request(`/api/stock-alerts/${encodeURIComponent(id)}/approve`, StockAlertSchema, {
+      method: "PATCH",
+    }),
+  rejectStockAlert: (id: string): Promise<StockAlert> =>
+    request(`/api/stock-alerts/${encodeURIComponent(id)}/reject`, StockAlertSchema, {
+      method: "PATCH",
+    }),
 };

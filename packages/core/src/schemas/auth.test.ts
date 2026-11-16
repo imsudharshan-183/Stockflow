@@ -18,6 +18,12 @@ describe("auth helpers and schemas", () => {
     expect(can("admin", "users:manage")).toBe(true);
     expect(can("admin", "branches:view_all")).toBe(true);
     expect(can("admin", "products:manage")).toBe(true);
+    expect(can("admin", "dashboard:financial:network")).toBe(true);
+    expect(can("admin", "dashboard:financial:scoped")).toBe(true);
+    expect(can("admin", "dashboard:operational:scoped")).toBe(true);
+    expect(can("admin", "catalog:view")).toBe(true);
+    expect(can("admin", "stock:flag")).toBe(false);
+    expect(can("admin", "stock:flag:decide")).toBe(true);
 
     // Manager permissions
     expect(can("manager", "recommendations:read")).toBe(true);
@@ -26,6 +32,12 @@ describe("auth helpers and schemas", () => {
     expect(can("manager", "users:manage")).toBe(false);
     expect(can("manager", "branches:view_all")).toBe(false);
     expect(can("manager", "products:manage")).toBe(false);
+    expect(can("manager", "dashboard:financial:network")).toBe(false);
+    expect(can("manager", "dashboard:financial:scoped")).toBe(true);
+    expect(can("manager", "dashboard:operational:scoped")).toBe(true);
+    expect(can("manager", "catalog:view")).toBe(true);
+    expect(can("manager", "stock:flag")).toBe(false);
+    expect(can("manager", "stock:flag:decide")).toBe(true);
 
     // Staff permissions
     expect(can("staff", "recommendations:read")).toBe(true);
@@ -34,6 +46,12 @@ describe("auth helpers and schemas", () => {
     expect(can("staff", "users:manage")).toBe(false);
     expect(can("staff", "branches:view_all")).toBe(false);
     expect(can("staff", "products:manage")).toBe(false);
+    expect(can("staff", "dashboard:financial:network")).toBe(false);
+    expect(can("staff", "dashboard:financial:scoped")).toBe(false);
+    expect(can("staff", "dashboard:operational:scoped")).toBe(false);
+    expect(can("staff", "catalog:view")).toBe(true);
+    expect(can("staff", "stock:flag")).toBe(true);
+    expect(can("staff", "stock:flag:decide")).toBe(false);
   });
 
   it("enforces role management hierarchy (strictly lower role)", () => {

@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/features/auth/AuthContext";
+import { StaffProductStats } from "@/features/products/StaffProductStats";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
@@ -51,6 +52,7 @@ import {
   formatNumber,
 } from "@/lib/format";
 import {
+  CATALOG_CATEGORIES,
   formatProductDisplayName,
   type CreateProduct,
   type Product,
@@ -59,23 +61,17 @@ import {
   type UpdateProduct,
 } from "@stockflow/core";
 
-const CATEGORIES = [
-  "All categories",
-  "Bakery",
-  "Beverages",
-  "Dairy",
-  "Frozen",
-  "Household",
-  "Meat & Seafood",
-  "Pantry",
-  "Personal Care",
-  "Pet Supplies",
-  "Produce",
-  "Snacks",
-  "Toys",
-] as const;
+const CATEGORIES = ["All categories", ...CATALOG_CATEGORIES] as const;
 
 export function ProductsPage() {
+  const { user } = useAuth();
+  if (user?.role === "staff") {
+    return <StaffProductStats />;
+  }
+  return <CatalogProductsPage />;
+}
+
+function CatalogProductsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const queryClient = useQueryClient();
@@ -937,30 +933,30 @@ function AddProductDialog({ open, onOpenChange, onSubmit, isPending }: AddProduc
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground">
-                  Selling Price ($) <span className="text-destructive">*</span>
+                  Selling Price (BD) <span className="text-destructive">*</span>
                 </label>
                 <Input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="0.005"
+                  step="0.005"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
-                  placeholder="24.00"
+                  placeholder="3.250"
                   required
                 />
               </div>
 
               <div className="space-y-1">
                 <label className="text-xs font-medium text-foreground">
-                  Unit Cost ($) <span className="text-destructive">*</span>
+                  Unit Cost (BD) <span className="text-destructive">*</span>
                 </label>
                 <Input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="0.005"
+                  step="0.005"
                   value={cost}
                   onChange={(e) => setCost(e.target.value)}
-                  placeholder="12.00"
+                  placeholder="1.950"
                   required
                 />
               </div>
@@ -968,7 +964,7 @@ function AddProductDialog({ open, onOpenChange, onSubmit, isPending }: AddProduc
 
             {priceInvalid ? (
               <p className="text-xs text-destructive">
-                Selling price (${numPrice}) must be greater than unit cost (${numCost}).
+                Selling price ({formatMoneyFull(numPrice)}) must be greater than unit cost ({formatMoneyFull(numCost)}).
               </p>
             ) : null}
           </div>
@@ -1093,11 +1089,11 @@ function EditProductDialog({
 
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Selling Price ($)</label>
+                <label className="text-xs font-medium text-foreground">Selling Price (BD)</label>
                 <Input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="0.005"
+                  step="0.005"
                   value={price}
                   onChange={(e) => setPrice(e.target.value)}
                   required
@@ -1105,11 +1101,11 @@ function EditProductDialog({
               </div>
 
               <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Unit Cost ($)</label>
+                <label className="text-xs font-medium text-foreground">Unit Cost (BD)</label>
                 <Input
                   type="number"
-                  min="0.01"
-                  step="0.01"
+                  min="0.005"
+                  step="0.005"
                   value={cost}
                   onChange={(e) => setCost(e.target.value)}
                   required
@@ -1119,7 +1115,7 @@ function EditProductDialog({
 
             {priceInvalid ? (
               <p className="text-xs text-destructive">
-                Selling price (${numPrice}) must be greater than unit cost (${numCost}).
+                Selling price ({formatMoneyFull(numPrice)}) must be greater than unit cost ({formatMoneyFull(numCost)}).
               </p>
             ) : null}
 
