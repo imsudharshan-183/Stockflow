@@ -67,17 +67,17 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("RBAC Matrix, Hierarchy & Sc
       {
         method: "GET",
         url: "/api/locations",
-        expected: { anon: 401, staff: 200, mgr1: 200, admin: 200 },
+        expected: { anon: 401, staff: 403, mgr1: 200, admin: 200 },
       },
       {
         method: "GET",
         url: "/api/locations/BR-001/summary",
-        expected: { anon: 401, staff: 200, mgr1: 200, admin: 200 },
+        expected: { anon: 401, staff: 403, mgr1: 200, admin: 200 },
       },
       {
         method: "GET",
         url: "/api/locations/BR-005/summary",
-        expected: { anon: 401, staff: 404, mgr1: 404, admin: 200 },
+        expected: { anon: 401, staff: 403, mgr1: 404, admin: 200 },
       },
       {
         method: "GET",

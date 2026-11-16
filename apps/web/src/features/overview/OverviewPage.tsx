@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { ErrorBlock, LoadingBlock } from "@/components/shared/states";
 import { useAuth } from "@/features/auth/AuthContext";
-import { BranchPage } from "@/features/drilldown/BranchPage";
 import { AdminOverview } from "@/features/overview/AdminOverview";
 import { ManagerOverview } from "@/features/overview/ManagerOverview";
+import { StaffProductStats } from "@/features/products/StaffProductStats";
 import { queryKeys } from "@/hooks/queryKeys";
 import { useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
@@ -13,9 +13,9 @@ export function OverviewPage() {
   const isStaff = user?.role === "staff";
   const isManager = user?.role === "manager";
 
-  // Staff land on a read-only version of their assigned location dashboard
+  // DECISION: Store staff land directly on non-financial store inventory (`ADR-009`)
   if (isStaff) {
-    return <BranchPage forcedBranchId={user.branchIds[0]} readOnly />;
+    return <StaffProductStats />;
   }
 
   return <OverviewDashboard isManager={isManager} />;

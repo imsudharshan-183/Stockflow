@@ -99,12 +99,25 @@ export const ProductListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
 
+export const ProductBranchSummarySchema = z.object({
+  branch: BranchSchema,
+  totalSkus: z.number().int().nonnegative(),
+  statusCounts: z.object({
+    AT_RISK: z.number().int().nonnegative(),
+    HEALTHY: z.number().int().nonnegative(),
+    OVERSTOCK: z.number().int().nonnegative(),
+    NEW: z.number().int().nonnegative(),
+  }),
+});
+export type ProductBranchSummary = z.infer<typeof ProductBranchSummarySchema>;
+
 export const ProductListResponseSchema = z.object({
   products: z.array(ProductSchema),
   total: z.number().int().nonnegative(),
   page: z.number().int().positive(),
   limit: z.number().int().positive(),
   totalPages: z.number().int().positive(),
+  branchSummary: ProductBranchSummarySchema.optional(),
 });
 
 export const ProductDetailWithHistorySchema = z.object({

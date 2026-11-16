@@ -33,7 +33,7 @@ import { useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Role } from "@stockflow/core";
+import { BAHRAIN_BRANCHES, type Role } from "@stockflow/core";
 
 interface NavItem {
   to: string;
@@ -60,8 +60,8 @@ function writeCollapsedPreference(storageKey: string, collapsed: boolean): void 
 }
 
 function breadcrumbForPath(pathname: string, role?: Role): { section: string; page: string } {
-  if (role === "staff" && (pathname === "/" || pathname.startsWith("/overview"))) {
-    return { section: "Store", page: "My Location" };
+  if (role === "staff" && (pathname === "/" || pathname.startsWith("/overview") || pathname === "/products")) {
+    return { section: "Store", page: "Store inventory" };
   }
   if (pathname === "/" || pathname.startsWith("/overview")) {
     return { section: "Daily work", page: "Overview" };
@@ -123,7 +123,7 @@ export function Shell() {
   const locationsQuery = useQuery({
     queryKey: queryKeys.locations,
     queryFn: () => api.locations(),
-    enabled: Boolean(user),
+    enabled: Boolean(user) && user?.role !== "staff",
     staleTime: 60_000,
   });
 
@@ -210,7 +210,14 @@ export function Shell() {
   const canManageUsers = user ? user.role === "admin" : false;
 
   const dailyWorkNav: NavItem[] = isStaff
-    ? [{ to: "/", label: "My Location", icon: MapPin, matchPaths: ["/", "/overview"] }]
+    ? [
+        {
+          to: "/",
+          label: "Store inventory",
+          icon: Package,
+          matchPaths: ["/", "/overview", "/products"],
+        },
+      ]
     : [
         { to: "/", label: "Overview", icon: BarChart3, matchPaths: ["/", "/overview"] },
         {
@@ -223,7 +230,7 @@ export function Shell() {
       ];
 
   const inventoryNav: NavItem[] = isStaff
-    ? [{ to: "/products", label: "Store inventory", icon: Package, matchPaths: ["/products"] }]
+    ? []
     : [
         { to: "/products", label: "Products", icon: Package, matchPaths: ["/products"] },
         { to: "/data", label: "Daily entries", icon: ClipboardEdit, matchPaths: ["/data"] },
@@ -248,6 +255,15 @@ export function Shell() {
     () => locations.find((l) => l.branch.id === selectedLocation) ?? null,
     [locations, selectedLocation],
   );
+  const lockedBranch = useMemo(
+    () => (isStaff && selectedLocation ? BAHRAIN_BRANCHES.find((b) => b.id === selectedLocation) ?? null : null),
+    [isStaff, selectedLocation],
+  );
+  const selectedLocationLabel = selectedLocationInfo
+    ? `${selectedLocationInfo.branch.name} (${selectedLocation})`
+    : lockedBranch
+      ? `${lockedBranch.name} (${lockedBranch.id})`
+      : selectedLocation ?? undefined;
 
   const crumb = breadcrumbForPath(location.pathname, user?.role);
 
@@ -260,6 +276,7 @@ export function Shell() {
           onSelect={setSelectedLocation}
           isLocked={isLocked}
           isAdmin={isAdmin}
+          lockedLabel={selectedLocationLabel}
         />
       ) : null}
 
@@ -305,7 +322,7 @@ export function Shell() {
           />
         ) : null}
 
-        {!isRailCollapsed ? (
+        {!isRailCollapsed && !isStaff ? (
           <SidebarLocationsList locations={locations} pathname={location.pathname} />
         ) : null}
       </nav>
@@ -480,9 +497,7 @@ export function Shell() {
                 <Badge tone="reorder" className="min-w-0 max-w-full shrink gap-1.5 pl-2 pr-1.5">
                   <MapPin className="size-3 shrink-0" aria-hidden="true" />
                   <span className="truncate">
-                    {selectedLocationInfo
-                      ? `${selectedLocationInfo.branch.name} (${selectedLocation})`
-                      : selectedLocation}
+                    {selectedLocationLabel ?? selectedLocation}
                   </span>
                   {!isLocked ? (
                     <Button

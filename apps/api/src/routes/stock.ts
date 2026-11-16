@@ -69,7 +69,9 @@ export function registerStockRoutes(
 
   app.get(
     "/branches/:id",
-    { preHandler: [authGuards.authenticate] },
+    // DECISION: Branch detail exposes financial BD rollups (deadStockValue, lostSalesAtRisk, netBenefit)
+    // so access matches /api/locations/:id/summary and requires dashboard:financial:scoped (403 for staff).
+    { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
     async (request, reply) => {
       await service.ensureFreshPlan();
       const { id } = pathId.parse(request.params);

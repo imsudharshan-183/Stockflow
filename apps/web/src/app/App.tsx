@@ -105,7 +105,14 @@ export function App() {
                   </RequireRole>
                 }
               />
-              <Route path="branches/:id" element={<BranchPage />} />
+              <Route
+                path="branches/:id"
+                element={
+                  <RequireNotStaff>
+                    <BranchPage />
+                  </RequireNotStaff>
+                }
+              />
               <Route path="products" element={<ProductsPage />} />
               <Route path="products/:sku" element={<ProductPage />} />
               <Route

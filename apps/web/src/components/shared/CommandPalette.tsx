@@ -68,40 +68,49 @@ export function CommandPalette({
     }
   }, [open]);
 
+  const isStaff = user?.role === "staff";
+
   const locationsQuery = useQuery({
     queryKey: queryKeys.locations,
     queryFn: () => api.locations(),
-    enabled: open && Boolean(user),
+    enabled: open && Boolean(user) && !isStaff,
     staleTime: 60_000,
   });
 
   const productsQuery = useQuery({
     queryKey: queryKeys.catalogProducts({ search: query.trim() || undefined, limit: 15 }),
     queryFn: () => api.listCatalogProducts({ search: query.trim() || undefined, limit: 15, page: 1 }),
-    enabled: open && Boolean(user),
+    enabled: open && Boolean(user) && !isStaff,
     staleTime: 60_000,
   });
 
   const pageItems = useMemo<PaletteItem[]>(() => {
-    const isStaff = user?.role === "staff";
-    const items: PaletteItem[] = [
-      { id: "page-overview", label: isStaff ? "My Location" : "Overview", subtitle: "Daily summary", to: "/", group: "Page" },
-      { id: "page-products", label: "Products", subtitle: "Catalog & stock levels", to: "/products", group: "Page" },
-    ];
-    if (!isStaff) {
-      items.push(
-        { id: "page-queue", label: "Action queue", subtitle: "Pending transfers, reorders & markdowns", to: "/queue", group: "Page" },
-        { id: "page-data", label: "Daily entries", subtitle: "Record sales & stock counts", to: "/data", group: "Page" },
-        { id: "page-audit", label: "Audit log", subtitle: "Decision history", to: "/audit", group: "Page" },
-      );
+    if (isStaff) {
+      return [
+        {
+          id: "page-overview",
+          label: "Store inventory",
+          subtitle: "Branch shelf stock & cover days",
+          to: "/",
+          group: "Page",
+        },
+      ];
     }
+    const items: PaletteItem[] = [
+      { id: "page-overview", label: "Overview", subtitle: "Daily summary", to: "/", group: "Page" },
+      { id: "page-products", label: "Products", subtitle: "Catalog & stock levels", to: "/products", group: "Page" },
+      { id: "page-queue", label: "Action queue", subtitle: "Pending transfers, reorders & markdowns", to: "/queue", group: "Page" },
+      { id: "page-data", label: "Daily entries", subtitle: "Record sales & stock counts", to: "/data", group: "Page" },
+      { id: "page-audit", label: "Audit log", subtitle: "Decision history", to: "/audit", group: "Page" },
+    ];
     if (user?.role === "admin") {
       items.push({ id: "page-users", label: "Users", subtitle: "Manage roles & branch access", to: "/users", group: "Page" });
     }
     return items;
-  }, [user]);
+  }, [isStaff, user?.role]);
 
   const locationItems = useMemo<PaletteItem[]>(() => {
+    if (isStaff) return [];
     const locs = locationsQuery.data?.locations ?? [];
     return locs.map((loc) => ({
       id: `loc-${loc.branch.id}`,
@@ -110,9 +119,10 @@ export function CommandPalette({
       to: `/branches/${loc.branch.id}`,
       group: "Location",
     }));
-  }, [locationsQuery.data]);
+  }, [isStaff, locationsQuery.data]);
 
   const productItems = useMemo<PaletteItem[]>(() => {
+    if (isStaff) return [];
     const prods = productsQuery.data?.products ?? [];
     return prods.map((p) => ({
       id: `sku-${p.sku}`,
@@ -121,7 +131,7 @@ export function CommandPalette({
       to: `/products/${p.sku}`,
       group: "Product",
     }));
-  }, [productsQuery.data]);
+  }, [isStaff, productsQuery.data]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

@@ -111,13 +111,23 @@ describe("Role-Differentiated API Experience", () => {
   it("Staff gets branch product stats only and is denied dashboard, audit, and user endpoints", async () => {
     const { client, authHeaders } = await setupTestApp();
 
-    // 1. Staff is denied /api/kpis (403)
-    const kpisRes = await client.inject({
-      method: "GET",
-      url: "/api/kpis",
-      headers: authHeaders.staffManama,
-    });
-    expect(kpisRes.statusCode).toBe(403);
+    // 1. Staff is denied /api/kpis and all branch/location financial summary endpoints (403)
+    for (const url of [
+      "/api/kpis",
+      "/api/locations",
+      "/api/locations/BR-001/summary",
+      "/api/locations/BR-005/summary",
+      "/api/locations/BR-001/inventory",
+      "/api/locations/BR-001/trend",
+      "/api/branches/BR-001",
+    ]) {
+      const deniedRes = await client.inject({
+        method: "GET",
+        url,
+        headers: authHeaders.staffManama,
+      });
+      expect(deniedRes.statusCode, `GET ${url} should be 403 for staff`).toBe(403);
+    }
 
     // 2. Staff is denied /api/audit (403)
     const auditRes = await client.inject({
@@ -158,7 +168,7 @@ describe("Role-Differentiated API Experience", () => {
     });
     expect(createProductRes.statusCode).toBe(403);
 
-    // 6. Staff can view catalog with product stats, automatically defaulted to their branch (BR-001)
+    // 6. Staff can view catalog with position stats + non-financial branch header context for BR-001
     const staffCatalogRes = await client.inject({
       method: "GET",
       url: "/api/catalog/products?page=1&limit=10",
@@ -168,11 +178,41 @@ describe("Role-Differentiated API Experience", () => {
     const catalogBody = staffCatalogRes.json();
     expect(catalogBody.products.length).toBe(10);
 
+    // Non-financial branch header metadata and status counts only
+    expect(catalogBody.branchSummary).toBeDefined();
+    expect(catalogBody.branchSummary.branch.id).toBe("BR-001");
+    expect(catalogBody.branchSummary.branch.name).toBe("Manama - CBD");
+    expect(catalogBody.branchSummary.totalSkus).toBeGreaterThan(0);
+    const counts = catalogBody.branchSummary.statusCounts;
+    expect(counts.AT_RISK + counts.HEALTHY + counts.OVERSTOCK + counts.NEW).toBe(
+      catalogBody.branchSummary.totalSkus,
+    );
+
     const firstProduct = catalogBody.products[0];
     expect(firstProduct.stats).toBeDefined();
     expect(typeof firstProduct.stats.onHand).toBe("number");
+    expect(typeof firstProduct.stats.inTransit).toBe("number");
+    expect(typeof firstProduct.stats.reserved).toBe("number");
     expect(typeof firstProduct.stats.velocity).toBe("number");
+    expect(firstProduct.stats.coverDays === null || typeof firstProduct.stats.coverDays === "number").toBe(true);
     expect(["AT_RISK", "OVERSTOCK", "HEALTHY", "NEW"]).toContain(firstProduct.stats.status);
+
+    // Zero financial BD aggregates anywhere in payload
+    for (const forbiddenKey of [
+      "deadStockValue",
+      "lostSalesAtRisk",
+      "overstockValue",
+      "cashReleasable",
+      "netBenefit",
+      "inventoryValue",
+      "revenueAtRisk",
+      "backlogValue",
+      "kpis",
+    ]) {
+      expect(catalogBody[forbiddenKey]).toBeUndefined();
+      expect(catalogBody.branchSummary[forbiddenKey]).toBeUndefined();
+      expect(firstProduct.stats[forbiddenKey]).toBeUndefined();
+    }
 
     // 7. Staff cannot query a branch outside their assigned branch (BR-002)
     const forbiddenBranchCatalogRes = await client.inject({

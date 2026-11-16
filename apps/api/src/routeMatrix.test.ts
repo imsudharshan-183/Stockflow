@@ -245,7 +245,7 @@ describe("route matrix: read-only routes", () => {
       expect((await call("GET", "/api/branches/BR-001")).status).toBe(401);
     });
     it.each([
-      ["staff", "BR-001", 200],
+      ["staff", "BR-001", 403],
       ["staff", "BR-002", 403],
       ["manager", "BR-002", 200],
       ["manager", "BR-005", 403],
@@ -255,7 +255,11 @@ describe("route matrix: read-only routes", () => {
       const r = await call("GET", `/api/branches/${id}`, t[who]);
       expect(r.status).toBe(status);
       if (status === 200) expect((r.body.branch as { id: string }).id).toBe(id);
-      if (status === 403) expect(r.body).toEqual({ error: "Access to branch forbidden" });
+      if (status === 403) {
+        expect(r.body).toEqual({
+          error: who === "staff" ? "Forbidden: Insufficient permissions" : "Access to branch forbidden",
+        });
+      }
       if (status === 404) expect(r.body).toEqual({ error: "Branch not found" });
     });
   });

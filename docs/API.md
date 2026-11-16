@@ -16,18 +16,19 @@ All endpoints are mounted under `/api`. Protected routes require a valid JWT acc
 - `POST /api/recommendations/:id/approve` — Approves recommendation, records audit entry (`admin`/`manager` in scope), and overlays live `committedDeltas` (`reserved`/`inTransit`) without bumping `dataVersion`; returns `409 Conflict` (`DecisionConflictError`) if donor surplus is already committed.
 - `POST /api/recommendations/:id/reject` — Rejects recommendation with reason code, records audit entry.
 - `POST /api/recommendations/batch/decide` — Batch-decides `{ ids: string[] (1..200), decision: "approve" | "reject", reasonCode? }` (`admin`/`manager`). Evaluates RBAC/scope per ID, persists with one bulk action write and one bulk audit write (without bumping `dataVersion`), and returns `{ results: [{ id, status: "ok" | "forbidden" | "not_found" | "already_decided" }] }`.
-- `GET /api/branches/:id` — Branch detail DTO (scoped) with projected `onHand`, `coverDays`, `reserved`, and `inTransit`.
+- `GET /api/branches/:id` — Branch detail DTO with projected `onHand`, `coverDays`, `reserved`, and `inTransit` (`admin`/`manager` in scope via `dashboard:financial:scoped`; `403` for `staff`).
 - `GET /api/products/:sku` — Product detail DTO across scoped branches with projected `onHand`, `coverDays`, `reserved`, and `inTransit`.
 - `GET /api/audit` — Decision audit log, newest first, scoped to caller's branches (`admin`/`manager`).
 
 ## Locations (`/api/locations/*`)
-- `GET /api/locations` — Scoped branch list with health summary.
-- `GET /api/locations/:id/summary` — Location-scoped KPIs, needs/gives/markdowns, cover bands, and category×status heatmap.
-- `GET /api/locations/:id/inventory` — Paginated, filtered inventory for a scoped location with projected stock, cover, `reserved`, and `inTransit`.
-- `GET /api/locations/:id/trend` — Sales vs. on-hand time series (`sku` or `category`, `range=7|30|90`).
+*(Guarded with `dashboard:financial:scoped`; returns `403 Forbidden` for `staff`.)*
+- `GET /api/locations` — Scoped branch list with health summary (`admin`/`manager`).
+- `GET /api/locations/:id/summary` — Location-scoped KPIs, needs/gives/markdowns, cover bands, and category×status heatmap (`admin`/`manager` in scope).
+- `GET /api/locations/:id/inventory` — Paginated, filtered inventory for a scoped location with projected stock, cover, `reserved`, and `inTransit` (`admin`/`manager` in scope).
+- `GET /api/locations/:id/trend` — Sales vs. on-hand time series (`sku` or `category`, `range=7|30|90`, `admin`/`manager` in scope).
 
 ## Product Catalog (`/api/catalog/*`)
-- `GET /api/catalog/products` — Paginated product listing (`search`, `category`, `status`; includes caller branch stock stats with projected `reserved`/`inTransit` when scoped). Authenticated (`admin`, `manager`, `staff`).
+- `GET /api/catalog/products` — Paginated product listing (`search`, `category`, `status`; includes caller branch position `stats` with `onHand`, `inTransit`, `reserved`, `velocity`, `coverDays`, `status` plus non-financial `branchSummary` metadata/status counts when branch-scoped). Authenticated (`admin`, `manager`, `staff`).
 - `GET /api/catalog/products/:sku` — Product record, change history, and `canDeletePermanently` indicator.
 - `POST /api/catalog/products` — Admin-only (`products:manage`). Auto-generates `SKU-XXXXX`, validates `price > cost > 0`, integer `leadTimeDays` 1..21, category-level name uniqueness; starts as `awaiting_history`.
 - `PATCH /api/catalog/products/:sku` — Admin-only. Edits attributes; recomputes analysis when math fields (`price`, `cost`, `leadTimeDays`) change on active products.

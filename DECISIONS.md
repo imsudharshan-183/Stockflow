@@ -176,6 +176,13 @@ Previously, all three user roles (`admin`, `manager`, `staff`) saw the exact sam
      - `/queue` is guarded with `RequireNotStaff` in `App.tsx`, immediately redirecting staff to `/`.
      - `Shell.tsx` hides Operations and Governance sections for staff, presenting a clean "Store" section with a single "Branch Inventory" link.
 
+### Addendum (Location Drilldown Security Tightening)
+- During the location-drilldown work (`c7989d5`), `OverviewPage.tsx` temporarily routed `role === "staff"` on `/` to `BranchPage` (exposing branch-level financial `BD` KPI cards such as `Excess stock`, `Rev at risk`, and `Inventory`), `/branches/:id` lacked `RequireNotStaff`, `Shell.tsx` included a sidebar link to `/branches/:id`, and `GET /api/locations`, `GET /api/locations/:id/summary`, and `GET /api/branches/:id` only required `authenticate` (`403` absent for staff).
+- Both frontend and backend have been tightened to restore the zero-financial-`BD` invariant for `staff`:
+  1. `OverviewPage.tsx` renders `StaffProductStats` on `/` for `staff`, `/branches/:id` is guarded with `RequireNotStaff` in `App.tsx`, and `Shell.tsx` / `CommandPalette.tsx` suppress location/queue/financial links for `staff` while preserving `/products`.
+  2. `GET /api/locations`, `GET /api/locations/:id/summary`, `GET /api/locations/:id/inventory`, `GET /api/locations/:id/trend`, and `GET /api/branches/:id` now enforce `authGuards.requirePermission("dashboard:financial:scoped")` (`403 Forbidden` for `staff`), preventing branch financial `BD` aggregates from leaking over the network.
+  3. Non-financial branch header metadata (`branch` name, city, region) and store-wide SKU status counts (`totalSkus`, `AT_RISK`, `HEALTHY`, `OVERSTOCK`, `NEW`) are returned cleanly via `ProductBranchSummary` on `GET /api/catalog/products` (`branchSummary`) and displayed in `StaffProductStats` using `Badge` and `formatNumber` with zero `BD` figures.
+
 ---
 
 ## ADR-010: Bahrain Geographic Localization, Native Tiered BHD Pricing, and Engine Threshold Scaling

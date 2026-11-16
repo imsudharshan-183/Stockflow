@@ -3,6 +3,7 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Package, Search, X } from "lu
 import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -31,6 +32,7 @@ import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import { formatCover, formatNumber } from "@/lib/format";
 import {
+  BAHRAIN_BRANCHES,
   CATALOG_CATEGORIES,
   formatProductDisplayName,
   type PositionStatus,
@@ -115,6 +117,16 @@ export function StaffProductStats() {
   const products = data?.products ?? [];
   const total = data?.total ?? 0;
   const totalPages = data?.totalPages ?? 1;
+  const branchSummary = data?.branchSummary;
+  const fallbackBranch = useMemo(
+    () => BAHRAIN_BRANCHES.find((b) => b.id === staffBranchId) ?? null,
+    [staffBranchId],
+  );
+  const branchMeta = branchSummary?.branch ?? fallbackBranch;
+  const headerTitle = branchMeta ? `${branchMeta.name} (${branchMeta.id})` : `Store Inventory (${staffBranchId})`;
+  const headerSubtitle = branchMeta
+    ? `Store inventory · ${branchMeta.city}, ${branchMeta.region} region · Shelf stock, cover days & critical-stock escalations`
+    : `Branch ${staffBranchId} · Live shelf stock & cover days`;
 
   const handleSearchChange = (val: string) => {
     setSearch(val);
@@ -139,9 +151,35 @@ export function StaffProductStats() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Store Inventory"
-        subtitle={`Branch ${staffBranchId} · Live shelf stock & cover days`}
+        title={headerTitle}
+        subtitle={headerSubtitle}
+        breadcrumbs={[{ label: "Store" }, { label: "Store inventory" }]}
       />
+
+      {branchSummary ? (
+        <div
+          aria-label="Store inventory status summary"
+          className="flex flex-wrap items-center gap-2 rounded-2xl border border-border bg-card px-4 py-3 shadow-xs"
+        >
+          <Badge variant="secondary">
+            Total SKUs: {formatNumber(branchSummary.totalSkus)}
+          </Badge>
+          <Badge tone="risk" dot>
+            At Risk: {formatNumber(branchSummary.statusCounts.AT_RISK)}
+          </Badge>
+          <Badge tone="ok" dot>
+            Healthy: {formatNumber(branchSummary.statusCounts.HEALTHY)}
+          </Badge>
+          <Badge tone="over" dot>
+            Overstock: {formatNumber(branchSummary.statusCounts.OVERSTOCK)}
+          </Badge>
+          {branchSummary.statusCounts.NEW > 0 ? (
+            <Badge tone="fresh" dot>
+              New: {formatNumber(branchSummary.statusCounts.NEW)}
+            </Badge>
+          ) : null}
+        </div>
+      ) : null}
 
       <TableCard>
         <TableToolbar>
@@ -220,16 +258,17 @@ export function StaffProductStats() {
             />
           </div>
         ) : (
-          <Table className="min-w-[760px]">
+          <Table className="min-w-[740px]">
             <TableHeader>
               <TableRow>
-                <TableHead className="w-[320px]">Product</TableHead>
-                <TableHead className="w-[140px]">Category</TableHead>
-                <TableHead className="w-[100px] text-right">On Hand</TableHead>
-                <TableHead className="w-[100px] text-right">Velocity</TableHead>
-                <TableHead className="w-[110px] text-right">Cover Days</TableHead>
-                <TableHead className="w-[110px]">Health</TableHead>
-                <TableHead className="w-[180px] text-right">Alert</TableHead>
+                <TableHead className="px-2.5">Product</TableHead>
+                <TableHead className="px-2.5">Category</TableHead>
+                <TableHead className="px-2.5 text-right whitespace-normal leading-tight">On Hand</TableHead>
+                <TableHead className="px-2.5 whitespace-normal leading-tight w-[96px]">In transit / Reserved</TableHead>
+                <TableHead className="px-2.5 text-right">Velocity</TableHead>
+                <TableHead className="px-2.5 text-right whitespace-normal leading-tight">Cover Days</TableHead>
+                <TableHead className="px-2.5">Health</TableHead>
+                <TableHead className="px-2.5 text-right">Alert</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -241,31 +280,37 @@ export function StaffProductStats() {
 
                 return (
                   <TableRow key={p.sku}>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40 text-muted-foreground">
-                          <Package className="size-4" />
+                    <TableCell className="px-2.5">
+                      <div className="flex items-center gap-2">
+                        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-muted/40 text-muted-foreground">
+                          <Package className="size-3.5" />
                         </div>
-                        <div className="min-w-0">
+                        <div className="min-w-0 max-w-[175px]">
                           <p className="truncate font-medium text-foreground">{displayName}</p>
                           <p className="font-mono text-xs text-muted-foreground">{p.sku}</p>
                         </div>
                       </div>
                     </TableCell>
-                    <TableCell className="text-muted-foreground">{p.category}</TableCell>
-                    <TableCell className="text-right font-medium tabular-nums text-foreground">
+                    <TableCell className="px-2.5 text-muted-foreground">{p.category}</TableCell>
+                    <TableCell className="px-2.5 text-right font-medium tabular-nums text-foreground">
                       {formatNumber(p.stats?.onHand ?? 0)}
                     </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums text-foreground">
+                    <TableCell className="px-2.5">
+                      <StockDeltaBadges
+                        inTransit={p.stats?.inTransit}
+                        reserved={p.stats?.reserved}
+                      />
+                    </TableCell>
+                    <TableCell className="px-2.5 text-right font-medium tabular-nums text-foreground">
                       {formatNumber(p.stats?.velocity ?? 0)}/d
                     </TableCell>
-                    <TableCell className="text-right font-medium tabular-nums text-foreground">
+                    <TableCell className="px-2.5 text-right font-medium tabular-nums text-foreground">
                       {formatCover(p.stats?.coverDays)}
                     </TableCell>
-                    <TableCell>
+                    <TableCell className="px-2.5">
                       <Badge tone={badge.tone}>{badge.label}</Badge>
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="px-2.5 text-right">
                       {!isAtRisk ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : alert?.status === "PENDING" ? (

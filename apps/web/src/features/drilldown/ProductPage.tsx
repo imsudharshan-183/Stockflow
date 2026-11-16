@@ -278,14 +278,14 @@ function Logic({
           </label>
 
           <div>
-            {isBranchAllowed ? (
+            {isBranchAllowed && user?.role !== "staff" ? (
               <Link
                 className="text-sm font-semibold text-primary hover:underline"
                 to={`/branches/${position.branch.id}`}
               >
                 Open {position.branch.name} branch page →
               </Link>
-            ) : (
+            ) : isBranchAllowed ? null : (
               <span className="text-xs text-muted-foreground">
                 {position.branch.name} is outside your branch scope
               </span>

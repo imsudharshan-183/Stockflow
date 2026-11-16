@@ -36,7 +36,7 @@ StockFlow is a morning decision and action queue system for a 15-branch Bahrain 
 ## RBAC Summary
 - `admin`: All 15 branches; `dashboard:financial:network`, `dashboard:financial:scoped`, `dashboard:operational:scoped`, `catalog:view`, `products:manage`, `users:manage`, `branches:view_all`, `recommendations:read`, `recommendations:decide`, `audit:read`, `sales:enter`, `stock:flag:decide`.
 - `manager`: Assigned `branchIds` only; `dashboard:financial:scoped`, `dashboard:operational:scoped`, `catalog:view`, `recommendations:read`, `recommendations:decide`, `audit:read`, `sales:enter`, `stock:flag:decide`.
-- `staff`: Single assigned branch; `catalog:view`, `recommendations:read`, `stock:flag`. Read-only branch landing (`BranchPage`) + `/products` (`StaffProductStats` with `Flag critical stock` on `AT_RISK` rows); blocked from `/queue`, `/data`, `/audit`, `/users`.
+- `staff`: Single assigned branch; `catalog:view`, `recommendations:read`, `stock:flag`. Lands on non-financial store inventory (`StaffProductStats` on `/` and `/products`, with `Flag critical stock` on `AT_RISK` rows and zero `BD` financial metrics); blocked from `/queue`, `/branches/:id`, `/data`, `/audit`, `/users` (and `403` on `/api/kpis`, `/api/locations*`, `/api/branches/:id`).
 
 ## Working Agreements
 - Run `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` before finishing any phase or task.

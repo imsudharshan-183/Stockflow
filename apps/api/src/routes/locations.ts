@@ -15,9 +15,13 @@ export function registerLocationRoutes(
   service: StockService,
   authGuards: AuthContext,
 ): void {
+  // DECISION: Location drilldown endpoints expose branch financial BD rollups (lostSalesAtRisk,
+  // overstockValue, cashReleasable, netBenefit) and are gated by dashboard:financial:scoped (403 for staff).
+  const requireScopedDashboard = authGuards.requirePermission("dashboard:financial:scoped");
+
   app.get(
     "/locations",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [requireScopedDashboard] },
     async (request) => {
       await service.ensureFreshPlan();
       return service.listLocations(request.currentUser);
@@ -26,7 +30,7 @@ export function registerLocationRoutes(
 
   app.get(
     "/locations/:id/summary",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
       await service.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
@@ -40,7 +44,7 @@ export function registerLocationRoutes(
 
   app.get(
     "/locations/:id/inventory",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
       await service.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
@@ -55,7 +59,7 @@ export function registerLocationRoutes(
 
   app.get(
     "/locations/:id/trend",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
       await service.ensureFreshPlan();
       const { id } = pathId.parse(request.params);

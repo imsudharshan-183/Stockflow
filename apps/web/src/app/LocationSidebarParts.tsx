@@ -26,12 +26,14 @@ export function LocationSwitcher({
   onSelect,
   isLocked,
   isAdmin,
+  lockedLabel,
 }: {
   locations: LocationSummaryItem[];
   selectedLocation: string | null;
   onSelect: (branchId: string | null) => void;
   isLocked: boolean;
   isAdmin: boolean;
+  lockedLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -81,7 +83,9 @@ export function LocationSwitcher({
   }, [locations, search]);
 
   if (isLocked) {
-    const label = currentItem ? `${currentItem.branch.name} (${currentItem.branch.id})` : selectedLocation ?? "Assigned store";
+    const label =
+      lockedLabel ??
+      (currentItem ? `${currentItem.branch.name} (${currentItem.branch.id})` : selectedLocation ?? "Assigned store");
     return (
       <div className="px-2.5 pt-3">
         <div className="flex items-center gap-2 rounded-xl border border-border bg-secondary/50 px-2.5 py-2 text-xs">

@@ -53,6 +53,7 @@ import {
   type Position,
   type PositionStatus,
   type Product,
+  type ProductBranchSummary,
   type ProductChangeRecord,
   type ProductDetail,
   type ProductDetailWithHistory,
@@ -1525,6 +1526,28 @@ export class StockService {
       branchIdx = this.data.branches.findIndex((b) => b.id === targetBranchId);
     }
 
+    let branchSummary: ProductBranchSummary | undefined;
+    const skuIndexBySku = new Map<string, number>();
+    if (branchIdx >= 0) {
+      const statusCounts = { AT_RISK: 0, HEALTHY: 0, OVERSTOCK: 0, NEW: 0 };
+      let totalSkus = 0;
+      for (let i = 0; i < this.data.products.length; i += 1) {
+        const dp = this.data.products[i];
+        if (!dp) continue;
+        skuIndexBySku.set(dp.sku, i);
+        if (dp.status === "archived") continue;
+        const pos = this.projectPositionFor(i, branchIdx);
+        if (!pos) continue;
+        totalSkus += 1;
+        statusCounts[pos.status] += 1;
+      }
+      branchSummary = {
+        branch: this.data.branches[branchIdx]!,
+        totalSkus,
+        statusCounts,
+      };
+    }
+
     let list = [...this.data.products];
     if (query.status) {
       list = list.filter((p) => (p.status ?? "active") === query.status);
@@ -1547,7 +1570,7 @@ export class StockService {
       .map((p) => {
         let stats: ProductStats | undefined = undefined;
         if (branchIdx >= 0) {
-          const prodIdx = this.data.products.findIndex((dp) => dp.sku === p.sku);
+          const prodIdx = skuIndexBySku.get(p.sku) ?? -1;
           const pos = prodIdx >= 0 ? this.projectPositionFor(prodIdx, branchIdx) : undefined;
           if (pos) {
             stats = {
@@ -1584,6 +1607,7 @@ export class StockService {
       page,
       limit,
       totalPages,
+      ...(branchSummary ? { branchSummary } : {}),
     });
   }
 
