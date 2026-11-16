@@ -1,6 +1,6 @@
 # StockFlow
 
-StockFlow is a morning action queue for a 15-branch retailer. It ranks transfer, reorder, and markdown moves by net dollar benefit and writes a plain-language reason for each one. The data is synthetic. There is no customer data and no authentication.
+StockFlow is a morning action queue for a 15-branch Bahrain retail network. It ranks transfer, reorder, and markdown moves by net BHD benefit (`BD`, incorporating Haversine inter-branch freight cost) and writes a plain-language reason for each one. The dataset is synthetic and protected by JWT/cookie RBAC authentication (`admin`, `manager`, `staff`).
 
 Why the math looks like this, and what it refuses to do, is in [docs/DECISIONS.md](docs/DECISIONS.md).
 
@@ -37,7 +37,7 @@ pnpm lint
 pnpm build
 ```
 
-Vitest covers `packages/core` only, including the worked example of a 60-unit transfer. `pnpm build` typechecks the API and writes `apps/web/dist`.
+Vitest covers both `packages/core` (engine math, property invariants, RBAC truth tables, deterministic Bahrain seed) and `apps/api` (dual-repo auth security, RBAC scoping, catalog/sales lifecycle, `plan_cache` consistency, `stock_alerts`, and `committedDeltas` projection / `409` conflict suites; see [docs/TESTING.md](docs/TESTING.md)). `pnpm lint` runs ESLint plus `scripts/check-ui.mjs`, and `pnpm build` compiles TypeScript workspaces and writes `apps/web/dist`.
 
 ## Architecture
 
@@ -61,32 +61,33 @@ apps/web  -- /api -->  apps/api  -->  services  -->  packages/core
 
 ```
 packages/core/src
-  schemas/          Zod contracts shared by the API and the web
-  seed/             Deterministic catalog and 120-day history
+  schemas/          Zod contracts & pure RBAC permission helpers shared by API and web
+  seed/             Deterministic 15-branch Bahrain geography, tiered BHD catalog, and 120-day history
   engine/           config, forecast, classify, match, recommend, backtest
-  report/           Recommendations, KPIs, branch and product views
+  report/           Recommendations, KPIs, branch and product views, reason sentences
   round.ts
 apps/api/src
   config/           Env loading and secret redaction
-  plugins/          Fastify app and error handler
-  routes/           HTTP
-  services/         Cached morning plan, decisions, materiality screen
+  plugins/          Fastify app, auth guards, and error handler
+  routes/           HTTP endpoints (auth, stock, stockAlerts, catalog, locations, salesEntries, users)
+  services/         StockService (cached morning plan, committedDeltas projection, decisions) & AuthService
   repositories/     Memory, MongoDB, and the repository interface
 apps/web/src
-  app/              Shell and routes
-  components/ui     Shared controls
-  components/shared Empty, error, and loading states
-  features/         overview, queue, drilldown, audit
+  app/              Shell and role-guarded routes
+  components/ui     Shared primitives (Button, Badge, Table, Dialog, Card, etc.)
+  components/shared Empty/error/loading states, StockDeltaBadges, charts, glossaries
+  features/         overview, queue, drilldown, products, data, audit, users, auth
   hooks/            Query keys
-  lib/              API client and formatters
+  lib/              API client, design tokens, and formatters
 ```
 
 ## Data flow
 
-1. The repository builds the seeded dataset, or loads one already stored in MongoDB.
-2. The service runs the engine once for the morning after the last seeded day.
-3. `GET /api/kpis`, `GET /api/recommendations`, `GET /api/branches/:id`, and `GET /api/products/:sku` read that result. The recommendation list hides actions below BD 9.500 net benefit or below the minimum transfer quantity. Mongo reads the recommendations stored by `pnpm seed:mongo` instead of running the engine again.
-4. `POST /api/recommendations/:id/approve` and `/reject` append an action and an audit row. They do not recompute the queue. `GET /api/audit` returns those rows.
+1. The repository loads the seeded Bahrain dataset from MongoDB (`plan_cache` + `StockflowMeta`, seeded via `pnpm seed:mongo` / `pnpm seed:users`) or builds it deterministically in memory when `MONGODB_URI` is unset.
+2. `StockService` computes the morning plan lazily on first request for the current `dataVersion` (`<= BD 9.500` net benefit actions and sub-minimum transfers are suppressed by the service queue).
+3. Read endpoints (`GET /api/kpis`, `/api/recommendations`, `/api/locations/:id/*`, `/api/branches/:id`, `/api/products/:sku`, `/api/catalog/products`) apply role/branch scoping post-plan and project live `committedDeltas` (`reserved` donor deductions, `inTransit` receiver receipts) via pure `project()`.
+4. `POST /api/recommendations/:id/approve`, `/reject`, and `/batch/decide` record immutable `actions` + `audit` rows without bumping `dataVersion`, overlay `committedDeltas` (replayed from post-plan `audit` entries on startup), and reject donor over-allocations with `409 Conflict`.
+5. Store `staff` can escalate `AT_RISK` items via `POST /api/stock-alerts` (`stock:flag`), which scoped `manager`/`admin` users approve or reject once via `/api/stock-alerts/:id/approve|reject`. `GET /api/audit` returns decision audit rows in scope.
 
 ## Deploy to Vercel
 
@@ -106,8 +107,8 @@ Use one project. In the import settings, set Framework Preset to **Services**. T
 ## Third-party libraries
 
 - **Core:** Zod, Vitest, TypeScript
-- **API:** Fastify, `@fastify/cors`, Mongoose, dotenv, pino (via Fastify)
-- **Web:** React, Vite, Tailwind CSS, Radix UI, class-variance-authority, TanStack Query, Recharts, React Router, Lucide, Zod, `@fontsource/inter`
+- **API:** Fastify, `@fastify/cors`, `@fastify/cookie`, `@fastify/helmet`, `@fastify/rate-limit`, `bcryptjs`, `jose`, Mongoose, `mongodb-memory-server` (tests), dotenv, pino (via Fastify)
+- **Web:** React, Vite, Tailwind CSS, Base UI (`@base-ui/react`), class-variance-authority, TanStack Query, Recharts, React Router, Lucide, Zod, `@fontsource/inter`
 - **Repo:** ESLint, typescript-eslint, Prettier
 
 ## AI tools

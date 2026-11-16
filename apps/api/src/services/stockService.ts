@@ -104,6 +104,10 @@ const ZERO_DELTA: CommittedDelta = { reserved: 0, inTransit: 0 };
 /**
  * Pure projection applying committed outgoing reservations and inbound stock
  * on top of an immutable engine Position snapshot.
+ *
+ * DECISION: `StockService.analysis` is treated as an immutable baseline per `dataVersion` (`ADR-001`)
+ * so golden snapshots, engine math, and cross-instance plan caching stay deterministic; approvals write
+ * to `actions`/`audit` and project live `reserved`/`inTransit` adjustments at read time instead.
  */
 export function project(
   rawPosition: Position,
@@ -199,6 +203,8 @@ export class StockAlertValidationError extends Error {
 
 export class StockService {
   private readonly decisions = new Map<string, Extract<RecommendationStatus, "APPROVED" | "REJECTED">>();
+  // In-memory projection ledger keyed by `${sku}::${branchId}`; rebuilt from post-plan audits on boot
+  // and cleared per SKU (or network-wide) whenever base dataVersion advances.
   private readonly committedDeltas = new Map<string, CommittedDelta>();
   private readonly committedAllocations = new Map<
     string,
@@ -329,8 +335,13 @@ export class StockService {
   }
 
   /**
-   * Reconstructs committedDeltas at startup from persisted APPROVED transfer
-   * records in the audits collection so restarts never lose live reservations.
+   * Reconstructs `committedDeltas` at startup from persisted APPROVED transfer
+   * records in the `audits` collection so restarts never lose live reservations.
+   *
+   * IMPORTANT: `replayCutoffAt` (`plan_cache.computedAt` when `dataVersion > 1`) skips audit entries
+   * recorded before the current plan was built—after a sales or catalog write bumps `dataVersion`,
+   * recomputation already incorporates physical stock changes into base `onHand`, so replaying older
+   * approvals would double-deduct donor surplus.
    */
   private replayApprovedTransfersFromAudit(replayCutoffAt?: string): void {
     this.clearAllCommittedDeltas();
@@ -1339,8 +1350,10 @@ export class StockService {
     this.inflightDecisionIds.add(id);
     let staged: Array<{ sku: string; branchId: string; reserved: number; inTransit: number }> = [];
     try {
-      // DECISION: Stage donor reservation & receiver in-transit synchronously before awaiting persistence
-      // so concurrent approvals against the same depleted donor fail immediately with 409 Conflict.
+      // DECISION: Stage donor reservation and receiver in-transit synchronously *before* awaiting persistence.
+      // Because Node runs synchronously between awaits, checking donor surplus and mutating `committedDeltas`
+      // before `saveDecisionBatch` prevents same-process concurrent approvals from double-allocating without
+      // an async mutex (`409 Conflict`), while `rollbackStagedDeltas` reverts on DB failure or an E11000 race.
       if (!alreadyDecided && status === "APPROVED") {
         staged = this.stageApprovedDelta(existing);
       }

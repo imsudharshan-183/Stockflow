@@ -51,6 +51,12 @@ export interface TransferCostBreakdown {
   totalCost: number;
 }
 
+/**
+ * TotalTransferCost(Q, D) = C_fixed + (C_km * D) + (C_unit * Q) in BHD.
+ * DECISION: Separates fixed dispatch overhead (BD 1.500), Bahrain island route length
+ * (BD 0.150/km across 2-45 km pairs), and unit handling (BD 0.250/unit) rather than using a flat
+ * USD-era fee so short Manama hops beat long Zallaq/Hidd transfers without shutting out mid-tier BHD items.
+ */
 export function totalTransferCostBreakdown(
   quantity: number,
   distanceKm: number,

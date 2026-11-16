@@ -6,7 +6,7 @@
   - Full Light / Dark / System support via `ThemeProvider` (`components/theme-provider.tsx`) and `ModeToggle` (`components/mode-toggle.tsx`), persisted under `stockflow-theme`.
 - **Shared Primitives (`src/components/ui/`)**:
   - `Button` (`button.tsx`): Only button implementation allowed across the app. Variants: `default`/`primary`, `secondary`/`outline`, `soft-success`, `soft-danger`, `destructive`, `ghost`, `link`. Supports `loading` spinner and `tooltip` props.
-  - `Badge` (`badge.tsx`): Rounded pill badges (`rounded-full`, `1px` inset ring, optional `dot`) for actions (`transfer`, `reorder`, `markdown`), statuses (`pending`, `approved`, `rejected`), roles (`admin`, `manager`, `staff`), and inventory health (`risk`, `over`, `ok`, `fresh`). Priority is conveyed by sort order and `$` amount, not a separate priority badge.
+  - `Badge` (`badge.tsx`): Rounded pill badges (`rounded-full`, `1px` inset ring, optional `dot`) for actions (`transfer`, `reorder`, `markdown`), statuses (`pending`, `approved`, `rejected`), roles (`admin`, `manager`, `staff`), and inventory health (`risk`, `over`, `ok`, `fresh`). Priority is conveyed by sort order and `BD` amount, not a separate priority badge. `StockDeltaBadges` (`components/shared/StockDeltaBadges.tsx`) surfaces `In transit` and `Reserved` pills with `formatNumber()` on branch and product position tables.
   - `TableCard` / `TableToolbar` / `Table` (`table.tsx`): Uses `table-auto` inside a scrollable `table-container` with `min-w-*` widths so wide columns never collide or clip headers on narrow viewports, with `--table-header` 11px uppercase column headers, right-aligned `tabular-nums` numbers, and `TableSkeleton` loading states.
 - **Unified Formatting (`src/lib/format.ts`)**:
   - `formatMoney`: 3-decimal Bahraini Dinar currency (`BD 3.250`, `BD 14,520.350`) for headers and KPI cards.
@@ -24,17 +24,17 @@
 | Route | Component | Access | Purpose |
 |---|---|---|---|
 | `/login` | `LoginPage` | Public | Role-assigned sign-in + collapsible demo account selector (`VITE_SHOW_DEMO_ACCOUNTS`) |
-| `/` | `OverviewPage` | `admin`, `manager`, `staff` | Differentiated view: `AdminOverview` (network $ KPIs, 15-branch heatmap), `ManagerOverview` (cluster operational & financial KPIs), `BranchPage` (`forcedBranchId`, `readOnly` for `staff`) |
-| `/queue` | `QueuePage` | `admin`, `manager` | Ranked action queue, action tabs, filters, batch bar; blocked for `staff` |
-| `/branches/:id` | `BranchPage` | `admin`, `manager`, `staff` (scoped) | Branch KPIs, sales & stock chart, actions touching branch |
-| `/products` | `ProductsPage` | `admin`, `manager`, `staff` (view-only) | Network catalog table and filters; Add/Edit modals, Change History, and CSV Import hidden for `staff` |
-| `/products/:sku` | `ProductPage` | `admin`, `manager`, `staff` (scoped) | SKU policy breakdown, sales/stock/cover charts, branch position table |
+| `/` | `OverviewPage` | `admin`, `manager`, `staff` | Differentiated view: `AdminOverview` (network `BD` KPIs, 15-branch Bahrain heatmap), `ManagerOverview` (cluster operational & financial KPIs plus pending `stock_alerts` approval table), `BranchPage` (`forcedBranchId`, `readOnly` for `staff`) |
+| `/queue` | `QueuePage` | `admin`, `manager` | Ranked action queue, action tabs, filters, freight breakdown drawer, batch bar; blocked for `staff` |
+| `/branches/:id` | `BranchPage` | `admin`, `manager`, `staff` (scoped) | Branch KPIs, sales & stock chart, projected `In transit` / `Reserved` stock badges, actions touching branch |
+| `/products` | `ProductsPage` | `admin`, `manager`, `staff` (`Store Inventory`) | Role-branched: `admin`/`manager` see network catalog & filters (Add/Edit/Archive/CSV controls admin-only); `staff` render `StaffProductStats` (`Store Inventory` for their assigned branch with `Flag critical stock` on `AT_RISK` items) |
+| `/products/:sku` | `ProductPage` | `admin`, `manager`, `staff` (scoped) | SKU policy breakdown, sales/stock/cover charts, branch position table with `StockDeltaBadges` (`In transit` / `Reserved`) |
 | `/data` | `DataEntryPage` | `admin`, `manager` | Daily sales entry form, recent entries, and bulk CSV import; blocked for `staff` |
 | `/audit` | `AuditPage` | `admin`, `manager` | Searchable decision audit log with reason-code badges; blocked for `staff` |
 | `/users` | `UsersPage` | `admin` | Create, edit role/branches, reset password, and deactivate users |
 
 ## UX Principles
 - **Plain language first**: Surface buyer-friendly terms and contextual help popovers for inventory metrics.
-- **Role-appropriate landing**: Admins see network dollars and risk; managers see their branch cluster; staff see a read-only view of their assigned store.
+- **Role-appropriate landing**: Admins see network `BD` risk and cash-release totals; managers see their branch cluster and escalated alerts; staff see a read-only view of their assigned store.
 - **Linkable URL state**: Location scope, filters, tabs, sorting, and pagination belong in URL query parameters so views survive refresh and sharing.
 - **Accessible & non-color-only**: Statuses pair color tokens with text labels or icons; charts provide table fallbacks and keyboard navigation.

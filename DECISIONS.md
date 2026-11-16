@@ -2,6 +2,24 @@
 
 This document records the numbered architectural decisions (`ADR-001`+), trade-offs, and invariants adopted across the StockFlow codebase. For the replenishment algorithm notes, assumptions, scaling path, and security summary, see [docs/DECISIONS.md](docs/DECISIONS.md).
 
+## Index
+
+| ADR | Decision | Summary |
+|---|---|---|
+| [ADR-001](#adr-001-pure-mathematical-core-engine-in-stockflowcore) | Pure Core Engine | Keep math deterministic, side-effect-free, and snapshot-locked in `@stockflow/core`. |
+| [ADR-002](#adr-002-server-side-branch-scoping-post-plan-computation) | Post-Plan Branch Scoping | Compute the global morning plan once and scope donors/receivers per role in the API. |
+| [ADR-003](#adr-003-authentication-session-continuity-and-dual-mode-tokens) | Session Continuity & Dual-Mode Tokens | Resolve Bearer tokens even when `AUTH_ENABLED=false`, persist sessionStorage across reloads, and isolate user caches. |
+| [ADR-004](#adr-004-immutable-decision-audit-trail-with-dual-branch-attribution) | Immutable Audit & Dual Attribution | Append immutable decision audit entries visible to both receiving and donor branch managers. |
+| [ADR-005](#adr-005-professional-category-specific-product-naming) | Category-Specific Product Naming | Enforce unique `<Brand> <Product>, <Variant>` catalog names under 60 characters without embedded SKUs. |
+| [ADR-006](#adr-006-ui-primitives--automated-guardrail-verification) | UI Primitives & Lint Guardrails | Require shared `Button`/`Badge`/`Table` components and `@/lib/format` helpers via `check-ui.mjs`. |
+| [ADR-007](#adr-007-product-catalog-lifecycle-change-history-and-safe-deletion) | Catalog Lifecycle & Safe Deletion | Track `awaiting_history`/`active`/`archived` SKU states with admin-only edits and safe deletion checks. |
+| [ADR-008](#adr-008-product-catalog-management-ui-and-ingestion-workflows) | Catalog Management UI & Ingestion | Support admin SKU CRUD, audit history tabs, and bulk daily sales CSV import workflows. |
+| [ADR-009](#adr-009-role-differentiated-dashboards-and-staff-product-view) | Role-Differentiated Dashboards & Staff View | Serve distinct `/` landing screens per role and route staff `/products` to read-only `StaffProductStats`. |
+| [ADR-010](#adr-010-bahrain-geographic-localization-native-tiered-bhd-pricing-and-engine-threshold-scaling) | Bahrain Localization & BHD Scaling | Localize all 15 branches to verified Bahrain coordinates, tier prices in 3-decimal BHD, and scale engine cutoffs. |
+| [ADR-011](#adr-011-distance-aware-inter-branch-transfer-cost-in-bahrain-totaltransfercostq-d) | Distance-Aware Transfer Freight | Price inter-branch transfers via `C_fixed + (C_km * D) + (C_unit * Q)` using Haversine km in BHD. |
+| [ADR-012](#adr-012-critical-stock-escalations-stock_alerts-with-staff-flagging-and-immutable-manager-review) | Critical Stock Escalations (`stock_alerts`) | Split `stock:flag` (staff create) and `stock:flag:decide` (scoped manager/admin immutable approval). |
+| [ADR-013](#adr-013-non-mutating-committeddeltas-approval-ledger-pure-project-and-409-over-allocation-conflict-guard) | Non-Mutating `committedDeltas` Ledger & `409` Guard | Project live `reserved`/`inTransit` overlays via pure `project()`, guard donor over-allocation (`409`), and replay on boot. |
+
 ---
 
 ## ADR-001: Pure Mathematical Core Engine in `@stockflow/core`

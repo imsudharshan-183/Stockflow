@@ -21,7 +21,8 @@ pnpm reset:decisions --yes
 3. **Daily Entries (`/data`)**:
    - Open **Daily entries**, select a location and SKU, submit a new daily count (`onHand = 0` with demand), and click the toast link to jump to the updated **Action queue**.
    - Switch to **Recent entries** to edit (`PATCH`) or delete (`DELETE`) a record, and show **Import CSV** with template download and row-level error reporting.
-4. **Action Queue & Audit (`/queue`, `/audit`)**:
-   - Approve or reject a recommendation, inspect the drawer economics, and verify the immutable audit trail on `/audit`.
-5. **Role Switching**:
-   - Sign in as `manager.manama@stockflow.dev` (scoped to 2 branches, out-of-scope `/branches/BR-005` blocked) and `staff.manama@stockflow.dev` (locked to `BR-001`, read-only landing).
+4. **Action Queue, Live Inventory Projection & Audit (`/queue`, `/audit`)**:
+   - Inspect a transfer's Bahrain distance-aware freight breakdown (`fixed + distance + per-unit`) in the recommendation drawer, approve it, confirm live **Reserved** (donor) / **In transit** (receiver) badges update on `/branches/:id` and `/products/:sku`, and verify the immutable audit trail on `/audit`.
+5. **Role Switching & Staff Escalations**:
+   - Sign in as `staff.manama@stockflow.dev` (locked to `BR-001`, read-only landing), open `/products` (`Store Inventory`), and click **Flag critical stock** on an `AT_RISK` item.
+   - Sign in as `manager.manama@stockflow.dev` (scoped to `BR-001`/`BR-002`, out-of-scope `/branches/BR-005` blocked) and approve or reject the escalated item under **Pending branch critical-stock alerts** on `/`.

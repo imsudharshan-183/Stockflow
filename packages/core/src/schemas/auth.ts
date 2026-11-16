@@ -21,6 +21,8 @@ export const PermissionActionSchema = z.enum([
   "dashboard:operational:scoped",
   "catalog:view",
   "sales:enter",
+  // DECISION: Strict separation of duties — store staff can flag floor shortages in their own branch
+  // (`stock:flag`), while only scoped managers/admins can decide escalations (`stock:flag:decide`).
   "stock:flag",
   "stock:flag:decide",
 ]);

@@ -10,13 +10,13 @@
 - Run post-deploy smoke test: `node scripts/smoke.mjs https://<deployment-url>`
 
 ## Test Suites
-- **`packages/core` (22 tests)**:
+- **`packages/core` (23 tests)**:
   - `src/engine/engine.test.ts`: EWMA velocity, safety stock, classification, greedy matching, net benefit, backtest.
   - `src/engine/engine.prop.test.ts`: `fast-check` property-based tests verifying engine mathematical and structural invariants across generated datasets.
   - `src/schemas/auth.test.ts`: RBAC `can`, `scopeBranches`, `canManageRole` unit checks.
   - `src/authTruthTable.test.ts`: Exhaustive truth tables for `can`, `canManageRole`, and `scopeBranches`.
   - `src/seed/seed.test.ts`: Deterministic dataset generation and backtest replay invariants.
-- **`apps/api` (183 tests)**:
+- **`apps/api` (195 tests)**:
   - `src/dbRoundTripsAndLatency.test.ts` *(dual-repo, `MongoMemoryReplSet` for transactions)*: Instruments repository DB operations per request (`<= 3` DB ops on warm reads, single approve, and `POST /api/recommendations/batch/decide` for 50 items), verifies `dataVersion` invariance on decisions, cross-instance decision overlay propagation, mixed valid/out-of-scope/unknown/already-decided batch results, idempotency on repeat, reject-without-`reasonCode` `400`, concurrent overlapping batches across two instances (unique index `E11000` -> `already_decided`, 1 action + 1 audit per ID), simulated audit-write failure leaving zero orphan actions, and `< 300 ms` in-memory latencies.
   - `src/planConsistency.test.ts` *(dual-repo)*: Two-instance serverless consistency (sales entries, catalog archive, decisions), cold-start `plan_cache` hit skipping `analyze()`, concurrent version-mismatch single compute, and failed-persist fallback.
   - `src/vercelRouting.test.ts`: Verifies `vercel.json` catch-all SPA fallback covers every `<Route>` in `apps/web/src/app/App.tsx` without colliding with `/api/(.*)`.

@@ -500,7 +500,9 @@ export class MongoRepository implements StockRepository {
     | { status: "already_decided"; alert: StockAlert }
   > {
     await this.ensureConnected();
-    // DECISION: Conditional atomic update matches status: "PENDING" so decided alerts are strictly immutable.
+    // DECISION: Conditional atomic findOneAndUpdate({ id, status: "PENDING" }) prevents TOCTOU races
+    // under concurrent manager reviews without needing a multi-document transaction; a null match lets us
+    // cleanly separate "not_found" from "already_decided" (409) via a follow-up lookup.
     const updated = await StockAlertModel.findOneAndUpdate(
       { id, status: "PENDING" },
       { $set: { status: decision, decidedBy, decidedAt } },
