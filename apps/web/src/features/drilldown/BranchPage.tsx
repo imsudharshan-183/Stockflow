@@ -357,6 +357,7 @@ export function BranchPage({
               <ActionListTable
                 rows={summary.needsStock}
                 mode="needs"
+                leadTimeDaysBySku={summary.leadTimeDaysBySku}
                 emptyTitle="No incoming stock needed"
                 emptyBody="All SKUs at this location have enough days of stock left to cover lead time."
                 onOpen={setDrawerRec}
@@ -901,12 +902,14 @@ function SortButton({
 function ActionListTable({
   rows,
   mode,
+  leadTimeDaysBySku,
   emptyTitle,
   emptyBody,
   onOpen,
 }: {
   rows: Recommendation[];
   mode: "needs" | "gives" | "markdowns";
+  leadTimeDaysBySku?: Record<string, number>;
   emptyTitle: string;
   emptyBody: string;
   onOpen: (rec: Recommendation) => void;
@@ -957,7 +960,11 @@ function ActionListTable({
                     {rec.donorBranchName ?? rec.donorBranchId} · Today
                   </span>
                 ) : (
-                  <span>Supplier · Lead time</span>
+                  <span>
+                    {leadTimeDaysBySku?.[rec.sku] !== undefined
+                      ? `Supplier · ${formatNumber(leadTimeDaysBySku[rec.sku]!)}d lead time`
+                      : "Supplier · Lead time"}
+                  </span>
                 )}
               </TableCell>
             ) : null}

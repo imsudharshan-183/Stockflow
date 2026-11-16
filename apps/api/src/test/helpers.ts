@@ -32,9 +32,9 @@ export const SEED_USERS = {
     password: "Manager@12345",
     branchIds: ["BR-001", "BR-002"],
   },
-  managerWest: {
+  managerRegional: {
     id: "usr_mgr_02",
-    email: "manager.west@stockflow.dev",
+    email: "manager.regional@stockflow.dev",
     role: "manager",
     password: "Manager@12345",
     branchIds: ["BR-005", "BR-006", "BR-008", "BR-011"],
@@ -46,9 +46,9 @@ export const SEED_USERS = {
     password: "Staff@12345",
     branchIds: ["BR-001"],
   },
-  staffLincoln: {
+  staffJuffair: {
     id: "usr_stf_02",
-    email: "staff.lincoln@stockflow.dev",
+    email: "staff.juffair@stockflow.dev",
     role: "staff",
     password: "Staff@12345",
     branchIds: ["BR-002"],

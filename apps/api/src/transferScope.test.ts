@@ -47,9 +47,9 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
   it.each([
     ["admin", SEED_USERS.admin, true],
     ["manager whose branch is the donor", SEED_USERS.managerManama, true],
-    ["manager whose branch is the receiver", SEED_USERS.managerWest, true],
+    ["manager whose branch is the receiver", SEED_USERS.managerRegional, true],
     ["staff at the donor branch", SEED_USERS.staffManama, true],
-    ["staff at an unrelated branch", SEED_USERS.staffLincoln, false],
+    ["staff at an unrelated branch", SEED_USERS.staffJuffair, false],
   ] as const)("%s sees it: %s", async (_label, user, visible) => {
     expect((await visibleIds(user)).includes(transfer.id)).toBe(visible);
   });
@@ -100,7 +100,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     const receiverAudit = await app.inject({
       method: "GET",
       url: "/api/audit",
-      headers: bearer(tokenFor(app, SEED_USERS.managerWest)),
+      headers: bearer(tokenFor(app, SEED_USERS.managerRegional)),
     });
     expect(json<AuditList>(receiverAudit.payload).entries).toHaveLength(1);
 

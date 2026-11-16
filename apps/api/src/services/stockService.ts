@@ -1055,6 +1055,15 @@ export class StockService {
 
     atRiskSkus.sort((a, b) => b.lostSalesAtRisk - a.lostSalesAtRisk);
 
+    const leadTimeDaysBySku: Record<string, number> = {};
+    if (needsStock.length > 0) {
+      const productBySku = new Map(this.data.products.map((p) => [p.sku, p]));
+      for (const rec of needsStock) {
+        const prod = productBySku.get(rec.sku);
+        if (prod) leadTimeDaysBySku[rec.sku] = prod.leadTimeDays;
+      }
+    }
+
     return LocationSummaryResponseSchema.parse({
       branch,
       asOf: this.analysis.kpis.asOf,
@@ -1080,6 +1089,7 @@ export class StockService {
       coverBands,
       categoryHeatmap: Array.from(heatmapMap.values()),
       topAtRiskSkus: atRiskSkus.slice(0, 10),
+      leadTimeDaysBySku,
     });
   }
 

@@ -12,7 +12,7 @@ if (env.MONGODB_URI.trim().length === 0) {
   console.log("Demo credentials:");
   console.log("  Admin: admin@stockflow.dev / " + env.ADMIN_PASSWORD);
   console.log("  Manager (Manama): manager.manama@stockflow.dev / Manager@12345");
-  console.log("  Manager (West): manager.west@stockflow.dev / Manager@12345");
+  console.log("  Manager (Regional): manager.regional@stockflow.dev / Manager@12345");
   console.log("  Staff: staff.manama@stockflow.dev / Staff@12345");
   process.exit(0);
 }
@@ -28,7 +28,7 @@ try {
     console.log("Demo credentials:");
     console.log("  Admin: admin@stockflow.dev / " + env.ADMIN_PASSWORD);
     console.log("  Manager (Manama): manager.manama@stockflow.dev / Manager@12345");
-    console.log("  Manager (West): manager.west@stockflow.dev / Manager@12345");
+    console.log("  Manager (Regional): manager.regional@stockflow.dev / Manager@12345");
     console.log("  Staff: staff.manama@stockflow.dev / Staff@12345");
   }
   process.exit(0);

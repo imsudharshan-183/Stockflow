@@ -680,18 +680,36 @@ export function QueuePage() {
                               >
                                 <X className="size-3.5" aria-hidden="true" />
                               </Button>
-                              <ChevronRight
-                                className="ml-0.5 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-hover/row:translate-x-0.5 group-hover/row:text-foreground"
-                                aria-hidden="true"
-                              />
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                tooltip="Inspect details"
+                                aria-label={`Inspect ${row.productName}`}
+                                onClick={() => openRowDrawer(row.id)}
+                                className="ml-0.5 text-muted-foreground hover:text-foreground"
+                              >
+                                <ChevronRight
+                                  className="size-4 shrink-0 transition-transform duration-150 group-hover/row:translate-x-0.5"
+                                  aria-hidden="true"
+                                />
+                              </Button>
                             </div>
                           </TableCell>
                         ) : (
-                          <TableCell className="px-2 text-right">
-                            <ChevronRight
-                              className="inline-block size-4 text-muted-foreground group-hover/row:text-foreground"
-                              aria-hidden="true"
-                            />
+                          <TableCell
+                            className="px-2 text-right"
+                            onClick={(event) => event.stopPropagation()}
+                          >
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              tooltip="Inspect details"
+                              aria-label={`Inspect ${row.productName}`}
+                              onClick={() => openRowDrawer(row.id)}
+                              className="text-muted-foreground hover:text-foreground"
+                            >
+                              <ChevronRight className="size-4" aria-hidden="true" />
+                            </Button>
                           </TableCell>
                         )}
                       </TableRow>

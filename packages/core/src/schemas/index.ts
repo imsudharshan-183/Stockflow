@@ -477,6 +477,7 @@ export const LocationSummaryResponseSchema = z.object({
   coverBands: z.array(LocationCoverBandSchema),
   categoryHeatmap: z.array(LocationCategoryHeatmapCellSchema),
   topAtRiskSkus: z.array(LocationTopRiskSkuSchema),
+  leadTimeDaysBySku: z.record(z.string(), z.number().int().positive()).optional(),
 });
 export type LocationSummaryResponse = z.infer<typeof LocationSummaryResponseSchema>;
 

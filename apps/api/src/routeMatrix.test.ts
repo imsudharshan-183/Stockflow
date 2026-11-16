@@ -417,7 +417,7 @@ describe("route matrix: /api/users writes", () => {
     role: "staff",
     branchIds: ["BR-003"],
   };
-  const sid = SEED_USERS.staffLincoln.id;
+  const sid = SEED_USERS.staffJuffair.id;
 
   it.each([
     ["POST", "/api/users", newUser],
@@ -470,7 +470,7 @@ describe("route matrix: /api/users writes", () => {
     expect(r.status).toBe(200);
     expect(r.body).toMatchObject({ role: "manager", branchIds: ["BR-002", "BR-003"] });
     // Scope change takes effect immediately on the next request (role is read from the DB).
-    const token = tokenFor(ctx.app, { id: sid, email: SEED_USERS.staffLincoln.email, role: "staff" });
+    const token = tokenFor(ctx.app, { id: sid, email: SEED_USERS.staffJuffair.email, role: "staff" });
     const k = (await call("GET", "/api/kpis", token)).body as unknown as KpiSummary;
     expect(k.branches.map((b) => b.id).sort()).toEqual(["BR-002", "BR-003"]);
   });
@@ -478,20 +478,20 @@ describe("route matrix: /api/users writes", () => {
   it("PATCH: 404 unknown, 403 on self/admin, 403 promoting to admin, 400 invalid", async () => {
     expect((await call("PATCH", "/api/users/usr_nope", admin, { name: "X" })).status).toBe(404);
     expect((await call("PATCH", `/api/users/${SEED_USERS.admin.id}`, admin, { name: "X" })).status).toBe(403);
-    const promote = await call("PATCH", `/api/users/${SEED_USERS.managerWest.id}`, admin, { role: "admin" });
+    const promote = await call("PATCH", `/api/users/${SEED_USERS.managerRegional.id}`, admin, { role: "admin" });
     expect(promote.status).toBe(403);
     expect(promote.body).toEqual({ error: "Cannot assign role equal to or higher than yours" });
-    expect((await call("PATCH", `/api/users/${SEED_USERS.managerWest.id}`, admin, { role: "owner" })).status).toBe(400);
+    expect((await call("PATCH", `/api/users/${SEED_USERS.managerRegional.id}`, admin, { role: "owner" })).status).toBe(400);
   });
 
   it("PATCH isActive=false revokes refresh tokens and access", async () => {
     const login = await ctx.app.inject({
       method: "POST",
       url: "/api/auth/login",
-      payload: { email: SEED_USERS.managerWest.email, password: SEED_USERS.managerWest.password },
+      payload: { email: SEED_USERS.managerRegional.email, password: SEED_USERS.managerRegional.password },
     });
     const cookie = String(login.headers["set-cookie"]);
-    const r = await call("PATCH", `/api/users/${SEED_USERS.managerWest.id}`, admin, { isActive: false });
+    const r = await call("PATCH", `/api/users/${SEED_USERS.managerRegional.id}`, admin, { isActive: false });
     expect(r.status).toBe(200);
     const refresh = await ctx.app.inject({ method: "POST", url: "/api/auth/refresh", headers: { cookie } });
     expect(refresh.statusCode).toBe(401);
@@ -594,8 +594,8 @@ describe("route matrix: approve / reject / audit", () => {
 
     const manama = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerManama))).body as unknown as AuditList;
     expect(manama.entries.map((e) => e.branchId)).toEqual(["BR-001"]);
-    const west = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerWest))).body as unknown as AuditList;
-    expect(west.entries.map((e) => e.branchId)).toEqual(["BR-005"]);
+    const regional = (await call("GET", "/api/audit", tokenFor(app, SEED_USERS.managerRegional))).body as unknown as AuditList;
+    expect(regional.entries.map((e) => e.branchId)).toEqual(["BR-005"]);
     await app.close();
   });
 

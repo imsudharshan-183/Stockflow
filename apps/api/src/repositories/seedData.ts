@@ -47,8 +47,8 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
     },
     {
       id: "usr_mgr_02",
-      name: "Sarah Connor",
-      email: "manager.west@stockflow.dev",
+      name: "Nadia Al-Dosari",
+      email: "manager.regional@stockflow.dev",
       passwordHash: managerHash,
       role: "manager",
       branchIds: [
@@ -72,8 +72,8 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
     },
     {
       id: "usr_stf_02",
-      name: "Jordan Bell",
-      email: "staff.lincoln@stockflow.dev",
+      name: "Yusuf Al-Mahmood",
+      email: "staff.juffair@stockflow.dev",
       passwordHash: staffHash,
       role: "staff",
       branchIds: [branchId("BR-002")],
@@ -82,8 +82,8 @@ export function getInitialSeedUsers(adminPassword = "Admin@12345"): UserRecord[]
     },
     {
       id: "usr_stf_03",
-      name: "Elena Gomez",
-      email: "staff.santamonica@stockflow.dev",
+      name: "Mariam Al-Mannai",
+      email: "staff.hidd@stockflow.dev",
       passwordHash: staffHash,
       role: "staff",
       branchIds: [branchId("BR-005")],
