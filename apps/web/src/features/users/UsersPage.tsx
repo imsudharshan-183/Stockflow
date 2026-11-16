@@ -38,7 +38,7 @@ export function UsersPage() {
   const queryClient = useQueryClient();
 
   const usersQuery = useQuery({ queryKey: ["users"], queryFn: api.listUsers });
-  const kpisQuery = useQuery({ queryKey: queryKeys.kpis, queryFn: api.kpis });
+  const kpisQuery = useQuery({ queryKey: queryKeys.kpis(), queryFn: () => api.kpis() });
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);

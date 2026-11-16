@@ -18,6 +18,22 @@ export function toPublicUser(record: UserRecord): User {
   });
 }
 
+export interface AuthSecurityAuditEvent {
+  at: string;
+  event: "REFRESH_TOKEN_REUSE";
+  userId: string;
+  familyId: string;
+}
+
+const authSecurityAuditLog: AuthSecurityAuditEvent[] = [];
+
+export function getAuthSecurityEvents(userId?: string): AuthSecurityAuditEvent[] {
+  const rows = userId
+    ? authSecurityAuditLog.filter((e) => e.userId === userId)
+    : authSecurityAuditLog;
+  return [...rows];
+}
+
 export class AuthService {
   constructor(
     private readonly userRepo: UserRepository,
@@ -51,8 +67,9 @@ export class AuthService {
     }
 
     const refreshToken = crypto.randomBytes(32).toString("hex");
+    const familyId = crypto.randomUUID();
     const expiresAt = new Date(Date.now() + this.refreshTtlMs);
-    await this.userRepo.saveRefreshToken(userRecord.id, refreshToken, expiresAt);
+    await this.userRepo.saveRefreshToken(userRecord.id, refreshToken, expiresAt, familyId);
 
     const now = new Date().toISOString();
     await this.userRepo.update(userRecord.id, { lastLoginAt: now });
@@ -77,18 +94,29 @@ export class AuthService {
       throw new AuthError("Invalid or expired refresh token", 401);
     }
 
+    if (record.revokedAt) {
+      await this.userRepo.revokeRefreshTokenFamily(record.familyId);
+      authSecurityAuditLog.push({
+        at: new Date().toISOString(),
+        event: "REFRESH_TOKEN_REUSE",
+        userId: record.userId,
+        familyId: record.familyId,
+      });
+      throw new AuthError("Invalid or expired refresh token", 401);
+    }
+
     const userRecord = await this.userRepo.findById(record.userId);
     if (!userRecord || !userRecord.isActive) {
-      await this.userRepo.deleteRefreshToken(refreshToken);
+      await this.userRepo.revokeRefreshTokenFamily(record.familyId);
       throw new AuthError("Unauthorized", 401);
     }
 
-    // Token rotation: delete old, generate new
-    await this.userRepo.deleteRefreshToken(refreshToken);
+    // Token rotation: revoke old token and issue replacement in the same family
+    await this.userRepo.revokeRefreshToken(refreshToken);
 
     const newRefreshToken = crypto.randomBytes(32).toString("hex");
     const expiresAt = new Date(Date.now() + this.refreshTtlMs);
-    await this.userRepo.saveRefreshToken(userRecord.id, newRefreshToken, expiresAt);
+    await this.userRepo.saveRefreshToken(userRecord.id, newRefreshToken, expiresAt, record.familyId);
 
     return {
       user: toPublicUser(userRecord),
@@ -99,7 +127,12 @@ export class AuthService {
 
   async logout(refreshToken?: string): Promise<void> {
     if (refreshToken) {
-      await this.userRepo.deleteRefreshToken(refreshToken);
+      const record = await this.userRepo.findRefreshToken(refreshToken);
+      if (record) {
+        await this.userRepo.revokeRefreshTokenFamily(record.familyId);
+      } else {
+        await this.userRepo.deleteRefreshToken(refreshToken);
+      }
     }
   }
 

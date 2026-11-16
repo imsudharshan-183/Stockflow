@@ -27,10 +27,10 @@ export function registerCatalogRoutes(
   service: StockService,
   authGuards: AuthContext,
 ): void {
-  // Publicly readable for authenticated users (admin, manager, staff)
+  // Publicly readable for authenticated users (admin, manager, staff) with catalog:view
   app.get(
     "/catalog/products",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("catalog:view")] },
     async (request, reply) => {
       const parsed = ProductListQuerySchema.safeParse(request.query);
       if (!parsed.success) {
@@ -38,14 +38,21 @@ export function registerCatalogRoutes(
           ErrorBodySchema.parse({ error: parsed.error.issues[0]?.message || "Invalid query parameters" }),
         );
       }
-      const result = await service.listCatalogProducts(parsed.data);
-      return ProductListResponseSchema.parse(result);
+      try {
+        const result = await service.listCatalogProducts(parsed.data, request.currentUser);
+        return ProductListResponseSchema.parse(result);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
     },
   );
 
   app.get(
     "/catalog/products/:sku",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("catalog:view")] },
     async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {

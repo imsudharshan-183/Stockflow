@@ -1,0 +1,165 @@
+export interface LabelEntry {
+  key: string;
+  label: string;
+  shortHelp: string;
+  longHelp: string;
+  formula: string;
+  whatToDo: string;
+}
+
+export const LABELS = {
+  coverDays: {
+    key: "coverDays",
+    label: "Days of stock left",
+    shortHelp: "Estimated days current on-hand stock will last at recent sales pace.",
+    longHelp:
+      "Shows how many days of demand your current shelf and backroom inventory can cover before hitting zero.",
+    formula: "On-hand units ÷ average daily sales (EWMA over 28 in-stock days).",
+    whatToDo:
+      "If below Reorder level, transfer from an overstocked branch or place a reorder. Above 60 days signals overstock.",
+  },
+  reorderPoint: {
+    key: "reorderPoint",
+    label: "Reorder level",
+    shortHelp: "Minimum stock threshold before a location risks running out during lead time.",
+    longHelp:
+      "The unit count needed to cover expected sales while waiting for a supplier delivery plus a safety buffer.",
+    formula: "(Daily sales pace × lead time days) + safety stock (1.65 × demand std dev × √lead time).",
+    whatToDo:
+      "When on-hand drops below this level, approve an incoming transfer or a supplier reorder.",
+  },
+  netBenefit: {
+    key: "netBenefit",
+    label: "Estimated gain",
+    shortHelp: "Expected net BHD benefit of taking this action after transfer or markdown costs.",
+    longHelp:
+      "Ranks morning decisions by real financial impact so buyers tackle the highest-value moves first.",
+    formula: "Lost margin avoided + holding cost saved − transfer or markdown cost.",
+    whatToDo:
+      "Prioritize pending items with the highest Estimated gain first in the Action queue.",
+  },
+  cashReleasable: {
+    key: "cashReleasable",
+    label: "Cash you can free up",
+    shortHelp: "Cost value of surplus units sitting above healthy stock levels.",
+    longHelp:
+      "Working capital tied up in overstocked items that can be transferred to needy stores or cleared via markdowns.",
+    formula: "Sum of (surplus units × unit cost) across overstocked SKUs.",
+    whatToDo:
+      "Review Can give transfers and Should mark down items to convert excess stock back into cash.",
+  },
+  overstockValue: {
+    key: "overstockValue",
+    label: "Overstock value",
+    shortHelp: "Total cost value of inventory with more than 60 days of stock left.",
+    longHelp:
+      "Capital sitting in slow-moving or over-ordered items that tie up shelf space and cash.",
+    formula: "Sum of (on-hand units × unit cost) for SKUs classified as Overstock.",
+    whatToDo:
+      "Move surplus to branches that need stock or approve recommended markdowns.",
+  },
+  lostSalesAtRisk: {
+    key: "lostSalesAtRisk",
+    label: "Sales at risk",
+    shortHelp: "Projected lost retail revenue if at-risk SKUs are not replenished in time.",
+    longHelp:
+      "Estimated customer demand that will go unfulfilled during supplier lead time unless stock is added.",
+    formula: "Projected lost units × shelf price across At-risk SKUs.",
+    whatToDo:
+      "Approve incoming transfers (same-day) or reorders for the top at-risk SKUs immediately.",
+  },
+  stockoutRate: {
+    key: "stockoutRate",
+    label: "Stockout rate",
+    shortHelp: "Share of SKU-days where demand existed but on-hand stock hit zero.",
+    longHelp:
+      "Measures how often customers could not buy an item because the shelf was empty.",
+    formula: "Stockout SKU-days ÷ total active SKU-days in the window.",
+    whatToDo:
+      "Target locations above 10% first and check their Needs stock list.",
+  },
+  skusAtRisk: {
+    key: "skusAtRisk",
+    label: "SKUs at risk",
+    shortHelp: "Number of active products currently below their Reorder level.",
+    longHelp:
+      "Count of items in this location that are likely to stock out before a standard reorder arrives.",
+    formula: "Count of active SKUs with status At risk.",
+    whatToDo:
+      "Open the Needs stock panel or filter the inventory table by At risk.",
+  },
+  pendingDecisions: {
+    key: "pendingDecisions",
+    label: "Pending decisions",
+    shortHelp: "Recommended transfers, reorders, and markdowns awaiting buyer review.",
+    longHelp:
+      "Morning recommendations that have not yet been approved or rejected.",
+    formula: "Count of material recommendations with status Pending.",
+    whatToDo:
+      "Open the Action queue to approve or reject pending moves.",
+  },
+  deadStockValue: {
+    key: "deadStockValue",
+    label: "Dead stock value",
+    shortHelp: "Cost value of overstocked items with virtually no recent sales.",
+    longHelp:
+      "Inventory with near-zero velocity that will not clear organically without intervention.",
+    formula: "Sum of (on-hand units × unit cost) where velocity < 0.05/day.",
+    whatToDo:
+      "Approve markdowns to clear shelf space and recover cash.",
+  },
+  actionMix: {
+    key: "actionMix",
+    label: "Action mix",
+    shortHelp: "Breakdown of morning recommendations by Transfers, Reorders, and Markdowns.",
+    longHelp:
+      "Shows whether the network's biggest opportunity today is rebalancing stock, buying from suppliers, or clearing excess.",
+    formula: "Count and Estimated gain grouped by action type.",
+    whatToDo:
+      "Click a slice or bar to jump straight to the Action queue filtered to that action.",
+  },
+  topRiskBranches: {
+    key: "topRiskBranches",
+    label: "Top at-risk locations",
+    shortHelp: "Branches with the highest Sales at risk and stockout exposure.",
+    longHelp:
+      "Highlights which stores need buyer attention first.",
+    formula: "Branches ranked by Sales at risk (BD).",
+    whatToDo:
+      "Click any branch bar to open its Location dashboard.",
+  },
+  coverHeatmap: {
+    key: "coverHeatmap",
+    label: "Stock cover heatmap",
+    shortHelp: "Days of stock left across categories and locations or statuses.",
+    longHelp:
+      "Spot pockets of shortage (red) or overstock (amber/indigo) at a glance.",
+    formula: "Median or count of Days of stock left per cell.",
+    whatToDo:
+      "Click any cell to filter the inventory or drill down into that slice.",
+  },
+  topSkus: {
+    key: "topSkus",
+    label: "Top SKUs by gain",
+    shortHelp: "Products generating the largest Estimated gain across pending and decided actions.",
+    longHelp:
+      "Identifies the individual items where buyer decisions matter most today.",
+    formula: "Sum of Estimated gain (BD) per SKU.",
+    whatToDo:
+      "Click a SKU bar to open its Product detail page.",
+  },
+  locationTrend: {
+    key: "locationTrend",
+    label: "Sales vs. on-hand trend",
+    shortHelp: "Daily units sold compared against ending on-hand inventory.",
+    longHelp:
+      "Reveals whether stock is keeping up with demand or building up into overstock.",
+    formula: "Daily sum of units sold and on-hand units over the selected 7/30/90-day window.",
+    whatToDo:
+      "Use the range buttons and brush to zoom into recent spikes or stockouts.",
+  },
+} as const satisfies Record<string, LabelEntry>;
+
+export type LabelKey = keyof typeof LABELS;
+
+export const GLOSSARY_LIST: LabelEntry[] = Object.values(LABELS);

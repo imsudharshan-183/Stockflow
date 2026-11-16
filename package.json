@@ -6,6 +6,7 @@
     "dev": "pnpm -r --parallel dev",
     "seed:mongo": "pnpm --filter @stockflow/api seed:mongo",
     "seed:users": "pnpm --filter @stockflow/api seed:users",
+    "reset:decisions": "pnpm --filter @stockflow/api reset:decisions",
     "test": "pnpm -r --if-present test",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint . && node scripts/check-ui.mjs",

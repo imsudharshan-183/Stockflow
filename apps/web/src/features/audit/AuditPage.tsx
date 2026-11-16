@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { queryKeys } from "@/hooks/queryKeys";
+import { useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
 import {
   REASON_LABELS,
@@ -32,7 +33,12 @@ import {
 import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
-  const audit = useQuery({ queryKey: queryKeys.audit, queryFn: api.audit });
+  const { selectedLocation } = useLocationScope();
+  const branchParam = selectedLocation ?? undefined;
+  const audit = useQuery({
+    queryKey: queryKeys.audit(branchParam),
+    queryFn: () => api.audit(branchParam),
+  });
   const [search, setSearch] = useState("");
   const [decisionFilter, setDecisionFilter] = useState<string>("");
 
@@ -182,7 +188,7 @@ export function AuditPage() {
                   <TableHead className="w-[104px]">Action</TableHead>
                   <TableHead className="w-[22%]">Product</TableHead>
                   <TableHead className="w-[160px]">Branch</TableHead>
-                  <TableHead className="w-[110px] text-right">Net benefit</TableHead>
+                  <TableHead className="w-[125px] text-right">Estimated gain</TableHead>
                   <TableHead className="w-auto">Reason codes</TableHead>
                 </tr>
               </TableHeader>

@@ -1,7 +1,16 @@
-import { isBranchInScope } from "@stockflow/core";
+import { isBranchInScope, scopeBranches } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
-import { recomputeForSku, upsertSalesEntry } from "../db.js";
+import {
+  deleteSalesEntryById,
+  getSalesEntryById,
+  listSalesEntries,
+  recomputeForSku,
+  recordSalesEntryAudit,
+  updateSalesEntryById,
+  upsertSalesEntry,
+} from "../db.js";
 import type { AuthContext } from "../plugins/auth.js";
+import type { StockService } from "../services/stockService.js";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -73,6 +82,13 @@ export function validateSalesEntryInput(
     return {
       ok: false,
       message: "Field 'date' must be a valid date string in YYYY-MM-DD format",
+    };
+  }
+  const todayIso = new Date().toISOString().slice(0, 10);
+  if (record.date.trim() > todayIso) {
+    return {
+      ok: false,
+      message: "Field 'date' cannot be in the future",
     };
   }
 
@@ -308,6 +324,7 @@ export function parseCsvWithHeaders(
 
 export function registerSalesEntriesRoutes(
   app: FastifyInstance,
+  service: StockService,
   authGuards: AuthContext,
 ): void {
   // Accept multipart/form-data as raw Buffer within this route scope
@@ -319,27 +336,243 @@ export function registerSalesEntriesRoutes(
     },
   );
 
+  const validateDomainRefs = (data: ValidatedSalesEntryInput): string | null => {
+    if (!service.hasBranch(data.branchId)) {
+      return `Field 'branchId' references unknown branch '${data.branchId}'`;
+    }
+    const status = service.getProductStatus(data.sku);
+    if (status === "unknown") {
+      return `Field 'sku' references unknown SKU '${data.sku}'`;
+    }
+    if (status === "archived") {
+      return `SKU '${data.sku}' is archived and cannot accept sales entries`;
+    }
+    return null;
+  };
+
+  /**
+   * GET /api/sales-entries/template.csv
+   */
+  app.get(
+    "/sales-entries/template.csv",
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
+    async (_request, reply) => {
+      const today = new Date().toISOString().slice(0, 10);
+      const csv = `branchId,sku,date,unitsSold,onHand\nBR-001,SKU-00001,${today},5,20\n`;
+      return reply
+        .header("Content-Type", "text/csv; charset=utf-8")
+        .header("Content-Disposition", 'attachment; filename="sales-entries-template.csv"')
+        .send(csv);
+    },
+  );
+
+  /**
+   * GET /api/sales-entries
+   * Paginated, filtered, branch-scoped list of recorded sales entries.
+   */
+  app.get(
+    "/sales-entries",
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
+    async (request, reply) => {
+      await service.ensureInitialized();
+      const q = (request.query ?? {}) as Record<string, unknown>;
+      const branch = typeof q.branch === "string" && q.branch.trim() ? q.branch.trim() : undefined;
+      const sku = typeof q.sku === "string" && q.sku.trim() ? q.sku.trim() : undefined;
+      const from = typeof q.from === "string" && q.from.trim() ? q.from.trim() : undefined;
+      const to = typeof q.to === "string" && q.to.trim() ? q.to.trim() : undefined;
+      const page = Math.max(1, Number(q.page ?? 1) || 1);
+      const limit = Math.min(100, Math.max(1, Number(q.limit ?? 25) || 25));
+
+      if (branch && !isBranchInScope(request.currentUser, branch)) {
+        return reply.code(403).send({ error: "Access to branch forbidden" });
+      }
+
+      const allowedBranchIds =
+        request.currentUser.role === "admin"
+          ? null
+          : scopeBranches(request.currentUser, service.allBranchIds());
+
+      return listSalesEntries({
+        allowedBranchIds,
+        branchId: branch,
+        sku,
+        from,
+        to,
+        page,
+        limit,
+      });
+    },
+  );
+
   /**
    * POST /api/sales-entries
    * Manual single-entry upsert on (branchId, sku, date).
    */
   app.post(
     "/sales-entries",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
+      await service.ensureInitialized();
       const validation = validateSalesEntryInput(request.body, { coerceNumericStrings: false });
       if (!validation.ok) {
         return reply.code(400).send({ error: validation.message });
+      }
+
+      const refError = validateDomainRefs(validation.data);
+      if (refError) {
+        return reply.code(400).send({ error: refError });
       }
 
       if (!isBranchInScope(request.currentUser, validation.data.branchId)) {
         return reply.code(403).send({ error: "Access to branch forbidden" });
       }
 
-      const { entry } = await upsertSalesEntry(validation.data);
+      const { entry, created } = await upsertSalesEntry(validation.data);
+      service.applySalesEntryToDataset(
+        entry.branchId,
+        entry.sku,
+        entry.date,
+        entry.unitsSold,
+        entry.onHand,
+      );
       await recomputeForSku(entry.branchId, entry.sku);
+      await service.recomputeSingleSku(entry.sku);
+
+      recordSalesEntryAudit({
+        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        entryId: entry.id,
+        branchId: entry.branchId,
+        sku: entry.sku,
+        date: entry.date,
+        action: created ? "CREATE" : "UPDATE",
+        at: new Date().toISOString(),
+        actedBy: {
+          userId: request.currentUser.id,
+          name: request.currentUser.name,
+          role: request.currentUser.role,
+        },
+        before: null,
+        after: { unitsSold: entry.unitsSold, onHand: entry.onHand },
+      });
 
       return reply.code(201).send(entry);
+    },
+  );
+
+  /**
+   * PATCH /api/sales-entries/:id
+   * Edits unitsSold and/or onHand only; branchId, sku, and date are immutable.
+   */
+  app.patch(
+    "/sales-entries/:id",
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
+    async (request, reply) => {
+      await service.ensureInitialized();
+      const { id } = request.params as { id: string };
+      const existing = await getSalesEntryById(decodeURIComponent(id));
+      if (!existing) {
+        return reply.code(404).send({ error: "Sales entry not found" });
+      }
+      if (!isBranchInScope(request.currentUser, existing.branchId)) {
+        return reply.code(403).send({ error: "Access to branch forbidden" });
+      }
+
+      const body = request.body as Record<string, unknown> | null;
+      if (!body || typeof body !== "object" || Array.isArray(body)) {
+        return reply.code(400).send({ error: "Request body must be a JSON object" });
+      }
+      if ("branchId" in body || "sku" in body || "date" in body) {
+        return reply.code(400).send({ error: "Key fields (branchId, sku, date) are immutable" });
+      }
+
+      const unitsSold = body.unitsSold !== undefined ? parseNumericField(body.unitsSold, false) : existing.unitsSold;
+      if (unitsSold === null || unitsSold < 0) {
+        return reply.code(400).send({ error: "Field 'unitsSold' must be a non-negative number (>= 0)" });
+      }
+      const onHand = body.onHand !== undefined ? parseNumericField(body.onHand, false) : existing.onHand;
+      if (onHand === null || onHand < 0) {
+        return reply.code(400).send({ error: "Field 'onHand' must be a non-negative number (>= 0)" });
+      }
+
+      const updated = await updateSalesEntryById(existing.id, { unitsSold, onHand });
+      if (!updated) {
+        return reply.code(404).send({ error: "Sales entry not found" });
+      }
+
+      service.applySalesEntryToDataset(
+        updated.branchId,
+        updated.sku,
+        updated.date,
+        updated.unitsSold,
+        updated.onHand,
+      );
+      await recomputeForSku(updated.branchId, updated.sku);
+      await service.recomputeSingleSku(updated.sku);
+
+      recordSalesEntryAudit({
+        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        entryId: updated.id,
+        branchId: updated.branchId,
+        sku: updated.sku,
+        date: updated.date,
+        action: "UPDATE",
+        at: new Date().toISOString(),
+        actedBy: {
+          userId: request.currentUser.id,
+          name: request.currentUser.name,
+          role: request.currentUser.role,
+        },
+        before: { unitsSold: existing.unitsSold, onHand: existing.onHand },
+        after: { unitsSold: updated.unitsSold, onHand: updated.onHand },
+      });
+
+      return updated;
+    },
+  );
+
+  /**
+   * DELETE /api/sales-entries/:id
+   */
+  app.delete(
+    "/sales-entries/:id",
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
+    async (request, reply) => {
+      await service.ensureInitialized();
+      const { id } = request.params as { id: string };
+      const existing = await getSalesEntryById(decodeURIComponent(id));
+      if (!existing) {
+        return reply.code(404).send({ error: "Sales entry not found" });
+      }
+      if (!isBranchInScope(request.currentUser, existing.branchId)) {
+        return reply.code(403).send({ error: "Access to branch forbidden" });
+      }
+
+      const deleted = await deleteSalesEntryById(existing.id);
+      if (!deleted) {
+        return reply.code(404).send({ error: "Sales entry not found" });
+      }
+
+      await recomputeForSku(deleted.branchId, deleted.sku);
+      await service.recomputeSingleSku(deleted.sku);
+
+      recordSalesEntryAudit({
+        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        entryId: deleted.id,
+        branchId: deleted.branchId,
+        sku: deleted.sku,
+        date: deleted.date,
+        action: "DELETE",
+        at: new Date().toISOString(),
+        actedBy: {
+          userId: request.currentUser.id,
+          name: request.currentUser.name,
+          role: request.currentUser.role,
+        },
+        before: { unitsSold: deleted.unitsSold, onHand: deleted.onHand },
+        after: null,
+      });
+
+      return { ok: true };
     },
   );
 
@@ -349,8 +582,9 @@ export function registerSalesEntriesRoutes(
    */
   app.post(
     "/sales-entries/import",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
+      await service.ensureInitialized();
       const rawBuffer = Buffer.isBuffer(request.body) ? request.body : null;
       if (!rawBuffer) {
         return reply
@@ -379,8 +613,18 @@ export function registerSalesEntriesRoutes(
           validatedRows.push({ ok: false, rowNumber: item.rowNumber, message: validation.message });
           continue;
         }
+        const refError = validateDomainRefs(validation.data);
+        if (refError) {
+          validatedRows.push({ ok: false, rowNumber: item.rowNumber, message: refError });
+          continue;
+        }
         if (!isBranchInScope(request.currentUser, validation.data.branchId)) {
-          return reply.code(403).send({ error: "Access to branch forbidden" });
+          validatedRows.push({
+            ok: false,
+            rowNumber: item.rowNumber,
+            message: `Branch '${validation.data.branchId}' is outside your assigned scope`,
+          });
+          continue;
         }
         validatedRows.push({ ok: true, rowNumber: item.rowNumber, data: validation.data });
       }
@@ -389,6 +633,7 @@ export function registerSalesEntriesRoutes(
       let updated = 0;
       const errors: Array<{ row: number; message: string }> = [];
       const touchedPairs = new Map<string, { branchId: string; sku: string }>();
+      const touchedSkus = new Set<string>();
 
       for (const item of validatedRows) {
         if (!item.ok) {
@@ -403,16 +648,31 @@ export function registerSalesEntriesRoutes(
           updated += 1;
         }
 
+        service.applySalesEntryToDataset(
+          result.entry.branchId,
+          result.entry.sku,
+          result.entry.date,
+          result.entry.unitsSold,
+          result.entry.onHand,
+        );
+
         const pairKey = `${result.entry.branchId}::${result.entry.sku}`;
         touchedPairs.set(pairKey, {
           branchId: result.entry.branchId,
           sku: result.entry.sku,
         });
+        touchedSkus.add(result.entry.sku);
       }
 
       // Trigger recomputeForSku once per distinct (branchId, sku) touched
       for (const pair of touchedPairs.values()) {
         await recomputeForSku(pair.branchId, pair.sku);
+      }
+      for (const sku of touchedSkus) {
+        await service.recomputeSingleSku(sku, { bumpVersion: false });
+      }
+      if (touchedSkus.size > 0) {
+        await service.commitPlanVersion();
       }
 
       return reply.code(200).send({

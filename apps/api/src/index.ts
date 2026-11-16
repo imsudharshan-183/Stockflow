@@ -4,6 +4,7 @@ import { buildApp } from "./plugins/app.js";
 import { createRepository } from "./repositories/create.js";
 import { StockService } from "./services/stockService.js";
 
+const startupStartedAt = performance.now();
 loadDotenv();
 const env = readEnv();
 const repo = await createRepository(env.MONGODB_URI);
@@ -25,7 +26,10 @@ process.on("SIGTERM", () => {
 try {
   const host = process.env.VERCEL ? "0.0.0.0" : env.HOST;
   await app.listen({ port: env.PORT, host });
-  app.log.info({ repository: service.repositoryKind(), asOf: service.kpis().asOf }, "stockflow ready");
+  const listenMs = Math.round(performance.now() - startupStartedAt);
+  console.log(
+    `listening on ${host}:${env.PORT} (repository: ${service.repositoryKind()}) (${listenMs}ms)`,
+  );
 } catch (error) {
   const message = error instanceof Error ? error.message : "startup failed";
   console.error(redactSecrets(message));

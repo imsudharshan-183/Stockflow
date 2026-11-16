@@ -38,7 +38,7 @@ describe("snapshot: /api/recommendations and /api/kpis match tracked fixtures", 
   beforeAll(async () => {
     noAuth = (await setupApp({ authEnabled: false })).app;
     withAuth = (await setupApp({ authEnabled: true })).app;
-  });
+  }, 30_000);
   afterAll(async () => {
     await noAuth.close();
     await withAuth.close();

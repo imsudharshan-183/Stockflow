@@ -3,10 +3,7 @@
     "web": {
       "root": "apps/web",
       "rewrites": [
-        { "source": "/queue", "destination": "/index.html" },
-        { "source": "/audit", "destination": "/index.html" },
-        { "source": "/branches/(.*)", "destination": "/index.html" },
-        { "source": "/products/(.*)", "destination": "/index.html" }
+        { "source": "/(.*)", "destination": "/index.html" }
       ]
     },
     "api": {

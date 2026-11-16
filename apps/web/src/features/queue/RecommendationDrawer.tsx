@@ -159,7 +159,7 @@ export function RecommendationDrawer({
                           <span className="font-semibold tabular-nums">
                             {formatNumber(recommendation.metrics.onHand)}
                           </span>{" "}
-                          vs reorder point{" "}
+                          vs reorder level{" "}
                           <span className="font-semibold tabular-nums">
                             {formatNumber(recommendation.metrics.reorderPoint)}
                           </span>{" "}
@@ -216,7 +216,7 @@ export function RecommendationDrawer({
               {/* Section 2: Net benefit math */}
               <section className="space-y-2.5">
                 <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Net benefit math ({formatNumber(recommendation.quantity)} units)
+                  Estimated gain math ({formatNumber(recommendation.quantity)} units)
                 </h3>
                 <div className="overflow-hidden rounded-xl border border-border bg-card">
                   <dl className="divide-y divide-border text-xs">
@@ -245,7 +245,7 @@ export function RecommendationDrawer({
                       </dd>
                     </div>
                     <div className="flex items-center justify-between bg-table-header px-3.5 py-2.5 text-sm font-semibold text-foreground">
-                      <dt>Projected net benefit</dt>
+                      <dt>Estimated gain</dt>
                       <dd className="tabular-nums">{formatMoneyFull(recommendation.netBenefit)}</dd>
                     </div>
                   </dl>

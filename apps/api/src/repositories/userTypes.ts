@@ -15,6 +15,8 @@ export interface UserRecord {
 export interface RefreshTokenRecord {
   token: string;
   userId: string;
+  familyId: string;
+  revokedAt?: Date | null;
   expiresAt: Date;
 }
 
@@ -24,8 +26,10 @@ export interface UserRepository {
   list(): Promise<UserRecord[]>;
   create(record: Omit<UserRecord, "id" | "createdAt">): Promise<UserRecord>;
   update(id: string, updates: Partial<Omit<UserRecord, "id" | "createdAt">>): Promise<UserRecord | null>;
-  saveRefreshToken(userId: string, token: string, expiresAt: Date): Promise<void>;
+  saveRefreshToken(userId: string, token: string, expiresAt: Date, familyId?: string): Promise<void>;
   findRefreshToken(token: string): Promise<RefreshTokenRecord | null>;
+  revokeRefreshToken(token: string): Promise<void>;
+  revokeRefreshTokenFamily(familyId: string): Promise<void>;
   deleteRefreshToken(token: string): Promise<void>;
   deleteRefreshTokensForUser(userId: string): Promise<void>;
 }

@@ -33,6 +33,7 @@ import { QUEUE_PAGE_SIZE } from "@/config";
 import { useAuth } from "@/features/auth/AuthContext";
 import { RecommendationDrawer } from "@/features/queue/RecommendationDrawer";
 import { queryKeys } from "@/hooks/queryKeys";
+import { useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
 import {
   REASON_LABELS,
@@ -55,11 +56,16 @@ import {
 export function QueuePage() {
   const { user } = useAuth();
   const canDecide = user ? user.role === "admin" || user.role === "manager" : true;
+  const { selectedLocation } = useLocationScope();
   const [params, setParams] = useSearchParams();
   const filters = readFilters(params);
-  const query = toQuery(filters);
+  const effectiveBranch = filters.branch || selectedLocation || undefined;
+  const query: RecommendationQuery = { ...toQuery(filters), branch: effectiveBranch };
 
-  const kpis = useQuery({ queryKey: queryKeys.kpis, queryFn: api.kpis });
+  const kpis = useQuery({
+    queryKey: queryKeys.kpis(effectiveBranch),
+    queryFn: () => api.kpis(effectiveBranch),
+  });
   const list = useQuery({
     queryKey: queryKeys.recommendations(query),
     queryFn: () => api.recommendations(query),
@@ -107,12 +113,25 @@ export function QueuePage() {
   });
 
   const batchDecision = useMutation({
-    mutationFn: async (input: { ids: readonly string[]; decision: "approve" | "reject" }) => {
-      await Promise.all(input.ids.map((id) => api.decide(id, input.decision)));
-    },
-    onSuccess: async (_data, input) => {
-      const label = input.decision === "approve" ? "Approved" : "Rejected";
-      toast.success(`${label} ${formatNumber(input.ids.length)} actions`);
+    mutationFn: (input: { ids: readonly string[]; decision: "approve" | "reject"; reasonCode?: string }) =>
+      api.decideBatch(input.ids, input.decision, input.reasonCode),
+    onSuccess: async (data, input) => {
+      const counts = { ok: 0, already_decided: 0, forbidden: 0, not_found: 0 };
+      for (const item of data.results) {
+        counts[item.status] += 1;
+      }
+      const actionLabel = input.decision === "approve" ? "Approved" : "Rejected";
+      const parts: string[] = [];
+      if (counts.ok > 0) parts.push(`${actionLabel} ${formatNumber(counts.ok)}`);
+      if (counts.already_decided > 0) parts.push(`Already decided ${formatNumber(counts.already_decided)}`);
+      if (counts.forbidden > 0) parts.push(`Forbidden ${formatNumber(counts.forbidden)}`);
+      if (counts.not_found > 0) parts.push(`Not found ${formatNumber(counts.not_found)}`);
+      const summary = parts.length > 0 ? parts.join(" · ") : `${actionLabel} ${formatNumber(0)}`;
+      if (counts.forbidden > 0 || counts.not_found > 0) {
+        toast.warning(summary);
+      } else {
+        toast.success(summary);
+      }
       setSelected(new Set());
       setRejectTargets(null);
       await invalidateAll();
@@ -254,8 +273,8 @@ export function QueuePage() {
         title="Action queue"
         subtitle={
           list.data
-            ? `${formatNumber(serverRows.length)} actions · ${formatMoney(totalWorth)} projected net benefit`
-            : "Ranked by net benefit."
+            ? `${formatNumber(serverRows.length)} actions · ${formatMoney(totalWorth)} estimated gain`
+            : "Ranked by estimated gain."
         }
       />
 
@@ -268,7 +287,7 @@ export function QueuePage() {
             writeFilters({ action: nextAction });
           }}
         >
-          <TabsList className="h-9 rounded-xl bg-secondary p-1">
+          <TabsList className="h-auto min-h-9 w-full flex-wrap justify-start rounded-xl bg-secondary p-1 sm:w-fit">
             <TabsTrigger value="ALL" className="rounded-lg px-3 text-xs font-medium">
               All
             </TabsTrigger>
@@ -412,7 +431,7 @@ export function QueuePage() {
           <>
             {/* Desktop & Tablet Fixed-Layout Table (>= 768px) */}
             <div className="hidden md:block">
-              <Table>
+              <Table className="min-w-[920px]">
                 <TableHeader>
                   <tr className="border-b border-border">
                     {canDecide ? (
@@ -448,7 +467,7 @@ export function QueuePage() {
                       Qty
                     </TableHead>
                     <TableHead className="w-[100px] pr-4 pl-2.5 text-right xl:w-[116px] xl:pr-5">
-                      Net benefit
+                      Estimated gain
                     </TableHead>
                     <TableHead
                       className={cn(
@@ -861,7 +880,7 @@ export function QueuePage() {
             </span>
             <span className="text-muted-foreground">·</span>
             <span className="text-muted-foreground">
-              Total net benefit{" "}
+              Total estimated gain{" "}
               <span className="font-semibold text-foreground">
                 {formatMoneyFull(selectedWorth)}
               </span>
@@ -974,7 +993,7 @@ export function QueuePage() {
                 </div>
               </div>
               <p className="text-muted-foreground tabular-nums">
-                Foregone projected net benefit:{" "}
+                Foregone estimated gain:{" "}
                 <span className="font-semibold text-foreground">
                   {formatMoneyFull(
                     rejectTargets.reduce((sum, item) => sum + item.netBenefit, 0),
@@ -1008,6 +1027,7 @@ export function QueuePage() {
                   batchDecision.mutate({
                     ids: rejectTargets.map((item) => item.id),
                     decision: "reject",
+                    reasonCode: rejectTargets[0]?.reasonCodes[0] ?? "MANUAL_REVIEW",
                   });
                 }
               }}
