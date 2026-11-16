@@ -85,18 +85,23 @@ apps/web/src
 
 1. The repository builds the seeded dataset, or loads one already stored in MongoDB.
 2. The service runs the engine once for the morning after the last seeded day.
-3. `GET /api/kpis`, `GET /api/recommendations`, `GET /api/branches/:id`, and `GET /api/products/:sku` read that result. The recommendation list hides actions below $25 net benefit or below the minimum transfer quantity. Mongo reads the recommendations stored by `pnpm seed:mongo` instead of running the engine again.
+3. `GET /api/kpis`, `GET /api/recommendations`, `GET /api/branches/:id`, and `GET /api/products/:sku` read that result. The recommendation list hides actions below BD 9.500 net benefit or below the minimum transfer quantity. Mongo reads the recommendations stored by `pnpm seed:mongo` instead of running the engine again.
 4. `POST /api/recommendations/:id/approve` and `/reject` append an action and an audit row. They do not recompute the queue. `GET /api/audit` returns those rows.
 
 ## Deploy to Vercel
 
-Use one project. In the import settings, set Framework Preset to **Services**. The root `vercel.json` builds `apps/web` and `apps/api` together and routes `/api` to the API. Every other path, including `/queue` and `/audit`, is served by the web app, and those client routes fall back to `index.html`.
+Use one project. In the import settings, set Framework Preset to **Services**. The root `vercel.json` builds `apps/web` and `apps/api` together, routes `/api/(.*)` to the API, and sends all other routes to `apps/web` with a catch-all `/(.*)` -> `/index.html` SPA fallback.
 
 1. Push this repository to GitHub and import it in Vercel.
-2. Add `MONGODB_URI` as a project environment variable. Do not commit it.
+2. Add environment variables in the Vercel project settings:
+   - `MONGODB_URI` (Atlas connection string; do not commit)
+   - `AUTH_ENABLED=true`
+   - `JWT_SECRET` (random 32+ char secret)
+   - `ADMIN_PASSWORD` (strong initial admin password)
+   - `WEB_ORIGIN` (leave unset for single-origin Vercel Services; set only if web and api live on different origins)
 3. In Atlas, create a database user and allow the Vercel deployment to connect (Network Access). The API uses the database name `stockflow`.
-4. From your machine, run `pnpm seed:mongo` once. That writes the dataset and the stored recommendations. Startup only reads them.
-5. Deploy. The site and the API share one domain. The web client calls `/api`.
+4. From your machine, run `pnpm seed:mongo` once (and `pnpm seed:users` if seeding auth users separately). That seeds the dataset, initializes `data_version` (`1`), and writes the gzipped initial plan to `plan_cache` so serverless cold starts do not recompute the engine. Startup never generates synthetic data when `MONGODB_URI` is set.
+5. Deploy, then verify with `node scripts/smoke.mjs https://<your-deployment-url>`.
 
 ## Third-party libraries
 

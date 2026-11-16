@@ -22,6 +22,7 @@ import {
   YAxis,
 } from "recharts";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -121,14 +122,15 @@ export function ProductPage() {
         </TableToolbar>
 
         <div className="overflow-x-auto">
-          <Table className="min-w-[720px]">
+          <Table className="min-w-[860px] table-auto">
             <TableHeader>
               <tr className="border-b border-border">
-                <TableHead className="w-[26%]">Branch</TableHead>
-                <TableHead className="w-[120px]">Health</TableHead>
+                <TableHead className="w-[22%]">Branch</TableHead>
+                <TableHead className="w-[110px]">Health</TableHead>
                 <TableHead className="w-[100px] text-right">On hand</TableHead>
-                <TableHead className="w-[120px] text-right">Cover</TableHead>
-                <TableHead className="w-[120px] text-right">Reorder point</TableHead>
+                <TableHead className="w-[160px] whitespace-nowrap">In transit / Reserved</TableHead>
+                <TableHead className="w-[110px] text-right">Cover</TableHead>
+                <TableHead className="w-[120px] text-right">Reorder level</TableHead>
                 <TableHead className="w-auto">Recommended action</TableHead>
               </tr>
             </TableHeader>
@@ -180,6 +182,9 @@ export function ProductPage() {
                     </TableCell>
                     <TableCell className="text-right font-medium text-foreground tabular-nums">
                       {formatNumber(item.onHand)}
+                    </TableCell>
+                    <TableCell>
+                      <StockDeltaBadges inTransit={item.inTransit} reserved={item.reserved} />
                     </TableCell>
                     <TableCell className="text-right text-foreground tabular-nums">
                       {formatCover(item.coverDays)}
@@ -295,11 +300,13 @@ function Logic({
 
           <dl className="grid grid-cols-2 gap-2.5 rounded-xl border border-border bg-secondary/30 p-3">
             <Mini label="On hand" value={`${formatNumber(position.onHand)} units`} />
+            <Mini label="In transit" value={`${formatNumber(position.inTransit ?? 0)} units`} />
+            <Mini label="Reserved" value={`${formatNumber(position.reserved ?? 0)} units`} />
             <Mini label="Daily demand" value={`${formatNumber(position.velocity)} / day`} />
             <Mini label="Std. dev." value={formatNumber(position.sigmaDemand)} />
             <Mini label="Lead time" value={`${formatNumber(position.leadTimeDays)} days`} />
             <Mini label="Safety stock" value={`${formatNumber(position.safetyStock)} units`} />
-            <Mini label="Reorder point" value={`${formatNumber(position.reorderPoint)} units`} />
+            <Mini label="Reorder level" value={`${formatNumber(position.reorderPoint)} units`} />
             <Mini label="Cover" value={formatCover(position.coverDays)} />
             <Mini label="In-stock days" value={formatNumber(position.inStockDays)} />
           </dl>
@@ -405,7 +412,7 @@ function Logic({
 
         <Card className="rounded-2xl border border-border shadow-card">
           <CardHeader>
-            <CardTitle>Cover days trajectory</CardTitle>
+            <CardTitle>Days of stock left trajectory</CardTitle>
           </CardHeader>
           <CardContent>
             {position.velocity <= 0 ? (
@@ -432,7 +439,7 @@ function Logic({
                     <Line
                       type="monotone"
                       dataKey="cover"
-                      name="Cover days"
+                      name="Days of stock left"
                       stroke={TOKENS.chart.netBenefit}
                       dot={false}
                       strokeWidth={2}
