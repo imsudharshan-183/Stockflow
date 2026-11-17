@@ -782,9 +782,11 @@ export function BranchPage({
             <LineChart
               data={trendQuery.data?.points ?? []}
               className="cursor-pointer"
-              onClick={(state) => {
-                const points = trendQuery.data?.points ?? [];
-                const point = pickChartPoint(state, points);
+              onClick={(state, event) => {
+                const point = pickChartPoint<{ date: string; salesUnits: number; onHandUnits: number }>(
+                  state,
+                  event,
+                );
                 if (!point) return;
                 const branchLabel = summaryQuery.data?.branch.name ?? id;
                 const scopeLabel = trendSku

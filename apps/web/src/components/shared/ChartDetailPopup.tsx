@@ -7,7 +7,10 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { Button } from "@/components/ui/button";
+import { Link, useLocation } from "react-router-dom";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { useAuth } from "@/features/auth/AuthContext";
+import { cn } from "@/lib/utils";
 
 export interface ChartDetailMetric {
   label: string;
@@ -18,6 +21,8 @@ export interface ChartDetailPayload {
   title: string;
   subtitle?: string;
   metrics: ChartDetailMetric[];
+  linkTo?: string;
+  linkLabel?: string;
 }
 
 interface ChartDetailContextValue {
@@ -29,6 +34,9 @@ interface ChartDetailContextValue {
 const ChartDetailContext = createContext<ChartDetailContextValue | null>(null);
 
 export function ChartDetailProvider({ children }: { children: ReactNode }) {
+  const { user } = useAuth();
+  const { pathname } = useLocation();
+  const userId = user?.id ?? null;
   const [detail, setDetail] = useState<ChartDetailPayload | null>(null);
 
   const showDetail = useCallback((payload: ChartDetailPayload) => {
@@ -39,19 +47,27 @@ export function ChartDetailProvider({ children }: { children: ReactNode }) {
     setDetail(null);
   }, []);
 
+  // IMPORTANT: Clear any open chart popup on logout, user switch, or route change so
+  // privileged financial metrics (e.g., admin BD figures) never survive across sessions or views.
   useEffect(() => {
-    if (!detail) return;
+    setDetail(null);
+  }, [userId, pathname]);
+
+  const activeDetail = userId ? detail : null;
+
+  useEffect(() => {
+    if (!activeDetail) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setDetail(null);
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [detail]);
+  }, [activeDetail]);
 
   return (
-    <ChartDetailContext.Provider value={{ detail, showDetail, clearDetail }}>
+    <ChartDetailContext.Provider value={{ detail: activeDetail, showDetail, clearDetail }}>
       {children}
-      {detail ? <ChartDetailPopup detail={detail} onClose={clearDetail} /> : null}
+      {activeDetail ? <ChartDetailPopup detail={activeDetail} onClose={clearDetail} /> : null}
     </ChartDetailContext.Provider>
   );
 }
@@ -65,27 +81,25 @@ export function useChartDetail(): ChartDetailContextValue {
 }
 
 /**
- * Extracts the clicked chart datum cleanly from a Recharts CategoricalChartState
- * whether the user clicked directly on a point/bar or along its vertical tooltip band.
+ * Extracts the clicked chart datum strictly when Recharts reports a non-empty
+ * `activePayload` and ignores pointer releases inside `.recharts-brush` so
+ * dragging the date-range Brush never accidentally triggers the detail popup.
  */
-export function pickChartPoint<T>(state: unknown, rows: readonly T[]): T | undefined {
+export function pickChartPoint<T>(state: unknown, event?: unknown): T | undefined {
+  if (event && typeof event === "object" && "target" in event) {
+    const target = (event as { target?: unknown }).target;
+    if (target instanceof Element && target.closest(".recharts-brush")) {
+      return undefined;
+    }
+  }
   if (!state || typeof state !== "object") return undefined;
   const candidate = state as {
     activePayload?: Array<{ payload?: unknown }>;
-    activeTooltipIndex?: number;
   };
-  const activePayload = candidate.activePayload?.[0]?.payload;
-  if (activePayload !== undefined) {
-    return activePayload as T;
+  if (!Array.isArray(candidate.activePayload) || candidate.activePayload.length === 0) {
+    return undefined;
   }
-  if (
-    typeof candidate.activeTooltipIndex === "number" &&
-    candidate.activeTooltipIndex >= 0 &&
-    candidate.activeTooltipIndex < rows.length
-  ) {
-    return rows[candidate.activeTooltipIndex];
-  }
-  return undefined;
+  return candidate.activePayload[0]?.payload as T | undefined;
 }
 
 function ChartDetailPopup({
@@ -128,6 +142,18 @@ function ChartDetailPopup({
           </div>
         ))}
       </dl>
+
+      {detail.linkTo && detail.linkLabel ? (
+        <div className="mt-3 border-t border-border/70 pt-3">
+          <Link
+            to={detail.linkTo}
+            onClick={onClose}
+            className={cn(buttonVariants({ variant: "primary", size: "sm" }), "w-full justify-center")}
+          >
+            {detail.linkLabel}
+          </Link>
+        </div>
+      ) : null}
     </div>
   );
 }

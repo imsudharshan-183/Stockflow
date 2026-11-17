@@ -362,8 +362,11 @@ function Logic({
                 <ComposedChart
                   data={salesRows}
                   className="cursor-pointer"
-                  onClick={(state) => {
-                    const row = pickChartPoint(state, salesRows);
+                  onClick={(state, event) => {
+                    const row = pickChartPoint<{ date: string; sales: number; stock: number }>(
+                      state,
+                      event,
+                    );
                     if (!row) return;
                     const delta = row.stock - position.reorderPoint;
                     showDetail({
@@ -449,8 +452,11 @@ function Logic({
                   <LineChart
                     data={coverRows}
                     className="cursor-pointer"
-                    onClick={(state) => {
-                      const row = pickChartPoint(state, coverRows);
+                    onClick={(state, event) => {
+                      const row = pickChartPoint<{ date: string; cover: number | null }>(
+                        state,
+                        event,
+                      );
                       if (!row) return;
                       showDetail({
                         title: `Cover trajectory · ${position.branch.name}`,

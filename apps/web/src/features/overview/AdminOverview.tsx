@@ -110,8 +110,8 @@ export function ChartCard({
           <LineChart
             data={sliced}
             className="cursor-pointer"
-            onClick={(state) => {
-              const point = pickChartPoint(state, sliced);
+            onClick={(state, event) => {
+              const point = pickChartPoint<WeekPoint>(state, event);
               if (!point) return;
               showDetail({
                 title,

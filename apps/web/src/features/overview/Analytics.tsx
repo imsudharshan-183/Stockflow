@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -63,7 +63,6 @@ export function Analytics({
   report: KpiSummary;
   rows: readonly Recommendation[];
 }) {
-  const navigate = useNavigate();
   const { showDetail } = useChartDetail();
   const [hiddenActions, setHiddenActions] = useState<ReadonlySet<Action>>(new Set());
 
@@ -96,7 +95,7 @@ export function Analytics({
       {/* 1. Action Mix */}
       <ChartCard
         title={LABELS.actionMix.label}
-        subtitle="Click a slice to filter the Action queue; click legend to toggle"
+        subtitle="Click a slice for metrics and queue link; click legend to toggle"
         helpKey="actionMix"
         isEmpty={rows.length === 0}
         tableData={{
@@ -141,8 +140,9 @@ export function Analytics({
                           value: count > 0 ? formatMoneyFull(value / count) : formatMoneyFull(0),
                         },
                       ],
+                      linkTo: `/queue?action=${item.action}`,
+                      linkLabel: "Open in Queue →",
                     });
-                    navigate(`/queue?action=${item.action}`);
                   }}
                   className="cursor-pointer"
                 >
@@ -190,7 +190,7 @@ export function Analytics({
       {/* 2. Top At-Risk Locations */}
       <ChartCard
         title={LABELS.topRiskBranches.label}
-        subtitle="Click a bar to open the location dashboard"
+        subtitle="Click a bar for exact metrics and branch link"
         helpKey="topRiskBranches"
         isEmpty={branches.length === 0}
         tableData={{
@@ -248,8 +248,9 @@ export function Analytics({
                       { label: "Sales at risk", value: formatMoneyFull(item.revenueAtRisk ?? 0) },
                       { label: "Stockout rate", value: formatPct(item.stockoutRate ?? 0) },
                     ],
+                    linkTo: `/branches/${item.branchId}`,
+                    linkLabel: "View Branch →",
                   });
-                  navigate(`/branches/${item.branchId}`);
                 }}
               />
             </BarChart>
@@ -260,7 +261,7 @@ export function Analytics({
       {/* 3. Top SKUs by Estimated Gain */}
       <ChartCard
         title={LABELS.topSkus.label}
-        subtitle="Click a bar to open the product detail page"
+        subtitle="Click a bar for exact metrics and product link"
         helpKey="topSkus"
         isEmpty={skus.length === 0}
         tableData={{
@@ -321,8 +322,9 @@ export function Analytics({
                       { label: "Recommendations", value: formatNumber(item.count ?? 0) },
                       { label: "Total action units", value: formatNumber(item.units ?? 0) },
                     ],
+                    linkTo: `/products/${item.sku}`,
+                    linkLabel: "View Product →",
                   });
-                  navigate(`/products/${item.sku}`);
                 }}
               />
             </BarChart>
