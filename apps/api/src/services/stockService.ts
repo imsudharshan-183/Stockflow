@@ -4,7 +4,6 @@ import {
   AuditEntrySchema,
   AuditListSchema,
   BranchDetailSchema,
-  DEAD_VELOCITY_PER_DAY,
   DEFAULT_POLICY,
   LocationInventoryResponseSchema,
   LocationListResponseSchema,
@@ -20,16 +19,10 @@ import {
   StockAlertListSchema,
   StockAlertSchema,
   analyze,
-  backtest,
   buildBranchDetail,
   buildProductDetail,
   can,
-  coverDaysOf,
-  isBranchInScope,
   matchesProductQuery,
-  round3,
-  scopeBranches,
-  type Action,
   type ActionRecord,
   type Analysis,
   type AuditEntry,
@@ -64,7 +57,6 @@ import {
   type Recommendation,
   type RecommendationList,
   type RecommendationQuery,
-  type RecommendationStatus,
   type StockAlert,
   type StockAlertList,
   type UpdateProduct,
@@ -73,152 +65,61 @@ import {
 import { recomputeForSku, upsertSalesEntry } from "../db.js";
 import type { StockRepository } from "../repositories/types.js";
 import type { UserRepository } from "../repositories/userTypes.js";
+import {
+  DecisionConflictError,
+  DecisionForbiddenError,
+  ProductConflictError,
+  ProductNotFoundError,
+  ProductValidationError,
+  StockAlertConflictError,
+  StockAlertNotFoundError,
+  StockAlertValidationError,
+} from "./errors.js";
+import { KpiService } from "./kpiService.js";
+import {
+  adjustCommittedDelta,
+  clearCommittedForSku,
+  findRawPosition,
+  getCommittedDelta,
+  projectAllPositions,
+  projectPosition as project,
+  projectPositionFor,
+  type CommittedDelta,
+  type ProjectedPosition,
+} from "./projection.js";
+import {
+  applyDecisionHistoryToState,
+  commitPlanVersion,
+  createStockRuntimeState,
+  ensureFreshPlan,
+  ensureInitialized,
+  ensureInitializedSyncIfPossible,
+  type StockRuntimeState,
+} from "./runtimeState.js";
+import { applyDecisionOverlay, computeActivePlan, isBranchInScope, scopeBranches } from "./scope.js";
+
+export {
+  DecisionConflictError,
+  DecisionForbiddenError,
+  ProductConflictError,
+  ProductNotFoundError,
+  ProductValidationError,
+  StockAlertConflictError,
+  StockAlertNotFoundError,
+  StockAlertValidationError,
+  project,
+  type CommittedDelta,
+  type ProjectedPosition,
+};
 
 const DEMO_USER = "Demo Buyer";
-
-export class DecisionForbiddenError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DecisionForbiddenError";
-  }
-}
-
-export class DecisionConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "DecisionConflictError";
-  }
-}
-
-export interface CommittedDelta {
-  reserved: number;
-  inTransit: number;
-}
-
-export interface ProjectedPosition extends Position {
-  reserved: number;
-  inTransit: number;
-}
-
-const ZERO_DELTA: CommittedDelta = { reserved: 0, inTransit: 0 };
-
-/**
- * Pure projection applying committed outgoing reservations and inbound stock
- * on top of an immutable engine Position snapshot.
- *
- * DECISION: `StockService.analysis` is treated as an immutable baseline per `dataVersion` (`ADR-001`)
- * so golden snapshots, engine math, and cross-instance plan caching stay deterministic; approvals write
- * to `actions`/`audit` and project live `reserved`/`inTransit` adjustments at read time instead.
- */
-export function project(
-  rawPosition: Position,
-  deltas: CommittedDelta = ZERO_DELTA,
-): ProjectedPosition {
-  const reserved = Math.max(0, deltas.reserved);
-  const inTransit = Math.max(0, deltas.inTransit);
-  if (reserved === 0 && inTransit === 0) {
-    return { ...rawPosition, reserved: 0, inTransit: 0 };
-  }
-
-  const onHand = Math.max(0, rawPosition.onHand - reserved);
-  const surplus = Math.max(0, rawPosition.surplus - reserved);
-  const effectiveStock = onHand + inTransit;
-  const coverDays = coverDaysOf(effectiveStock, rawPosition.velocity);
-  const onHandCoverDays = coverDaysOf(onHand, rawPosition.velocity);
-
-  let status: PositionStatus = rawPosition.status;
-  if (rawPosition.inStockDays === 0) {
-    status = "NEW";
-  } else {
-    const overstock =
-      onHandCoverDays === null ? onHand > 0 : onHandCoverDays > DEFAULT_POLICY.overstockCoverDays;
-    if (overstock) {
-      status = "OVERSTOCK";
-    } else if (effectiveStock < rawPosition.reorderPoint) {
-      status = "AT_RISK";
-    } else {
-      status = "HEALTHY";
-    }
-  }
-
-  const need = status === "AT_RISK" ? Math.max(0, rawPosition.need - inTransit) : 0;
-  const lostUnits = status === "AT_RISK" ? Math.max(0, rawPosition.lostUnits - inTransit) : 0;
-
-  return {
-    ...rawPosition,
-    onHand,
-    coverDays,
-    status,
-    surplus,
-    need,
-    lostUnits,
-    reserved,
-    inTransit,
-  };
-}
-
-export class ProductConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProductConflictError";
-  }
-}
-
-export class ProductNotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProductNotFoundError";
-  }
-}
-
-export class ProductValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ProductValidationError";
-  }
-}
-
-export class StockAlertNotFoundError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StockAlertNotFoundError";
-  }
-}
-
-export class StockAlertConflictError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StockAlertConflictError";
-  }
-}
-
-export class StockAlertValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "StockAlertValidationError";
-  }
-}
 
 // The morning plan is computed once per process. Approve and reject overlay status; they do not recompute velocity.
 // SCALE: a new day or a policy edit is the point to recompute, per SKU, instead of rebuilding 500 x 15 series on every request.
 
 export class StockService {
-  private readonly decisions = new Map<string, Extract<RecommendationStatus, "APPROVED" | "REJECTED">>();
-  // In-memory projection ledger keyed by `${sku}::${branchId}`; rebuilt from post-plan audits on boot
-  // and cleared per SKU (or network-wide) whenever base dataVersion advances.
-  private readonly committedDeltas = new Map<string, CommittedDelta>();
-  private readonly committedAllocations = new Map<
-    string,
-    { sku: string; branchId: string; donorBranchId: string | null; action: Action; quantity: number }
-  >();
-  private readonly inflightDecisionIds = new Set<string>();
-  private readonly scopedKpiCache = new Map<string, KpiSummary>();
-  private audit: AuditEntry[] = [];
-  private planVersion = 0;
-  private initialized = false;
-  private inflightRefresh: Promise<void> | null = null;
-  private data!: Dataset;
-  private analysis!: Analysis;
+  private readonly runtime: StockRuntimeState;
+  private readonly kpiService: KpiService;
 
   private constructor(
     private readonly repo: StockRepository,
@@ -226,12 +127,46 @@ export class StockService {
     analysis?: Analysis,
     planVersion = 0,
   ) {
+    this.runtime = createStockRuntimeState(repo);
+    this.kpiService = new KpiService(this.runtime);
     if (data && analysis) {
-      this.data = data;
-      this.analysis = analysis;
-      this.planVersion = planVersion;
-      this.initialized = true;
+      this.runtime.data = data;
+      this.runtime.analysis = analysis;
+      this.runtime.planVersion = planVersion;
+      this.runtime.initialized = true;
     }
+  }
+
+  private get decisions() {
+    return this.runtime.decisions;
+  }
+
+  private get committedDeltas() {
+    return this.runtime.committedDeltas;
+  }
+
+  private get inflightDecisionIds() {
+    return this.runtime.inflightDecisionIds;
+  }
+
+  private get scopedKpiCache() {
+    return this.runtime.scopedKpiCache;
+  }
+
+  private get audit(): AuditEntry[] {
+    return this.runtime.audit;
+  }
+
+  private get data(): Dataset {
+    return this.runtime.data;
+  }
+
+  private get analysis(): Analysis {
+    return this.runtime.analysis;
+  }
+
+  private set analysis(next: Analysis) {
+    this.runtime.analysis = next;
   }
 
   static async create(repo: StockRepository): Promise<StockService> {
@@ -241,218 +176,19 @@ export class StockService {
   }
 
   async ensureInitialized(): Promise<void> {
-    if (this.initialized) return;
-
-    if (!this.inflightRefresh) {
-      this.inflightRefresh = (async () => {
-        if (this.initialized) return;
-
-        const tDataset = performance.now();
-        const data = await this.repo.loadDataset();
-        const datasetMs = Math.round(performance.now() - tDataset);
-        console.log(`loading dataset (${datasetMs}ms)`);
-
-        const tPlan = performance.now();
-        const currentVersion = await this.repo.getDataVersion();
-        const cached = await this.repo.loadCachedPlan(currentVersion);
-
-        let analysis: Analysis;
-        if (cached) {
-          analysis = cached.plan;
-        } else {
-          analysis = (await this.repo.loadAnalysis()) ?? computeActivePlan(data);
-          try {
-            await this.repo.saveCachedPlan(currentVersion, analysis);
-          } catch {
-            // Fallback to compute-and-serve if plan persistence fails.
-          }
-        }
-        const planMs = Math.round(performance.now() - tPlan);
-        console.log(`computing plan (${planMs}ms)`);
-
-        this.data = data;
-        this.analysis = analysis;
-        this.planVersion = currentVersion;
-        this.scopedKpiCache.clear();
-        const replayCutoff = currentVersion > 1 ? cached?.computedAt : undefined;
-        await this.syncDecisionsAndAudit(replayCutoff);
-        this.initialized = true;
-      })().finally(() => {
-        this.inflightRefresh = null;
-      });
-    }
-
-    await this.inflightRefresh;
+    await ensureInitialized(this.runtime);
   }
 
   private ensureInitializedSyncIfPossible(): void {
-    if (this.initialized) return;
-    const syncRepo = this.repo as StockRepository & {
-      peekDatasetSync?: () => Dataset;
-      peekDataVersionSync?: () => number;
-      peekCachedPlanSync?: (v: number) => { plan: Analysis } | null;
-      saveCachedPlanSync?: (v: number, plan: Analysis) => void;
-      peekActionsSync?: () => ActionRecord[];
-      peekAuditSync?: () => AuditEntry[];
-    };
-    if (typeof syncRepo.peekDatasetSync === "function") {
-      const tDataset = performance.now();
-      const data = syncRepo.peekDatasetSync();
-      const datasetMs = Math.round(performance.now() - tDataset);
-      console.log(`loading dataset (${datasetMs}ms)`);
-
-      const tPlan = performance.now();
-      const currentVersion = syncRepo.peekDataVersionSync?.() ?? 1;
-      const cached = syncRepo.peekCachedPlanSync?.(currentVersion) as
-        | { plan: Analysis; computedAt?: string }
-        | null
-        | undefined;
-      const analysis = cached ? cached.plan : computeActivePlan(data);
-      if (!cached) {
-        syncRepo.saveCachedPlanSync?.(currentVersion, analysis);
-      }
-      const planMs = Math.round(performance.now() - tPlan);
-      console.log(`computing plan (${planMs}ms)`);
-
-      this.data = data;
-      this.analysis = analysis;
-      this.planVersion = currentVersion;
-      this.scopedKpiCache.clear();
-      if (typeof syncRepo.peekActionsSync === "function") {
-        this.applyDecisionHistory(syncRepo.peekActionsSync());
-      }
-      if (typeof syncRepo.peekAuditSync === "function") {
-        this.audit = syncRepo.peekAuditSync();
-      }
-      this.replayApprovedTransfersFromAudit(currentVersion > 1 ? cached?.computedAt : undefined);
-      this.initialized = true;
-    }
-  }
-
-  private applyDecisionHistory(history: ActionRecord[]): void {
-    this.decisions.clear();
-    const sorted = [...history].sort((a, b) => a.decidedAt.localeCompare(b.decidedAt));
-    for (const action of sorted) this.decisions.set(action.recommendationId, action.status);
-  }
-
-  /**
-   * Reconstructs `committedDeltas` at startup from persisted APPROVED transfer
-   * records in the `audits` collection so restarts never lose live reservations.
-   *
-   * IMPORTANT: `replayCutoffAt` (`plan_cache.computedAt` when `dataVersion > 1`) skips audit entries
-   * recorded before the current plan was built—after a sales or catalog write bumps `dataVersion`,
-   * recomputation already incorporates physical stock changes into base `onHand`, so replaying older
-   * approvals would double-deduct donor surplus.
-   */
-  private replayApprovedTransfersFromAudit(replayCutoffAt?: string): void {
-    this.clearAllCommittedDeltas();
-    const recById = new Map(this.analysis.recommendations.map((r) => [r.id, r]));
-    const sorted = [...this.audit].sort((a, b) => a.at.localeCompare(b.at));
-    const seenRecIds = new Set<string>();
-
-    for (const entry of sorted) {
-      if (entry.decision !== "APPROVED" || entry.action !== "TRANSFER") continue;
-      if (replayCutoffAt && entry.at < replayCutoffAt) continue;
-      if (seenRecIds.has(entry.recommendationId)) continue;
-      seenRecIds.add(entry.recommendationId);
-
-      // Respect actions collection if present (e.g. if an external script cleared decisions).
-      if (this.decisions.size > 0 && this.decisions.get(entry.recommendationId) !== "APPROVED") {
-        continue;
-      }
-
-      const rec = recById.get(entry.recommendationId);
-      if (!rec || rec.action !== "TRANSFER" || !rec.donorBranchId) continue;
-
-      this.adjustDelta(rec.sku, rec.donorBranchId, rec.quantity, 0);
-      this.adjustDelta(rec.sku, rec.branchId, 0, rec.quantity);
-      this.committedAllocations.set(rec.id, {
-        sku: rec.sku,
-        branchId: rec.branchId,
-        donorBranchId: rec.donorBranchId,
-        action: rec.action,
-        quantity: rec.quantity,
-      });
-    }
-  }
-
-  private async syncDecisionsAndAudit(replayCutoffAt?: string): Promise<void> {
-    const [history, audit] = await Promise.all([this.repo.listActions(), this.repo.listAudit()]);
-    this.applyDecisionHistory(history);
-    this.audit = audit;
-    this.replayApprovedTransfersFromAudit(replayCutoffAt);
+    ensureInitializedSyncIfPossible(this.runtime);
   }
 
   async ensureFreshPlan(options?: { syncDecisions?: boolean; syncAudit?: boolean }): Promise<void> {
-    if (!this.initialized) {
-      await this.ensureInitialized();
-      return;
-    }
-
-    const syncDecisions = options?.syncDecisions ?? true;
-    const syncAudit = options?.syncAudit ?? false;
-
-    const [currentVersion, actions, audit] = await Promise.all([
-      this.repo.getDataVersion(),
-      syncDecisions ? this.repo.listActions() : Promise.resolve(null),
-      syncAudit ? this.repo.listAudit() : Promise.resolve(null),
-    ]);
-
-    if (actions) this.applyDecisionHistory(actions);
-    if (audit) this.audit = audit;
-    if (currentVersion === this.planVersion) return;
-
-    if (!this.inflightRefresh) {
-      this.inflightRefresh = (async () => {
-        if (currentVersion === this.planVersion) return;
-
-        const tDataset = performance.now();
-        const [freshData, cached] = await Promise.all([
-          this.repo.loadDataset(),
-          this.repo.loadCachedPlan(currentVersion),
-        ]);
-        const datasetMs = Math.round(performance.now() - tDataset);
-        console.log(`loading dataset (${datasetMs}ms)`);
-
-        const tPlan = performance.now();
-        let nextPlan: Analysis;
-        if (cached) {
-          nextPlan = cached.plan;
-        } else {
-          nextPlan = computeActivePlan(freshData);
-          try {
-            await this.repo.saveCachedPlan(currentVersion, nextPlan);
-          } catch {
-            // Fallback to compute-and-serve if plan persistence fails.
-          }
-        }
-        const planMs = Math.round(performance.now() - tPlan);
-        console.log(`computing plan (${planMs}ms)`);
-
-        this.data = freshData;
-        this.analysis = nextPlan;
-        this.planVersion = currentVersion;
-        this.clearAllCommittedDeltas();
-        this.scopedKpiCache.clear();
-        if (!actions) this.applyDecisionHistory(await this.repo.listActions());
-        if (!audit) this.audit = await this.repo.listAudit();
-      })().finally(() => {
-        this.inflightRefresh = null;
-      });
-    }
-
-    await this.inflightRefresh;
+    await ensureFreshPlan(this.runtime, options);
   }
 
   async commitPlanVersion(): Promise<number> {
-    const nextVersion = await this.repo.bumpDataVersion();
-    this.planVersion = nextVersion;
-    try {
-      await this.repo.saveCachedPlan(nextVersion, this.analysis);
-    } catch {
-      // Fallback to compute-and-serve if plan persistence fails.
-    }
-    return nextVersion;
+    return commitPlanVersion(this.runtime);
   }
 
   get userRepo(): UserRepository {
@@ -545,63 +281,34 @@ export class StockService {
     }
   }
 
-  private deltaKey(sku: string, branchId: string): string {
-    return `${sku}::${branchId}`;
-  }
-
   private getDelta(sku: string, branchId: string): CommittedDelta {
-    return this.committedDeltas.get(this.deltaKey(sku, branchId)) ?? ZERO_DELTA;
+    return getCommittedDelta(this.runtime.committedDeltas, sku, branchId);
   }
 
   private adjustDelta(sku: string, branchId: string, dReserved: number, dInTransit: number): void {
-    const key = this.deltaKey(sku, branchId);
-    const current = this.committedDeltas.get(key) ?? ZERO_DELTA;
-    const reserved = Math.max(0, current.reserved + dReserved);
-    const inTransit = Math.max(0, current.inTransit + dInTransit);
-    if (reserved === 0 && inTransit === 0) {
-      this.committedDeltas.delete(key);
-    } else {
-      this.committedDeltas.set(key, { reserved, inTransit });
-    }
+    adjustCommittedDelta(this.runtime.committedDeltas, sku, branchId, dReserved, dInTransit);
   }
 
   private clearCommittedForSku(sku: string): void {
-    const prefix = `${sku}::`;
-    for (const key of this.committedDeltas.keys()) {
-      if (key.startsWith(prefix)) this.committedDeltas.delete(key);
-    }
-    for (const [id, entry] of this.committedAllocations.entries()) {
-      if (entry.sku === sku) this.committedAllocations.delete(id);
-    }
-  }
-
-  private clearAllCommittedDeltas(): void {
-    this.committedDeltas.clear();
-    this.committedAllocations.clear();
+    clearCommittedForSku(this.runtime.committedDeltas, this.runtime.committedRecommendationIds, sku);
   }
 
   private findRawPosition(sku: string, branchId: string): Position | undefined {
-    const sIdx = this.data.products.findIndex((p) => p.sku === sku);
-    const bIdx = this.data.branches.findIndex((b) => b.id === branchId);
-    if (sIdx < 0 || bIdx < 0) return undefined;
-    return this.analysis.positions[sIdx]?.[bIdx];
+    return findRawPosition(this.data, this.analysis, sku, branchId);
   }
 
   private projectPositionFor(skuIndex: number, branchIndex: number): ProjectedPosition | undefined {
-    const raw = this.analysis.positions[skuIndex]?.[branchIndex];
-    const product = this.data.products[skuIndex];
-    const branch = this.data.branches[branchIndex];
-    if (!raw || !product || !branch) return raw ? project(raw) : undefined;
-    return project(raw, this.getDelta(product.sku, branch.id));
+    return projectPositionFor(
+      this.data,
+      this.analysis,
+      this.runtime.committedDeltas,
+      skuIndex,
+      branchIndex,
+    );
   }
 
   private projectedPositions(onlySkuIndex?: number): ProjectedPosition[][] {
-    return this.analysis.positions.map((row, sIdx) => {
-      if (onlySkuIndex !== undefined && sIdx !== onlySkuIndex) {
-        return row.map((pos) => project(pos));
-      }
-      return row.map((pos, bIdx) => this.projectPositionFor(sIdx, bIdx) ?? project(pos));
-    });
+    return projectAllPositions(this.data, this.analysis, this.runtime.committedDeltas, onlySkuIndex);
   }
 
   projectPosition(sku: string, branchId: string): ProjectedPosition | null {
@@ -637,7 +344,7 @@ export class StockService {
       applied.push({ sku: rec.sku, branchId: rec.branchId, reserved: rec.quantity, inTransit: 0 });
     }
     if (applied.length > 0) {
-      this.committedAllocations.set(rec.id, {
+      this.runtime.committedRecommendationIds.set(rec.id, {
         sku: rec.sku,
         branchId: rec.branchId,
         donorBranchId: rec.donorBranchId,
@@ -655,185 +362,11 @@ export class StockService {
     for (const e of entries) {
       this.adjustDelta(e.sku, e.branchId, -e.reserved, -e.inTransit);
     }
-    this.committedAllocations.delete(recId);
-  }
-
-  private accumulateProjectedKpis(branchIndices: readonly number[]): {
-    deadStockValue: number;
-    lostSalesAtRisk: number;
-    cashReleasable: number;
-    revenueAtRiskByBranch: Map<string, number>;
-  } {
-    let deadStockValue = 0;
-    let lostSalesAtRisk = 0;
-    let cashReleasable = 0;
-    const revenueAtRiskByBranch = new Map<string, number>();
-
-    for (let sku = 0; sku < this.data.products.length; sku += 1) {
-      const product = this.data.products[sku];
-      if (!product) continue;
-      for (const bIdx of branchIndices) {
-        const branch = this.data.branches[bIdx];
-        const position = this.projectPositionFor(sku, bIdx);
-        if (!branch || !position) continue;
-        if (position.status === "OVERSTOCK" && position.velocity < DEAD_VELOCITY_PER_DAY) {
-          deadStockValue += position.onHand * product.cost;
-        }
-        if (position.status === "AT_RISK") {
-          const risk = position.lostUnits * product.price;
-          lostSalesAtRisk += risk;
-          revenueAtRiskByBranch.set(branch.id, (revenueAtRiskByBranch.get(branch.id) ?? 0) + risk);
-        }
-        if (position.status === "OVERSTOCK") {
-          cashReleasable += position.surplus * product.cost;
-        }
-      }
-    }
-
-    return { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch };
+    this.runtime.committedRecommendationIds.delete(recId);
   }
 
   kpis(user?: User, branchId?: string): KpiSummary {
-    this.ensureInitializedSyncIfPossible();
-    if (!branchId && (!user || can(user.role, "dashboard:financial:network"))) {
-      if (this.committedDeltas.size === 0) {
-        return this.analysis.kpis;
-      }
-      const allBranchIndices = this.data.branches.map((_, idx) => idx);
-      const { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch } =
-        this.accumulateProjectedKpis(allBranchIndices);
-
-      return {
-        ...this.analysis.kpis,
-        deadStockValue: round3(deadStockValue),
-        lostSalesAtRisk: round3(lostSalesAtRisk),
-        cashReleasable: round3(cashReleasable),
-        branchRisk: this.analysis.kpis.branchRisk.map((row) => ({
-          ...row,
-          revenueAtRisk: round3(revenueAtRiskByBranch.get(row.branchId) ?? 0),
-        })),
-      };
-    }
-
-    if (user && !can(user.role, "dashboard:financial:scoped")) {
-      throw new DecisionForbiddenError("Insufficient permission to view KPIs");
-    }
-
-    const allBranchIds = this.data.branches.map((b) => b.id);
-    const allowedList = user ? scopeBranches(user, allBranchIds) : allBranchIds;
-    if (branchId) {
-      if (user && user.role !== "admin" && !isBranchInScope(user, branchId)) {
-        throw new DecisionForbiddenError("Access to branch forbidden");
-      }
-      if (!allBranchIds.includes(branchId)) {
-        throw new DecisionForbiddenError("Branch not found in scope");
-      }
-    }
-    const scopedList = branchId ? [branchId] : allowedList;
-    const cacheKey = [...scopedList].sort().join("|");
-    const cached = this.scopedKpiCache.get(cacheKey);
-    if (cached) return cached;
-
-    const userBranches = new Set(scopedList);
-    const branches = this.analysis.kpis.branches.filter((b) => userBranches.has(b.id));
-    const coverGrid = this.analysis.kpis.coverGrid.filter((b) => userBranches.has(b.branchId));
-    const branchIndices: number[] = [];
-    for (let bIdx = 0; bIdx < this.data.branches.length; bIdx += 1) {
-      const branch = this.data.branches[bIdx];
-      if (branch && userBranches.has(branch.id)) branchIndices.push(bIdx);
-    }
-
-    const { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch } =
-      this.accumulateProjectedKpis(branchIndices);
-
-    const branchRisk = this.analysis.kpis.branchRisk
-      .filter((b) => userBranches.has(b.branchId))
-      .map((row) =>
-        this.committedDeltas.size === 0
-          ? row
-          : { ...row, revenueAtRisk: round3(revenueAtRiskByBranch.get(row.branchId) ?? 0) },
-      );
-
-    const trend = this.data.dates.map((date, day) => {
-      let stockouts = 0;
-      let cells = 0;
-      let salesValue = 0;
-      let inventoryValue = 0;
-      for (let sku = 0; sku < this.data.products.length; sku += 1) {
-        const product = this.data.products[sku];
-        const salesByBranch = this.data.sales[sku];
-        const stockByBranch = this.data.onHand[sku];
-        const demandByBranch = this.data.demand[sku];
-        if (!product || !salesByBranch || !stockByBranch || !demandByBranch) continue;
-        for (const bIdx of branchIndices) {
-          const sold = salesByBranch[bIdx]?.[day] ?? 0;
-          const onHand = stockByBranch[bIdx]?.[day] ?? 0;
-          const demand = demandByBranch[bIdx]?.[day] ?? 0;
-          cells += 1;
-          salesValue += sold * product.price;
-          inventoryValue += onHand * product.cost;
-          if (demand > 0 && onHand + sold <= 0) stockouts += 1;
-        }
-      }
-      return {
-        date,
-        stockoutRate: cells === 0 ? 0 : stockouts / cells,
-        salesValue: Math.round((salesValue + Number.EPSILON) * 100) / 100,
-        inventoryValue: Math.round((inventoryValue + Number.EPSILON) * 100) / 100,
-      };
-    });
-
-    const scopedDataset: Dataset = {
-      ...this.data,
-      branches,
-      sales: this.data.sales.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
-      onHand: this.data.onHand.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
-      demand: this.data.demand.map((byBranch) => branchIndices.map((bIdx) => byBranch[bIdx] ?? [])),
-    };
-    const scopedBacktest =
-      branches.length > 0
-        ? backtest(scopedDataset, DEFAULT_POLICY)
-        : {
-            windowDays: Math.min(DEFAULT_POLICY.backtestDays, this.data.dates.length),
-            baselineStockoutDays: 0,
-            engineStockoutDays: 0,
-            stockoutDaysAvoided: 0,
-            cashReleased: 0,
-          };
-
-    const stockoutRates = branchRisk.map((r) => r.stockoutRate);
-    const avgStockoutRate =
-      stockoutRates.length > 0 ? stockoutRates.reduce((sum, r) => sum + r, 0) / stockoutRates.length : 0;
-
-    const scopedPendingRecs = this.analysis.recommendations.filter((rec) => {
-      const status = this.decisions.get(rec.id) ?? rec.status;
-      if (status !== "PENDING") return false;
-      return userBranches.has(rec.branchId) || (rec.donorBranchId ? userBranches.has(rec.donorBranchId) : false);
-    });
-    const pendingApprovalsCount = scopedPendingRecs.length;
-    const backlogValue = Math.round((scopedPendingRecs.reduce((acc, r) => acc + r.netBenefit, 0) + Number.EPSILON) * 100) / 100;
-    const atRiskBranchCount = branchRisk.filter((r) => r.stockoutRate > 0.05 || r.revenueAtRisk > 0).length;
-
-    const result: KpiSummary = {
-      ...this.analysis.kpis,
-      branches,
-      branchRisk,
-      coverGrid,
-      trend,
-      backtest: scopedBacktest,
-      deadStockValue: round3(deadStockValue),
-      lostSalesAtRisk: round3(lostSalesAtRisk),
-      cashReleasable: round3(cashReleasable),
-      stockoutRate: Math.round(avgStockoutRate * 1000) / 1000,
-      operational: {
-        pendingApprovalsCount,
-        backlogValue,
-        atRiskBranchCount,
-      },
-      scope: scopedList,
-    };
-    this.scopedKpiCache.set(cacheKey, result);
-    return result;
+    return this.kpiService.kpis(user, branchId);
   }
 
   list(query: RecommendationQuery, user?: User): RecommendationList {
@@ -1379,7 +912,7 @@ export class StockService {
       } else {
         this.rollbackStagedDeltas(id, staged);
         // Another instance decided this recommendation first; refresh local overlay.
-        this.applyDecisionHistory(await this.repo.listActions());
+        applyDecisionHistoryToState(this.runtime, await this.repo.listActions());
         this.scopedKpiCache.clear();
       }
       return RecommendationSchema.parse(this.overlay(existing));
@@ -1482,7 +1015,7 @@ export class StockService {
           this.scopedKpiCache.clear();
         }
         if (duplicateIds.size > 0) {
-          this.applyDecisionHistory(await this.repo.listActions());
+          applyDecisionHistoryToState(this.runtime, await this.repo.listActions());
         }
       }
 
@@ -1508,9 +1041,7 @@ export class StockService {
   }
 
   private overlay(recommendation: Recommendation): Recommendation {
-    const status = this.decisions.get(recommendation.id);
-    if (!status || status === recommendation.status) return recommendation;
-    return { ...recommendation, status };
+    return applyDecisionOverlay(recommendation, this.decisions);
   }
 
   // --- Catalog Product Management ---
@@ -2066,32 +1597,4 @@ export class StockService {
     }
     return StockAlertSchema.parse(result.alert);
   }
-}
-
-function computeActivePlan(data: Dataset): Analysis {
-  const numBranches = data.branches.length;
-  const numDays = data.dates.length;
-  const activeIndices: number[] = [];
-  const activeProducts: Product[] = [];
-
-  for (let i = 0; i < data.products.length; i++) {
-    const p = data.products[i]!;
-    if (p.status !== "archived") {
-      activeIndices.push(i);
-      activeProducts.push(p);
-    }
-  }
-
-  if (activeProducts.length === data.products.length) {
-    return analyze(data, DEFAULT_POLICY);
-  }
-
-  const activeDataset: Dataset = {
-    ...data,
-    products: activeProducts,
-    sales: activeIndices.map((i) => data.sales[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0))),
-    onHand: activeIndices.map((i) => data.onHand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0))),
-    demand: activeIndices.map((i) => data.demand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0))),
-  };
-  return analyze(activeDataset, DEFAULT_POLICY);
 }

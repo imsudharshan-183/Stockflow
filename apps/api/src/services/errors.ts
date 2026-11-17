@@ -1,0 +1,55 @@
+export class DecisionForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecisionForbiddenError";
+  }
+}
+
+export class DecisionConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "DecisionConflictError";
+  }
+}
+
+export class ProductConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductConflictError";
+  }
+}
+
+export class ProductNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductNotFoundError";
+  }
+}
+
+export class ProductValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ProductValidationError";
+  }
+}
+
+export class StockAlertNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StockAlertNotFoundError";
+  }
+}
+
+export class StockAlertConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StockAlertConflictError";
+  }
+}
+
+export class StockAlertValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StockAlertValidationError";
+  }
+}
