@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import {
   ActionRecordSchema,
   AuditEntrySchema,
@@ -7,8 +6,6 @@ import {
   MATERIAL_MIN_NET_BENEFIT,
   RecommendationListSchema,
   RecommendationSchema,
-  StockAlertListSchema,
-  StockAlertSchema,
   can,
   type ActionRecord,
   type Analysis,
@@ -55,6 +52,7 @@ import {
   StockAlertValidationError,
 } from "./errors.js";
 import { KpiService } from "./kpiService.js";
+import { StockAlertService } from "./stockAlertService.js";
 import {
   adjustCommittedDelta,
   findRawPosition,
@@ -98,6 +96,7 @@ export class StockService {
   private readonly runtime: StockRuntimeState;
   private readonly kpiService: KpiService;
   private readonly catalogService: CatalogService;
+  private readonly stockAlertService: StockAlertService;
 
   private constructor(
     private readonly repo: StockRepository,
@@ -108,6 +107,7 @@ export class StockService {
     this.runtime = createStockRuntimeState(repo);
     this.kpiService = new KpiService(this.runtime);
     this.catalogService = new CatalogService(this.runtime);
+    this.stockAlertService = new StockAlertService(this.runtime);
     if (data && analysis) {
       this.runtime.data = data;
       this.runtime.analysis = analysis;
@@ -626,52 +626,11 @@ export class StockService {
   }
 
   async listStockAlerts(user?: User, branchId?: string): Promise<StockAlertList> {
-    await this.ensureInitialized();
-    if (branchId && user && !isBranchInScope(user, branchId)) {
-      throw new DecisionForbiddenError("Cannot view stock alerts outside your assigned branches");
-    }
-    const all = await this.repo.listStockAlerts();
-    const alerts = branchId
-      ? all.filter((alert) => alert.branchId === branchId)
-      : !user || user.role === "admin"
-        ? all
-        : all.filter((alert) => isBranchInScope(user, alert.branchId));
-    return StockAlertListSchema.parse({ alerts });
+    return this.stockAlertService.listStockAlerts(user, branchId);
   }
 
   async createStockAlert(input: CreateStockAlert, user: User): Promise<StockAlert> {
-    await this.ensureInitialized();
-    if (!can(user.role, "stock:flag")) {
-      throw new DecisionForbiddenError("Only branch staff can flag stock alerts");
-    }
-    if (!isBranchInScope(user, input.branchId)) {
-      throw new DecisionForbiddenError("Cannot flag stock outside your assigned branch");
-    }
-
-    const branch = this.data.branches.find((b) => b.id === input.branchId);
-    if (!branch) {
-      throw new StockAlertValidationError(`Unknown branch: ${input.branchId}`);
-    }
-    const product = this.data.products.find((p) => p.sku === input.sku);
-    if (!product || product.status === "archived") {
-      throw new StockAlertValidationError(`Unknown or archived SKU: ${input.sku}`);
-    }
-
-    const alert = StockAlertSchema.parse({
-      id: `alt_${randomUUID().slice(0, 8)}`,
-      branchId: branch.id,
-      branchName: branch.name,
-      sku: product.sku,
-      productName: product.name,
-      category: input.category ?? "CRITICAL_LOW",
-      flaggedBy: { userId: user.id, name: user.name, role: user.role },
-      flaggedAt: new Date().toISOString(),
-      note: input.note.trim(),
-      status: "PENDING",
-      decidedBy: null,
-      decidedAt: null,
-    });
-    return this.repo.createStockAlert(alert);
+    return this.stockAlertService.createStockAlert(input, user);
   }
 
   async decideStockAlert(
@@ -679,33 +638,6 @@ export class StockService {
     decision: "APPROVED" | "REJECTED",
     user: User,
   ): Promise<StockAlert> {
-    await this.ensureInitialized();
-    if (!can(user.role, "stock:flag:decide")) {
-      throw new DecisionForbiddenError("Staff cannot approve or reject stock alerts");
-    }
-    const existing = await this.repo.getStockAlert(id);
-    if (!existing) {
-      throw new StockAlertNotFoundError("Stock alert not found");
-    }
-    if (!isBranchInScope(user, existing.branchId)) {
-      throw new DecisionForbiddenError("Cannot decide stock alert outside your assigned branches");
-    }
-    if (existing.status !== "PENDING") {
-      throw new StockAlertConflictError("Stock alert has already been decided and is immutable");
-    }
-
-    const result = await this.repo.decideStockAlert(
-      id,
-      decision,
-      { userId: user.id, name: user.name, role: user.role },
-      new Date().toISOString(),
-    );
-    if (result.status === "not_found") {
-      throw new StockAlertNotFoundError("Stock alert not found");
-    }
-    if (result.status === "already_decided") {
-      throw new StockAlertConflictError("Stock alert has already been decided and is immutable");
-    }
-    return StockAlertSchema.parse(result.alert);
+    return this.stockAlertService.decideStockAlert(id, decision, user);
   }
 }
