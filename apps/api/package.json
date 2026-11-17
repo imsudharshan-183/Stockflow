@@ -9,6 +9,7 @@
     "seed:mongo": "tsx src/seed-mongo.ts",
     "seed:users": "tsx src/seed-users.ts",
     "reset:decisions": "tsx src/resetDecisions.ts",
+    "bench:cold": "tsx src/benchCold.ts",
     "fixtures:update": "tsx src/test/updateFixtures.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

@@ -26,7 +26,12 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
-export function repoRootFrom(start: string): string {
+export interface LoadDotenvOptions {
+  startDir?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+export function findRepoRoot(start: string): string | null {
   let dir = start;
   for (let depth = 0; depth < 8; depth += 1) {
     if (existsSync(resolve(dir, "pnpm-workspace.yaml"))) return dir;
@@ -34,12 +39,37 @@ export function repoRootFrom(start: string): string {
     if (parent === dir) break;
     dir = parent;
   }
-  throw new Error("Could not locate the repo root");
+  return null;
 }
 
-export function loadDotenv(): void {
-  const here = dirname(fileURLToPath(import.meta.url));
-  config({ path: resolve(repoRootFrom(here), ".env"), quiet: true });
+export function repoRootFrom(start: string): string {
+  const root = findRepoRoot(start);
+  if (root === null) {
+    throw new Error("Could not locate the repo root");
+  }
+  return root;
+}
+
+export function loadDotenv(options: LoadDotenvOptions = {}): void {
+  const env = options.env ?? process.env;
+  // DECISION: In hosted production environments (Vercel or NODE_ENV=production),
+  // runtime env vars are supplied by the platform and repo root markers are absent.
+  if (Boolean(env.VERCEL?.trim()) || env.NODE_ENV === "production") {
+    return;
+  }
+
+  try {
+    const startDir = options.startDir ?? dirname(fileURLToPath(import.meta.url));
+    const root = findRepoRoot(startDir);
+    if (!root) return;
+
+    const envPath = resolve(root, ".env");
+    if (!existsSync(envPath)) return;
+
+    config({ path: envPath, processEnv: env, quiet: true });
+  } catch {
+    // IMPORTANT: loadDotenv must never abort startup if .env lookup or parsing fails.
+  }
 }
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
