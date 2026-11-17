@@ -2,14 +2,14 @@ import { loadDotenv, readEnv } from "./config/env.js";
 import { redactSecrets } from "./config/redact.js";
 import { buildApp } from "./plugins/app.js";
 import { createRepository } from "./repositories/create.js";
-import { StockService } from "./services/stockService.js";
+import { createStockServices } from "./services/index.js";
 
 const startupStartedAt = performance.now();
 loadDotenv();
 const env = readEnv();
 const repo = await createRepository(env.MONGODB_URI);
-const service = await StockService.create(repo);
-const app = await buildApp(service);
+const services = createStockServices(repo);
+const app = await buildApp(services);
 
 const shutdown = async () => {
   await app.close();
@@ -28,7 +28,7 @@ try {
   await app.listen({ port: env.PORT, host });
   const listenMs = Math.round(performance.now() - startupStartedAt);
   console.log(
-    `listening on ${host}:${env.PORT} (repository: ${service.repositoryKind()}) (${listenMs}ms)`,
+    `listening on ${host}:${env.PORT} (repository: ${services.repositoryKind()}) (${listenMs}ms)`,
   );
 } catch (error) {
   const message = error instanceof Error ? error.message : "startup failed";

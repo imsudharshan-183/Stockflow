@@ -536,9 +536,9 @@ describe("route matrix: /api/users writes", () => {
  * ---------------------------------------------------------------------------------------------- */
 describe("route matrix: approve / reject / audit", () => {
   it.each(["approve", "reject"] as const)("POST /recommendations/:id/%s across roles and scope", async (verb) => {
-    const { app, service } = await setupApp();
+    const { app, services } = await setupApp();
     const call = caller(app);
-    const recs = service.list({}).recommendations;
+    const recs = services.decisions.list({}).recommendations;
     const inScope = recs.find((r) => r.branchId === "BR-001");
     const outOfScope = recs.find((r) => r.branchId === "BR-005");
     const elsewhere = recs.find((r) => r.branchId === "BR-010");
@@ -575,10 +575,10 @@ describe("route matrix: approve / reject / audit", () => {
   });
 
   it("GET /api/audit: 401 none, 403 staff, manager scoped to its branches, admin sees all (newest first)", async () => {
-    const { app, service } = await setupApp();
+    const { app, services } = await setupApp();
     const call = caller(app);
     const admin = tokenFor(app, SEED_USERS.admin);
-    const recs = service.list({}).recommendations;
+    const recs = services.decisions.list({}).recommendations;
     const ids = ["BR-001", "BR-005", "BR-010"].map((b) => recs.find((r) => r.branchId === b)!.id);
     for (const id of ids) {
       expect((await call("POST", `/api/recommendations/${id}/approve`, admin)).status).toBe(200);
@@ -601,7 +601,7 @@ describe("route matrix: approve / reject / audit", () => {
 
   it("decisions survive a service restart on the same repository", async () => {
     const first = await setupApp();
-    const rec = first.service.list({}).recommendations[0]!;
+    const rec = first.services.decisions.list({}).recommendations[0]!;
     await first.app.inject({
       method: "POST",
       url: `/api/recommendations/${rec.id}/reject`,
@@ -609,9 +609,9 @@ describe("route matrix: approve / reject / audit", () => {
     });
     await first.app.close();
     const second = await setupApp({ repo: first.repo });
-    const after = second.service.list({}).recommendations.find((r) => r.id === rec.id);
+    const after = second.services.decisions.list({}).recommendations.find((r) => r.id === rec.id);
     expect(after?.status).toBe("REJECTED");
-    expect(second.service.listAudit().entries).toHaveLength(1);
+    expect(second.services.decisions.listAudit().entries).toHaveLength(1);
     await second.app.close();
   });
 

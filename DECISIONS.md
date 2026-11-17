@@ -19,6 +19,7 @@ This document records the numbered architectural decisions (`ADR-001`+), trade-o
 | [ADR-011](#adr-011-distance-aware-inter-branch-transfer-cost-in-bahrain-totaltransfercostq-d) | Distance-Aware Transfer Freight | Price inter-branch transfers via `C_fixed + (C_km * D) + (C_unit * Q)` using Haversine km in BHD. |
 | [ADR-012](#adr-012-critical-stock-escalations-stock_alerts-with-staff-flagging-and-immutable-manager-review) | Critical Stock Escalations (`stock_alerts`) | Split `stock:flag` (staff create) and `stock:flag:decide` (scoped manager/admin immutable approval). |
 | [ADR-013](#adr-013-non-mutating-committeddeltas-approval-ledger-pure-project-and-409-over-allocation-conflict-guard) | Non-Mutating `committedDeltas` Ledger & `409` Guard | Project live `reserved`/`inTransit` overlays via pure `project()`, guard donor over-allocation (`409`), and replay on boot. |
+| [ADR-014](#adr-014-modular-domain-services-with-shared-stockruntimestate-composition-root) | Split Domain Services & Composition Root | Replace monolithic `StockService` with `KpiService`, `CatalogService`, `StockAlertService`, and `DecisionService` sharing `StockRuntimeState`. |
 
 ---
 
@@ -278,3 +279,20 @@ Approving transfers, reorders, and markdowns in `StockService` previously overla
 - **Boot-Time Ledger Replay**: During `StockService` startup (`syncDecisionsAndAudit` / `ensureInitializedSyncIfPossible`), `replayApprovedTransfersFromAudit()` reconstructs `committedDeltas` (`reserved` on donor, `inTransit` on receiver) from persisted `APPROVED` transfer records in the `audits` collection (skipping pre-refresh audits when `dataVersion > 1` is older than `plan_cache.computedAt`). API server restarts preserve live reserved/in-transit projections and conflict protection seamlessly without mutating `this.analysis`.
 - **Visible UI Indicators**: Surfaced `inTransit` and `reserved` badges via [StockDeltaBadges.tsx](file:///c:/Users/sudha/Desktop/stockflow/apps/web/src/components/shared/StockDeltaBadges.tsx) across [ProductPage.tsx](file:///c:/Users/sudha/Desktop/stockflow/apps/web/src/features/drilldown/ProductPage.tsx) and [BranchPage.tsx](file:///c:/Users/sudha/Desktop/stockflow/apps/web/src/features/drilldown/BranchPage.tsx).
 - **Double-Allocation Guard Resolution (Walkthrough Step 3)**: Attempting to trigger a `409 Conflict` via the live morning queue UI alone is intentionally unreachable by design—greedy surplus decrement in `packages/core/src/engine/match.ts` guarantees `analyze()` never emits two transfers whose combined quantity exceeds a donor branch's raw surplus, and managers have no manual transfer creation or quantity-override controls. Forcing a synthetic conflicting transfer into the morning generator or bypassing engine purity to trigger a live click error would violate `ADR-001`; the `409 Conflict` guard is instead verified continuously by [approvalMutation.test.ts](file:///c:/Users/sudha/Desktop/stockflow/apps/api/src/approvalMutation.test.ts).
+
+---
+
+## ADR-014: Modular Domain Services with Shared `StockRuntimeState` Composition Root
+
+### Context
+Over successive iterations (`ADR-002`, `ADR-007`, `ADR-012`, `ADR-013`), `apps/api/src/services/stockService.ts` grew past 2,000 lines mixing KPI rollup/caching, catalog & sales ingestion, stock-alert handling, and decision approvals/audit replay inside one class. Splitting these responsibilities cleanly improves maintainability without altering API contracts, permission guards, or `@stockflow/core` purity.
+
+### Decision
+1. **Shared `StockRuntimeState` (`apps/api/src/services/runtimeState.ts`) & Composition Root (`apps/api/src/services/index.ts`)**:
+   - `createStockServices(repo)` allocates a single shared `StockRuntimeState` (`{ repo, decisions, committedDeltas, committedRecommendationIds, inflightDecisionIds, scopedKpiCache, audit, planVersion, initialized, inflightRefresh, data, analysis }`) and injects it into four focused services (`KpiService`, `CatalogService`, `StockAlertService`, `DecisionService`), decorated on Fastify as `app.stockServices`.
+   - `runtime.onReplayAudit` wires `decisionService.replayApprovedTransfersFromAudit()` into both async `ensureInitialized()` and synchronous test initialization `ensureInitializedSyncIfPossible()`, preserving strict `loadDataset -> analyze() -> replayApprovedTransfersFromAudit()` startup order without service-to-service imports.
+2. **Pure Standalone Helpers (`projection.ts`, `scope.ts`, `errors.ts`)**:
+   - Services import pure `projectPosition()` / delta helpers (`apps/api/src/services/projection.ts`), scoping/materiality/overlay helpers (`apps/api/src/services/scope.ts`), and domain error classes (`apps/api/src/services/errors.ts`) rather than importing sibling services.
+3. **Bi-Directional Cache & Ledger Invalidation**:
+   - `DecisionService` (`decide()`, `decideBatch()`) clears `runtime.scopedKpiCache` on persisted decisions so `GET /api/kpis` reflects changes immediately.
+   - `CatalogService` (`recomputeSingleSku()`, `recomputeAnalysisForProduct()`) updates `runtime.analysis` and clears SKU `committedDeltas`, `committedRecommendationIds`, and `runtime.scopedKpiCache`, verified continuously by [cacheInvalidation.test.ts](file:///c:/Users/sudha/Desktop/stockflow/apps/api/src/cacheInvalidation.test.ts).

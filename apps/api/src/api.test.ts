@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import type { AuditEntry } from "@stockflow/core";
 import { InMemoryRepository } from "./repositories/memory.js";
-import { StockService } from "./services/stockService.js";
+import { createStockServices } from "./services/index.js";
 import { buildApp } from "./plugins/app.js";
 
 const JWT_SECRET = "test-secret-at-least-32-characters-long-key";
 
 async function setupTestApp(authEnabled = true) {
   const repo = InMemoryRepository.create();
-  const service = await StockService.create(repo);
-  const app = await buildApp(service, {
+  const services = createStockServices(repo);
+  const app = await buildApp(services, {
     AUTH_ENABLED: authEnabled,
     JWT_SECRET,
   });
-  return { app, service, repo };
+  return { app, services, repo };
 }
 
 async function loginUser(app: FastifyInstance, email: string, password = "Admin@12345") {
@@ -182,12 +182,12 @@ describe("API Auth and Scoping", () => {
   });
 
   it("prevents manager from approving out-of-scope actions and forbids staff entirely", async () => {
-    const { app, service } = await setupTestApp(true);
+    const { app, services } = await setupTestApp(true);
     const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345"); // BR-001, BR-002
     const staff = await loginUser(app, "staff.manama@stockflow.dev", "Staff@12345"); // BR-001
 
     // Find an action for BR-005 (Hidd branch, outside Manama cluster)
-    const allRecs = service.list({});
+    const allRecs = services.decisions.list({});
     const westRec = allRecs.recommendations.find(
       (r) => r.branchId === "BR-005" && r.donorBranchId !== "BR-001" && r.donorBranchId !== "BR-002",
     );
@@ -215,10 +215,10 @@ describe("API Auth and Scoping", () => {
   });
 
   it("records actedBy {userId, name, role} in audit trail upon approve", async () => {
-    const { app, service } = await setupTestApp(true);
+    const { app, services } = await setupTestApp(true);
     const manager = await loginUser(app, "manager.manama@stockflow.dev", "Manager@12345");
 
-    const allRecs = service.list({});
+    const allRecs = services.decisions.list({});
     const manamaRec = allRecs.recommendations.find((r) => r.branchId === "BR-001");
     expect(manamaRec).toBeDefined();
 

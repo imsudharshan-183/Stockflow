@@ -7,7 +7,7 @@ import { buildApp } from "../plugins/app.js";
 import { InMemoryRepository } from "../repositories/memory.js";
 import { MongoRepository } from "../repositories/mongo.js";
 import type { StockRepository } from "../repositories/types.js";
-import { StockService } from "../services/stockService.js";
+import { createStockServices, type StockServices } from "../services/index.js";
 import { TEST_JWT_SECRET } from "./helpers.js";
 
 const SMALL_DAYS = 60;
@@ -86,15 +86,15 @@ export function smallSeededDataset(): Dataset {
 export async function buildTestApp(
   repo: StockRepository,
   envOverrides?: Partial<Env>,
-): Promise<{ app: FastifyInstance; service: StockService }> {
-  const service = await StockService.create(repo);
-  const app = await buildApp(service, {
+): Promise<{ app: FastifyInstance; services: StockServices }> {
+  const services = createStockServices(repo);
+  const app = await buildApp(services, {
     AUTH_ENABLED: true,
     JWT_SECRET: TEST_JWT_SECRET,
     ...envOverrides,
   });
   await app.ready();
-  return { app, service };
+  return { app, services };
 }
 
 export async function createUser(

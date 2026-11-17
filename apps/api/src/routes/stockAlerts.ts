@@ -13,8 +13,9 @@ import {
   StockAlertConflictError,
   StockAlertNotFoundError,
   StockAlertValidationError,
-  type StockService,
-} from "../services/stockService.js";
+  type StockAlertService,
+  type StockServices,
+} from "../services/index.js";
 
 const PathIdSchema = z.object({ id: z.string().min(1) });
 
@@ -29,7 +30,7 @@ function cleanQuery(raw: unknown): Record<string, unknown> {
 
 export function registerStockAlertsRoutes(
   app: FastifyInstance,
-  service: StockService,
+  services: StockServices,
   authGuards: AuthContext,
 ): void {
   app.get(
@@ -40,7 +41,7 @@ export function registerStockAlertsRoutes(
     async (request, reply) => {
       const query = StockAlertQuerySchema.parse(cleanQuery(request.query));
       try {
-        const result = await service.listStockAlerts(request.currentUser, query.branchId);
+        const result = await services.stockAlerts.listStockAlerts(request.currentUser, query.branchId);
         return StockAlertListSchema.parse(result);
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
@@ -57,7 +58,7 @@ export function registerStockAlertsRoutes(
     async (request, reply) => {
       const body = CreateStockAlertSchema.parse(request.body);
       try {
-        const alert = await service.createStockAlert(body, request.currentUser);
+        const alert = await services.stockAlerts.createStockAlert(body, request.currentUser);
         return reply.code(201).send(StockAlertSchema.parse(alert));
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
@@ -75,7 +76,7 @@ export function registerStockAlertsRoutes(
     "/stock-alerts/:id/approve",
     { preHandler: [authGuards.requirePermission("stock:flag:decide")] },
     async (request, reply) => {
-      return decideAlert(service, request.params, "APPROVED", request.currentUser, reply);
+      return decideAlert(services.stockAlerts, request.params, "APPROVED", request.currentUser, reply);
     },
   );
 
@@ -83,21 +84,21 @@ export function registerStockAlertsRoutes(
     "/stock-alerts/:id/reject",
     { preHandler: [authGuards.requirePermission("stock:flag:decide")] },
     async (request, reply) => {
-      return decideAlert(service, request.params, "REJECTED", request.currentUser, reply);
+      return decideAlert(services.stockAlerts, request.params, "REJECTED", request.currentUser, reply);
     },
   );
 }
 
 async function decideAlert(
-  service: StockService,
+  stockAlerts: StockAlertService,
   params: unknown,
   decision: "APPROVED" | "REJECTED",
-  user: Parameters<StockService["decideStockAlert"]>[2],
+  user: Parameters<StockAlertService["decideStockAlert"]>[2],
   reply: FastifyReply,
 ): Promise<unknown> {
   const { id } = PathIdSchema.parse(params);
   try {
-    const updated = await service.decideStockAlert(id, decision, user);
+    const updated = await stockAlerts.decideStockAlert(id, decision, user);
     return StockAlertSchema.parse(updated);
   } catch (err) {
     if (err instanceof DecisionForbiddenError) {

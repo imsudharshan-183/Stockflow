@@ -18,7 +18,7 @@ import { MemoryStockAlertStore } from "../repositories/memoryAlerts.js";
 import { InMemoryUserRepository } from "../repositories/memoryUser.js";
 import type { CachedPlanRecord, SaveDecisionBatchResult, StockRepository } from "../repositories/types.js";
 import type { UserRepository } from "../repositories/userTypes.js";
-import { StockService } from "../services/stockService.js";
+import { createStockServices, type StockServices } from "../services/index.js";
 
 export const TEST_JWT_SECRET = "test-secret-at-least-32-characters-long-key";
 
@@ -60,7 +60,7 @@ export const SEED_USERS = {
 
 export interface TestContext {
   app: FastifyInstance;
-  service: StockService;
+  services: StockServices;
   repo: StockRepository;
 }
 
@@ -68,13 +68,13 @@ export async function setupApp(
   options: { authEnabled?: boolean; repo?: StockRepository } = {},
 ): Promise<TestContext> {
   const repo = options.repo ?? InMemoryRepository.create();
-  const service = await StockService.create(repo);
-  const app = await buildApp(service, {
+  const services = createStockServices(repo);
+  const app = await buildApp(services, {
     AUTH_ENABLED: options.authEnabled ?? true,
     JWT_SECRET: TEST_JWT_SECRET,
   });
   await app.ready();
-  return { app, service, repo };
+  return { app, services, repo };
 }
 
 /**

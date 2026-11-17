@@ -17,7 +17,7 @@ describe("transfer scoping (donor OR receiver in scope)", () => {
     repo = new FixedDatasetRepository(transferDataset());
     const ctx = await setupApp({ repo });
     app = ctx.app;
-    const all = ctx.service.list({}).recommendations;
+    const all = ctx.services.decisions.list({}).recommendations;
     const t = all.find((r) => r.action === "TRANSFER");
     if (!t) throw new Error("fixture dataset must produce a TRANSFER");
     transfer = t;

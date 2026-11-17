@@ -15,7 +15,7 @@ import {
 } from "@stockflow/core";
 import { describe, expect, it } from "vitest";
 import { InMemoryRepository } from "./repositories/memory.js";
-import { project } from "./services/stockService.js";
+import { project } from "./services/index.js";
 import { buildTestApp, createDualRepo, createUser, smallSeededDataset, type RepoKind } from "./test/dualRepo.js";
 import { FixedDatasetRepository, SEED_USERS, bearer, setupApp, tokenFor, transferDataset } from "./test/helpers.js";
 
@@ -147,14 +147,14 @@ describe("Approval ledger mutation protection & pure project()", () => {
 
   it("decreases donor surplus and increases receiver inTransit across reads after transfer approval without mutating analysis snapshot", async () => {
     const repo = new FixedDatasetRepository(transferDataset());
-    const { app, service } = await setupApp({ repo, authEnabled: true });
+    const { app, services } = await setupApp({ repo, authEnabled: true });
     try {
       const adminHeader = bearer(tokenFor(app, SEED_USERS.admin));
 
       const recsBody = JSON.parse(
         (await app.inject({ method: "GET", url: "/api/recommendations", headers: adminHeader })).payload,
       ) as { recommendations: Recommendation[] };
-      const rawSnapshot = structuredClone((service as unknown as { analysis: Analysis }).analysis);
+      const rawSnapshot = structuredClone(services.runtime.analysis);
       const transfer = recsBody.recommendations.find((r) => r.action === "TRANSFER")!;
       expect(transfer).toBeDefined();
 
@@ -184,7 +184,7 @@ describe("Approval ledger mutation protection & pure project()", () => {
       expect(approveRes.statusCode).toBe(200);
 
       // Verify internal analysis snapshot is byte-identical (unmutated)
-      expect((service as unknown as { analysis: Analysis }).analysis).toStrictEqual(rawSnapshot);
+      expect(services.runtime.analysis).toStrictEqual(rawSnapshot);
 
       // Next read via /api/products/:sku shows reduced donor surplus & increased receiver inTransit
       const afterProduct = JSON.parse(
@@ -254,7 +254,7 @@ describe("Approval ledger mutation protection & pure project()", () => {
 
       // Only t1 wrote to actions/audit & donor reserved stayed 25
       expect(await seqRepo.listActions()).toHaveLength(1);
-      expect(seqCtx.service.projectPosition("SKU-CONFLICT-1", "BR-001")?.reserved).toBe(25);
+      expect(seqCtx.services.decisions.projectPosition("SKU-CONFLICT-1", "BR-001")?.reserved).toBe(25);
     } finally {
       await seqCtx.app.close();
     }
@@ -278,7 +278,7 @@ describe("Approval ledger mutation protection & pure project()", () => {
 
   it("tracks reorder/markdown committed quantities until the next sales or catalog refresh", async () => {
     const repo = InMemoryRepository.createFromDataset(smallSeededDataset());
-    const { app, service } = await setupApp({ repo, authEnabled: true });
+    const { app, services } = await setupApp({ repo, authEnabled: true });
     try {
       const adminHeader = bearer(tokenFor(app, SEED_USERS.admin));
       const recs = JSON.parse(
@@ -310,8 +310,8 @@ describe("Approval ledger mutation protection & pure project()", () => {
       ).toBe(200);
 
       // Before refresh: committed quantities appear in projections
-      expect(service.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(reorder.quantity);
-      const mdProj = service.projectPosition("SKU-90003", markdown.branchId)!;
+      expect(services.decisions.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(reorder.quantity);
+      const mdProj = services.decisions.projectPosition("SKU-90003", markdown.branchId)!;
       expect(mdProj.reserved).toBe(markdown.quantity);
       expect(mdProj.surplus).toBe(0);
 
@@ -330,7 +330,7 @@ describe("Approval ledger mutation protection & pure project()", () => {
         },
       });
       expect(salesRes.statusCode).toBe(201);
-      expect(service.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(0);
+      expect(services.decisions.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(0);
     } finally {
       await app.close();
     }
@@ -353,7 +353,7 @@ describe("Approval ledger mutation protection & pure project()", () => {
     }
   });
 
-  it("preserves conflicting-transfer 409 guard after reinstantiating StockService from persisted audit", async () => {
+  it("preserves conflicting-transfer 409 guard after reinstantiating StockServices from persisted audit", async () => {
     const { data, plan, t1, t2 } = makeCompetingTransfersDataset();
     const repo = new FixedDatasetRepository(data);
     await repo.saveCachedPlan(1, plan);
@@ -371,12 +371,12 @@ describe("Approval ledger mutation protection & pure project()", () => {
       await first.app.close();
     }
 
-    // Reinstantiate a brand-new StockService over the same repository (fresh in-memory ledger)
+    // Reinstantiate a brand-new StockServices composition root over the same repository (fresh in-memory ledger)
     const restarted = await setupApp({ repo, authEnabled: true });
     try {
       const adminHeader = bearer(tokenFor(restarted.app, SEED_USERS.admin));
-      expect(restarted.service.projectPosition("SKU-CONFLICT-1", "BR-001")?.reserved).toBe(25);
-      expect(restarted.service.projectPosition("SKU-CONFLICT-1", "BR-005")?.inTransit).toBe(25);
+      expect(restarted.services.decisions.projectPosition("SKU-CONFLICT-1", "BR-001")?.reserved).toBe(25);
+      expect(restarted.services.decisions.projectPosition("SKU-CONFLICT-1", "BR-005")?.inTransit).toBe(25);
 
       const res2 = await restarted.app.inject({
         method: "POST",
@@ -420,7 +420,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Boot-time audit ledger repl
         await inst1.app.close();
       }
 
-      // Simulate API restart: instantiate a brand-new StockService backed by the same repo
+      // Simulate API restart: instantiate a brand-new StockServices container backed by the same repo
       const inst2 = await buildTestApp(created.repo);
       try {
         const headers = bearer(tokenFor(inst2.app, adminUser));

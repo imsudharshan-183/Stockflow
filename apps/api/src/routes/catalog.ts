@@ -15,8 +15,8 @@ import {
   ProductConflictError,
   ProductNotFoundError,
   ProductValidationError,
-  type StockService,
-} from "../services/stockService.js";
+  type StockServices,
+} from "../services/index.js";
 
 const PathSkuSchema = z.object({
   sku: z.string().min(1),
@@ -24,7 +24,7 @@ const PathSkuSchema = z.object({
 
 export function registerCatalogRoutes(
   app: FastifyInstance,
-  service: StockService,
+  services: StockServices,
   authGuards: AuthContext,
 ): void {
   // Publicly readable for authenticated users (admin, manager, staff) with catalog:view
@@ -39,7 +39,7 @@ export function registerCatalogRoutes(
         );
       }
       try {
-        const result = await service.listCatalogProducts(parsed.data, request.currentUser);
+        const result = await services.catalog.listCatalogProducts(parsed.data, request.currentUser);
         return ProductListResponseSchema.parse(result);
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
@@ -58,7 +58,7 @@ export function registerCatalogRoutes(
       if (!pathParsed.success) {
         return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid SKU in path" }));
       }
-      const result = await service.getCatalogProduct(pathParsed.data.sku);
+      const result = await services.catalog.getCatalogProduct(pathParsed.data.sku);
       if (!result) {
         return reply.code(404).send(ErrorBodySchema.parse({ error: "Product not found" }));
       }
@@ -78,7 +78,7 @@ export function registerCatalogRoutes(
         );
       }
       try {
-        const created = await service.createCatalogProduct(parsed.data, request.currentUser);
+        const created = await services.catalog.createCatalogProduct(parsed.data, request.currentUser);
         return reply.code(201).send(ProductSchema.parse(created));
       } catch (err) {
         if (err instanceof ProductConflictError) {
@@ -103,7 +103,7 @@ export function registerCatalogRoutes(
         );
       }
       try {
-        const updated = await service.updateCatalogProduct(
+        const updated = await services.catalog.updateCatalogProduct(
           pathParsed.data.sku,
           parsed.data,
           request.currentUser,
@@ -132,7 +132,7 @@ export function registerCatalogRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid SKU in path" }));
       }
       try {
-        const result = await service.archiveCatalogProduct(pathParsed.data.sku, request.currentUser);
+        const result = await services.catalog.archiveCatalogProduct(pathParsed.data.sku, request.currentUser);
         return {
           product: ProductSchema.parse(result.product),
           removedPendingActionsCount: result.removedPendingActionsCount,
@@ -157,7 +157,7 @@ export function registerCatalogRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid SKU in path" }));
       }
       try {
-        const restored = await service.restoreCatalogProduct(pathParsed.data.sku, request.currentUser);
+        const restored = await services.catalog.restoreCatalogProduct(pathParsed.data.sku, request.currentUser);
         return ProductSchema.parse(restored);
       } catch (err) {
         if (err instanceof ProductValidationError) {
@@ -179,7 +179,7 @@ export function registerCatalogRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid SKU in path" }));
       }
       try {
-        await service.deleteCatalogProduct(pathParsed.data.sku, request.currentUser);
+        await services.catalog.deleteCatalogProduct(pathParsed.data.sku, request.currentUser);
         return { ok: true };
       } catch (err) {
         if (err instanceof ProductValidationError) {
@@ -204,7 +204,7 @@ export function registerCatalogRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid SKU in path" }));
       }
       try {
-        const result = await service.generateSampleHistory(pathParsed.data.sku, request.currentUser);
+        const result = await services.catalog.generateSampleHistory(pathParsed.data.sku, request.currentUser);
         return { ok: true, salesEntriesCount: result.salesEntriesCount };
       } catch (err) {
         if (err instanceof ProductValidationError) {

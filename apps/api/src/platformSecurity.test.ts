@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Dataset } from "@stockflow/core";
 import { buildApp } from "./plugins/app.js";
 import { InMemoryRepository } from "./repositories/memory.js";
-import { StockService } from "./services/stockService.js";
+import { createStockServices } from "./services/index.js";
 import { buildTestApp, createUser, smallSeededDataset } from "./test/dualRepo.js";
 import { FixedDatasetRepository, TEST_JWT_SECRET, bearer, tokenFor } from "./test/helpers.js";
 
@@ -90,8 +90,8 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
     const prevEnv = process.env.NODE_ENV;
     process.env.NODE_ENV = "production";
     try {
-      const service = await StockService.create(repo);
-      const app = await buildApp(service, { AUTH_ENABLED: true, JWT_SECRET: TEST_JWT_SECRET });
+      const services = createStockServices(repo);
+      const app = await buildApp(services, { AUTH_ENABLED: true, JWT_SECRET: TEST_JWT_SECRET });
       app.get("/api/test-boom", async () => {
         throw new Error("Sensitive internal failure mongodb+srv://user:pass@host");
       });
@@ -111,7 +111,7 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
   it("serves first /api/recommendations under 3s on full seeded dataset and maintains fast warm p95", async () => {
     const t0 = performance.now();
     const repo = InMemoryRepository.create();
-    const service = await StockService.create(repo);
+    const services = createStockServices(repo);
     const { app } = await buildTestApp(repo);
     const { user } = await createUser(repo, "admin", [], { email: "perf.full@stockflow.test" });
     const headers = bearer(tokenFor(app, user));
@@ -140,7 +140,7 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
     await cachedApp.app.close();
 
     console.info(
-      `[PERF] cold_compute_ms=${firstMs.toFixed(1)} cold_with_plan_cache_ms=${cachedColdMs.toFixed(1)} warm_p95_ms=${p95.toFixed(1)} service_repo=${service.repositoryKind()}`,
+      `[PERF] cold_compute_ms=${firstMs.toFixed(1)} cold_with_plan_cache_ms=${cachedColdMs.toFixed(1)} warm_p95_ms=${p95.toFixed(1)} service_repo=${services.repositoryKind()}`,
     );
     expect(p95).toBeLessThan(150);
 
@@ -171,8 +171,8 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
     });
     const logSpy = vi.spyOn(console, "log");
 
-    const service = await StockService.create(baseRepo);
-    const app = await buildApp(service, { AUTH_ENABLED: false, JWT_SECRET: TEST_JWT_SECRET });
+    const services = createStockServices(baseRepo);
+    const app = await buildApp(services, { AUTH_ENABLED: false, JWT_SECRET: TEST_JWT_SECRET });
     await app.ready();
 
     try {

@@ -56,7 +56,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
     it("clears committedDeltas, committedRecommendationIds, and scopedKpiCache on catalog edit and CSV sales import", async () => {
       const created = await createDualRepo(repoKind);
       try {
-        const { app, service } = await buildTestApp(created.repo);
+        const { app, services } = await buildTestApp(created.repo);
         try {
           const adminUser = (await createUser(created.repo, "admin", [])).user;
           const mgr = (await createUser(created.repo, "manager", ["BR-001"])).user;
@@ -76,8 +76,8 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
           });
           expect(approveRes.statusCode).toBe(200);
 
-          expect(service.projectPosition("SKU-90001", "BR-001")?.reserved).toBe(transfer.quantity);
-          expect(service.projectPosition("SKU-90001", "BR-005")?.inTransit).toBe(transfer.quantity);
+          expect(services.decisions.projectPosition("SKU-90001", "BR-001")?.reserved).toBe(transfer.quantity);
+          expect(services.decisions.projectPosition("SKU-90001", "BR-005")?.inTransit).toBe(transfer.quantity);
 
           const warmKpiRes = await app.inject({ method: "GET", url: "/api/kpis", headers: mgrHeaders });
           expect(warmKpiRes.statusCode).toBe(200);
@@ -116,7 +116,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
               })
             ).statusCode,
           ).toBe(200);
-          expect(service.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(reorder.quantity);
+          expect(services.decisions.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(reorder.quantity);
 
           const kpiBeforeCsv = JSON.parse(
             (await app.inject({ method: "GET", url: "/api/kpis", headers: mgrHeaders })).payload,
@@ -146,7 +146,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
           expect(importRes.statusCode).toBe(200);
 
           // Stale inTransit reservation cleared after single-SKU recompute and KPI cache reflects new AT_RISK shortage
-          expect(service.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(0);
+          expect(services.decisions.projectPosition("SKU-90002", reorder.branchId)?.inTransit).toBe(0);
           const kpiAfterCsv = JSON.parse(
             (await app.inject({ method: "GET", url: "/api/kpis", headers: mgrHeaders })).payload,
           ) as KpiSummary;

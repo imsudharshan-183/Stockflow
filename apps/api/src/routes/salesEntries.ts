@@ -10,7 +10,7 @@ import {
   upsertSalesEntry,
 } from "../db.js";
 import type { AuthContext } from "../plugins/auth.js";
-import type { StockService } from "../services/stockService.js";
+import type { StockServices } from "../services/index.js";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -324,7 +324,7 @@ export function parseCsvWithHeaders(
 
 export function registerSalesEntriesRoutes(
   app: FastifyInstance,
-  service: StockService,
+  services: StockServices,
   authGuards: AuthContext,
 ): void {
   // Accept multipart/form-data as raw Buffer within this route scope
@@ -337,10 +337,10 @@ export function registerSalesEntriesRoutes(
   );
 
   const validateDomainRefs = (data: ValidatedSalesEntryInput): string | null => {
-    if (!service.hasBranch(data.branchId)) {
+    if (!services.catalog.hasBranch(data.branchId)) {
       return `Field 'branchId' references unknown branch '${data.branchId}'`;
     }
-    const status = service.getProductStatus(data.sku);
+    const status = services.catalog.getProductStatus(data.sku);
     if (status === "unknown") {
       return `Field 'sku' references unknown SKU '${data.sku}'`;
     }
@@ -374,7 +374,7 @@ export function registerSalesEntriesRoutes(
     "/sales-entries",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
-      await service.ensureInitialized();
+      await services.ensureInitialized();
       const q = (request.query ?? {}) as Record<string, unknown>;
       const branch = typeof q.branch === "string" && q.branch.trim() ? q.branch.trim() : undefined;
       const sku = typeof q.sku === "string" && q.sku.trim() ? q.sku.trim() : undefined;
@@ -390,7 +390,7 @@ export function registerSalesEntriesRoutes(
       const allowedBranchIds =
         request.currentUser.role === "admin"
           ? null
-          : scopeBranches(request.currentUser, service.allBranchIds());
+          : scopeBranches(request.currentUser, services.catalog.allBranchIds());
 
       return listSalesEntries({
         allowedBranchIds,
@@ -412,7 +412,7 @@ export function registerSalesEntriesRoutes(
     "/sales-entries",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
-      await service.ensureInitialized();
+      await services.ensureInitialized();
       const validation = validateSalesEntryInput(request.body, { coerceNumericStrings: false });
       if (!validation.ok) {
         return reply.code(400).send({ error: validation.message });
@@ -428,7 +428,7 @@ export function registerSalesEntriesRoutes(
       }
 
       const { entry, created } = await upsertSalesEntry(validation.data);
-      service.applySalesEntryToDataset(
+      services.catalog.applySalesEntryToDataset(
         entry.branchId,
         entry.sku,
         entry.date,
@@ -436,7 +436,7 @@ export function registerSalesEntriesRoutes(
         entry.onHand,
       );
       await recomputeForSku(entry.branchId, entry.sku);
-      await service.recomputeSingleSku(entry.sku);
+      await services.catalog.recomputeSingleSku(entry.sku);
 
       recordSalesEntryAudit({
         id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -467,7 +467,7 @@ export function registerSalesEntriesRoutes(
     "/sales-entries/:id",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
-      await service.ensureInitialized();
+      await services.ensureInitialized();
       const { id } = request.params as { id: string };
       const existing = await getSalesEntryById(decodeURIComponent(id));
       if (!existing) {
@@ -499,7 +499,7 @@ export function registerSalesEntriesRoutes(
         return reply.code(404).send({ error: "Sales entry not found" });
       }
 
-      service.applySalesEntryToDataset(
+      services.catalog.applySalesEntryToDataset(
         updated.branchId,
         updated.sku,
         updated.date,
@@ -507,7 +507,7 @@ export function registerSalesEntriesRoutes(
         updated.onHand,
       );
       await recomputeForSku(updated.branchId, updated.sku);
-      await service.recomputeSingleSku(updated.sku);
+      await services.catalog.recomputeSingleSku(updated.sku);
 
       recordSalesEntryAudit({
         id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -537,7 +537,7 @@ export function registerSalesEntriesRoutes(
     "/sales-entries/:id",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
-      await service.ensureInitialized();
+      await services.ensureInitialized();
       const { id } = request.params as { id: string };
       const existing = await getSalesEntryById(decodeURIComponent(id));
       if (!existing) {
@@ -553,7 +553,7 @@ export function registerSalesEntriesRoutes(
       }
 
       await recomputeForSku(deleted.branchId, deleted.sku);
-      await service.recomputeSingleSku(deleted.sku);
+      await services.catalog.recomputeSingleSku(deleted.sku);
 
       recordSalesEntryAudit({
         id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -584,7 +584,7 @@ export function registerSalesEntriesRoutes(
     "/sales-entries/import",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
-      await service.ensureInitialized();
+      await services.ensureInitialized();
       const rawBuffer = Buffer.isBuffer(request.body) ? request.body : null;
       if (!rawBuffer) {
         return reply
@@ -648,7 +648,7 @@ export function registerSalesEntriesRoutes(
           updated += 1;
         }
 
-        service.applySalesEntryToDataset(
+        services.catalog.applySalesEntryToDataset(
           result.entry.branchId,
           result.entry.sku,
           result.entry.date,
@@ -669,10 +669,10 @@ export function registerSalesEntriesRoutes(
         await recomputeForSku(pair.branchId, pair.sku);
       }
       for (const sku of touchedSkus) {
-        await service.recomputeSingleSku(sku, { bumpVersion: false });
+        await services.catalog.recomputeSingleSku(sku, { bumpVersion: false });
       }
       if (touchedSkus.size > 0) {
-        await service.commitPlanVersion();
+        await services.commitPlanVersion();
       }
 
       return reply.code(200).send({

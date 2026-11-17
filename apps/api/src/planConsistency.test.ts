@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import * as core from "@stockflow/core";
 import type { Recommendation, User } from "@stockflow/core";
 import type { StockRepository } from "./repositories/types.js";
-import { StockService } from "./services/stockService.js";
+import { createStockServices } from "./services/index.js";
 import { buildTestApp, createDualRepo, createUser, type RepoKind } from "./test/dualRepo.js";
 import { bearer, tokenFor } from "./test/helpers.js";
 
@@ -101,17 +101,17 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Serverless Plan Consistency
 
     const analyzeSpy = vi.spyOn(core, "analyze");
     try {
-      const coldService = await StockService.create(repo);
-      await coldService.ensureFreshPlan();
+      const coldServices = createStockServices(repo);
+      await coldServices.ensureFreshPlan();
       expect(analyzeSpy).not.toHaveBeenCalled();
-      expect(coldService.kpis().branches.length).toBeGreaterThan(0);
+      expect(coldServices.kpi.kpis().branches.length).toBeGreaterThan(0);
     } finally {
       analyzeSpy.mockRestore();
     }
   });
 
   it("version mismatch triggers exactly one compute under concurrent reads and falls back if persist fails", async () => {
-    const { app, service } = await buildTestApp(repo);
+    const { app, services } = await buildTestApp(repo);
     const headers = bearer(tokenFor(app, adminUser));
     try {
       // Bump version without saving plan_cache for the new version
@@ -139,7 +139,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Serverless Plan Consistency
         expect(r2.statusCode).toBe(200);
         expect(r3.statusCode).toBe(200);
         expect(computeCount).toBe(1);
-        expect(service.kpis().branches.length).toBeGreaterThan(0);
+        expect(services.kpi.kpis().branches.length).toBeGreaterThan(0);
       } finally {
         loadSpy.mockRestore();
         saveSpy.mockRestore();

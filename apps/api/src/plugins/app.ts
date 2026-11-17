@@ -13,14 +13,20 @@ import { registerStockRoutes } from "../routes/stock.js";
 import { registerStockAlertsRoutes } from "../routes/stockAlerts.js";
 import { registerUsersRoutes } from "../routes/users.js";
 import { AuthService } from "../services/authService.js";
+import type { StockServices } from "../services/index.js";
 import { createAuthGuards } from "./auth.js";
 import { registerErrors } from "./errors.js";
-import type { StockService } from "../services/stockService.js";
+
+declare module "fastify" {
+  interface FastifyInstance {
+    stockServices: StockServices;
+  }
+}
 
 const LOCAL_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] as const;
 
 export async function buildApp(
-  service: StockService,
+  services: StockServices,
   envOverrides?: Partial<Env>,
 ): Promise<FastifyInstance> {
   let env: Env;
@@ -77,20 +83,21 @@ export async function buildApp(
     global: false,
   });
 
+  app.decorate("stockServices", services);
   registerErrors(app);
 
-  const authService = new AuthService(service.userRepo);
-  const authGuards = createAuthGuards(env, service.userRepo);
+  const authService = new AuthService(services.userRepo);
+  const authGuards = createAuthGuards(env, services.userRepo);
 
   await app.register(
     (scope) => {
       registerAuthRoutes(scope, authService, authGuards, env);
-      registerUsersRoutes(scope, service.userRepo, authService, authGuards);
-      registerStockRoutes(scope, service, authGuards);
-      registerLocationRoutes(scope, service, authGuards);
-      registerCatalogRoutes(scope, service, authGuards);
-      registerSalesEntriesRoutes(scope, service, authGuards);
-      registerStockAlertsRoutes(scope, service, authGuards);
+      registerUsersRoutes(scope, services.userRepo, authService, authGuards);
+      registerStockRoutes(scope, services, authGuards);
+      registerLocationRoutes(scope, services, authGuards);
+      registerCatalogRoutes(scope, services, authGuards);
+      registerSalesEntriesRoutes(scope, services, authGuards);
+      registerStockAlertsRoutes(scope, services, authGuards);
     },
     { prefix: "/api" },
   );

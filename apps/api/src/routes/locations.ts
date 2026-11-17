@@ -6,13 +6,13 @@ import {
 } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
 import type { AuthContext } from "../plugins/auth.js";
-import type { StockService } from "../services/stockService.js";
+import type { StockServices } from "../services/index.js";
 
 const pathId = RecommendationSchema.pick({ id: true });
 
 export function registerLocationRoutes(
   app: FastifyInstance,
-  service: StockService,
+  services: StockServices,
   authGuards: AuthContext,
 ): void {
   // DECISION: Location drilldown endpoints expose branch financial BD rollups (lostSalesAtRisk,
@@ -23,8 +23,8 @@ export function registerLocationRoutes(
     "/locations",
     { preHandler: [requireScopedDashboard] },
     async (request) => {
-      await service.ensureFreshPlan();
-      return service.listLocations(request.currentUser);
+      await services.ensureFreshPlan();
+      return services.catalog.listLocations(request.currentUser);
     },
   );
 
@@ -32,9 +32,9 @@ export function registerLocationRoutes(
     "/locations/:id/summary",
     { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
-      await service.ensureFreshPlan();
+      await services.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
-      const summary = service.locationSummary(id, request.currentUser);
+      const summary = services.catalog.locationSummary(id, request.currentUser);
       if (!summary) {
         return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
       }
@@ -46,10 +46,10 @@ export function registerLocationRoutes(
     "/locations/:id/inventory",
     { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
-      await service.ensureFreshPlan();
+      await services.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
       const query = LocationInventoryQuerySchema.parse(cleanQuery(request.query));
-      const inventory = service.locationInventory(id, query, request.currentUser);
+      const inventory = services.catalog.locationInventory(id, query, request.currentUser);
       if (!inventory) {
         return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
       }
@@ -61,10 +61,10 @@ export function registerLocationRoutes(
     "/locations/:id/trend",
     { preHandler: [requireScopedDashboard] },
     async (request, reply) => {
-      await service.ensureFreshPlan();
+      await services.ensureFreshPlan();
       const { id } = pathId.parse(request.params);
       const query = LocationTrendQuerySchema.parse(cleanQuery(request.query));
-      const trend = service.locationTrend(id, query, request.currentUser);
+      const trend = services.catalog.locationTrend(id, query, request.currentUser);
       if (!trend) {
         return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
       }
