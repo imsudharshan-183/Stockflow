@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/app/Shell";
+import { ChartDetailProvider } from "@/components/shared/ChartDetailPopup";
 import { EmptyBlock, LoadingBlock } from "@/components/shared/states";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthProvider, useAuth } from "@/features/auth/AuthContext";
@@ -69,7 +70,8 @@ export function App() {
   return (
     <ThemeProvider defaultTheme="light" storageKey="stockflow-theme">
       <AuthProvider>
-        <Suspense fallback={<LoadingBlock />}>
+        <ChartDetailProvider>
+          <Suspense fallback={<LoadingBlock />}>
           <Routes>
             <Route path="/login" element={<LoginPage />} />
             <Route
@@ -135,6 +137,7 @@ export function App() {
             </Route>
           </Routes>
         </Suspense>
+        </ChartDetailProvider>
       </AuthProvider>
     </ThemeProvider>
   );

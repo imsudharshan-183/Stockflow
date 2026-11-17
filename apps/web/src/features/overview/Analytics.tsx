@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard } from "@/components/shared/ChartCard";
+import { useChartDetail } from "@/components/shared/ChartDetailPopup";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -63,12 +64,17 @@ export function Analytics({
   rows: readonly Recommendation[];
 }) {
   const navigate = useNavigate();
+  const { showDetail } = useChartDetail();
   const [hiddenActions, setHiddenActions] = useState<ReadonlySet<Action>>(new Set());
 
   const mix = useMemo(() => mixOf(rows), [rows]);
   const visibleMix = useMemo(
     () => mix.filter((m) => !hiddenActions.has(m.action)),
     [mix, hiddenActions],
+  );
+  const totalMixCount = useMemo(
+    () => mix.reduce((sum, m) => sum + m.count, 0),
+    [mix],
   );
   const skus = useMemo(() => topSkus(rows), [rows]);
   const branches = useMemo(() => report.branchRisk.slice(0, 5), [report.branchRisk]);
@@ -109,8 +115,34 @@ export function Analytics({
                   innerRadius={34}
                   outerRadius={52}
                   paddingAngle={2}
-                  onClick={(entry: { action?: Action }) => {
-                    if (entry?.action) navigate(`/queue?action=${entry.action}`);
+                  onClick={(entry: {
+                    action?: Action;
+                    name?: string;
+                    count?: number;
+                    value?: number;
+                    payload?: { action?: Action; name?: string; count?: number; value?: number };
+                  }) => {
+                    const item = entry?.payload ?? entry;
+                    if (!item?.action) return;
+                    const count = item.count ?? 0;
+                    const value = item.value ?? 0;
+                    showDetail({
+                      title: `${item.name ?? item.action} actions`,
+                      subtitle: "Action Mix breakdown",
+                      metrics: [
+                        { label: "Recommendations", value: formatNumber(count) },
+                        {
+                          label: "Share of queue",
+                          value: totalMixCount > 0 ? formatPct(count / totalMixCount) : "0%",
+                        },
+                        { label: "Total estimated gain", value: formatMoneyFull(value) },
+                        {
+                          label: "Average gain / action",
+                          value: count > 0 ? formatMoneyFull(value / count) : formatMoneyFull(0),
+                        },
+                      ],
+                    });
+                    navigate(`/queue?action=${item.action}`);
                   }}
                   className="cursor-pointer"
                 >
@@ -195,8 +227,29 @@ export function Analytics({
                 fill={TOKENS.status.risk}
                 radius={[0, 4, 4, 0]}
                 className="cursor-pointer"
-                onClick={(entry: { branchId?: string }) => {
-                  if (entry?.branchId) navigate(`/branches/${entry.branchId}`);
+                onClick={(entry: {
+                  branchId?: string;
+                  branchName?: string;
+                  revenueAtRisk?: number;
+                  stockoutRate?: number;
+                  payload?: {
+                    branchId?: string;
+                    branchName?: string;
+                    revenueAtRisk?: number;
+                    stockoutRate?: number;
+                  };
+                }) => {
+                  const item = entry?.payload ?? entry;
+                  if (!item?.branchId) return;
+                  showDetail({
+                    title: item.branchName ?? item.branchId,
+                    subtitle: `Location ${item.branchId} · Top at-risk summary`,
+                    metrics: [
+                      { label: "Sales at risk", value: formatMoneyFull(item.revenueAtRisk ?? 0) },
+                      { label: "Stockout rate", value: formatPct(item.stockoutRate ?? 0) },
+                    ],
+                  });
+                  navigate(`/branches/${item.branchId}`);
                 }}
               />
             </BarChart>
@@ -244,8 +297,32 @@ export function Analytics({
                 fill={TOKENS.chart.transfer}
                 radius={[0, 4, 4, 0]}
                 className="cursor-pointer"
-                onClick={(entry: { sku?: string }) => {
-                  if (entry?.sku) navigate(`/products/${entry.sku}`);
+                onClick={(entry: {
+                  sku?: string;
+                  name?: string;
+                  netBenefit?: number;
+                  count?: number;
+                  units?: number;
+                  payload?: {
+                    sku?: string;
+                    name?: string;
+                    netBenefit?: number;
+                    count?: number;
+                    units?: number;
+                  };
+                }) => {
+                  const item = entry?.payload ?? entry;
+                  if (!item?.sku) return;
+                  showDetail({
+                    title: formatProductDisplayName(item.sku, item.name ?? item.sku),
+                    subtitle: `SKU ${item.sku} · Queue impact`,
+                    metrics: [
+                      { label: "Estimated gain", value: formatMoneyFull(item.netBenefit ?? 0) },
+                      { label: "Recommendations", value: formatNumber(item.count ?? 0) },
+                      { label: "Total action units", value: formatNumber(item.units ?? 0) },
+                    ],
+                  });
+                  navigate(`/products/${item.sku}`);
                 }}
               />
             </BarChart>
@@ -445,14 +522,21 @@ function mixOf(rows: readonly Recommendation[]) {
 }
 
 function topSkus(rows: readonly Recommendation[]) {
-  const totals = new Map<string, { sku: string; name: string; netBenefit: number }>();
+  const totals = new Map<
+    string,
+    { sku: string; name: string; netBenefit: number; count: number; units: number }
+  >();
   for (const row of rows) {
     const current = totals.get(row.sku) ?? {
       sku: row.sku,
       name: row.productName,
       netBenefit: 0,
+      count: 0,
+      units: 0,
     };
     current.netBenefit += row.netBenefit;
+    current.count += 1;
+    current.units += row.quantity;
     totals.set(row.sku, current);
   }
   return [...totals.values()]

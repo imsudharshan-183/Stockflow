@@ -551,6 +551,7 @@ export const StockAlertCategorySchema = z.enum([
   "CRITICAL_LOW",
   "DAMAGED_SHRINKAGE",
   "COUNT_MISMATCH",
+  "OTHER",
 ]);
 export type StockAlertCategory = z.infer<typeof StockAlertCategorySchema>;
 

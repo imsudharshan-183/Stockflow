@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { toast } from "sonner";
 import { ChartCard } from "@/components/shared/ChartCard";
+import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailPopup";
 import { InfoPopover } from "@/components/shared/InfoPopover";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
@@ -122,6 +123,7 @@ export function BranchPage({
   const { id: paramId } = useParams();
   const id = forcedBranchId ?? paramId ?? "";
   const { user } = useAuth();
+  const { showDetail } = useChartDetail();
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -777,7 +779,31 @@ export function BranchPage({
       >
         <div className="h-72 w-full">
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={trendQuery.data?.points ?? []}>
+            <LineChart
+              data={trendQuery.data?.points ?? []}
+              className="cursor-pointer"
+              onClick={(state) => {
+                const points = trendQuery.data?.points ?? [];
+                const point = pickChartPoint(state, points);
+                if (!point) return;
+                const branchLabel = summaryQuery.data?.branch.name ?? id;
+                const scopeLabel = trendSku
+                  ? `SKU ${trendSku}`
+                  : trendCat
+                    ? `Category: ${trendCat}`
+                    : "All categories";
+                showDetail({
+                  title: branchLabel,
+                  subtitle: `Daily trend · ${formatDate(point.date)}`,
+                  metrics: [
+                    { label: "Sales units", value: formatNumber(point.salesUnits) },
+                    { label: "On hand units", value: formatNumber(point.onHandUnits) },
+                    { label: "Filter scope", value: scopeLabel },
+                    { label: "Range", value: `Last ${range} days` },
+                  ],
+                });
+              }}
+            >
               <CartesianGrid strokeDasharray="3 3" stroke={TOKENS.chart.grid} strokeOpacity={0.6} />
               <XAxis
                 dataKey="date"
@@ -811,6 +837,7 @@ export function BranchPage({
                   name="Sales units"
                   stroke={TOKENS.chart.markdown}
                   dot={false}
+                  activeDot={{ r: 5 }}
                   strokeWidth={2}
                 />
               ) : null}
@@ -822,6 +849,7 @@ export function BranchPage({
                   name="On hand"
                   stroke={TOKENS.chart.inventoryValue}
                   dot={false}
+                  activeDot={{ r: 5 }}
                   strokeWidth={2}
                 />
               ) : null}

@@ -205,7 +205,7 @@ const stockAlertSchema = new Schema(
     category: {
       type: String,
       required: true,
-      enum: ["CRITICAL_LOW", "DAMAGED_SHRINKAGE", "COUNT_MISMATCH"],
+      enum: ["CRITICAL_LOW", "DAMAGED_SHRINKAGE", "COUNT_MISMATCH", "OTHER"],
       default: "CRITICAL_LOW",
     },
     flaggedBy: { type: actedBySchema, required: true },

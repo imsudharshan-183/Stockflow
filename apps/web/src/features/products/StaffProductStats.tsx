@@ -194,7 +194,20 @@ export function StaffProductStats() {
         </div>
       ) : null}
 
-      <TableCard>
+      <section aria-labelledby="weekly-stock-check-title" className="space-y-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
+          <div>
+            <h2 id="weekly-stock-check-title" className="text-base font-semibold text-foreground">
+              Weekly Stock Check
+            </h2>
+            <p className="text-sm text-muted-foreground">
+              Walk your branch and flag anything missing, damaged, spoiled, or otherwise off during your regular check.
+            </p>
+          </div>
+          <Badge variant="secondary">{staffBranchId}</Badge>
+        </div>
+
+        <TableCard>
         <TableToolbar>
           <div className="flex flex-wrap items-center gap-2.5">
             <div className="relative w-64">
@@ -382,6 +395,7 @@ export function StaffProductStats() {
           </div>
         </TableCardFooter>
       </TableCard>
+      </section>
 
       <TableCard>
         <TableToolbar>
@@ -497,6 +511,11 @@ export function StaffProductStats() {
                   </option>
                 ))}
               </select>
+              {STOCK_ALERT_CATEGORIES.find((cat) => cat.value === flagCategory)?.helper ? (
+                <p className="text-xs text-muted-foreground">
+                  {STOCK_ALERT_CATEGORIES.find((cat) => cat.value === flagCategory)?.helper}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1.5">

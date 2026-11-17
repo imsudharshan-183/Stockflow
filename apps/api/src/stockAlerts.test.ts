@@ -10,6 +10,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
   let app: FastifyInstance;
   let staffManamaHeader: { authorization: string };
   let staffHiddHeader: { authorization: string };
+  let staffIsaHeader: { authorization: string };
   let managerManamaHeader: { authorization: string };
   let managerHiddHeader: { authorization: string };
   let adminHeader: { authorization: string };
@@ -22,12 +23,22 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
 
     const staffManama = await createUser(repo, "staff", ["BR-001"]);
     const staffHidd = await createUser(repo, "staff", ["BR-005"]);
+    const staffIsa = await createUser(repo, "staff", ["BR-009"]);
     const mgrManama = await createUser(repo, "manager", ["BR-001"]);
     const mgrHidd = await createUser(repo, "manager", ["BR-005"]);
     const admin = await createUser(repo, "admin", []);
 
     staffManamaHeader = (await loginAs(app, staffManama.user.email, staffManama.password)).authHeader;
     staffHiddHeader = (await loginAs(app, staffHidd.user.email, staffHidd.password)).authHeader;
+    // Use a distinct loopback address for the 6th setup login so /api/auth/login's max-5 rate limit isn't tripped in beforeAll.
+    const isaLoginRes = await app.inject({
+      method: "POST",
+      url: "/api/auth/login",
+      remoteAddress: "127.0.0.2",
+      payload: { email: staffIsa.user.email, password: staffIsa.password },
+    });
+    expect(isaLoginRes.statusCode).toBe(200);
+    staffIsaHeader = { authorization: `Bearer ${(JSON.parse(isaLoginRes.body) as { token: string }).token}` };
     managerManamaHeader = (await loginAs(app, mgrManama.user.email, mgrManama.password)).authHeader;
     managerHiddHeader = (await loginAs(app, mgrHidd.user.email, mgrHidd.password)).authHeader;
     adminHeader = (await loginAs(app, admin.user.email, admin.password)).authHeader;
@@ -131,6 +142,22 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     const hiddAlert = StockAlertSchema.parse(JSON.parse(createHiddRes.payload));
     expect(hiddAlert.category).toBe("COUNT_MISMATCH");
 
+    const createOtherRes = await app.inject({
+      method: "POST",
+      url: "/api/stock-alerts",
+      headers: staffIsaHeader,
+      payload: {
+        branchId: "BR-009",
+        sku: "SKU-90002",
+        category: "OTHER",
+        note: "Chiller thermostat fluctuating near dairy display",
+      },
+    });
+    expect(createOtherRes.statusCode).toBe(201);
+    const isaOtherAlert = StockAlertSchema.parse(JSON.parse(createOtherRes.payload));
+    expect(isaOtherAlert.category).toBe("OTHER");
+    expect(isaOtherAlert.branchId).toBe("BR-009");
+
     // 4. GET /api/stock-alerts allows staff & manager (branch-scoped) vs network for admin, and rejects out-of-scope ?branchId=
     const staffGetRes = await app.inject({ method: "GET", url: "/api/stock-alerts", headers: staffManamaHeader });
     expect(staffGetRes.statusCode).toBe(200);
@@ -164,12 +191,21 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
       JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: managerManamaHeader })).payload),
     );
     expect(mgrList.alerts.map((a) => a.id).sort()).toEqual([createdAlert.id, damagedAlert.id].sort());
+    expect(mgrList.alerts.some((a) => a.branchId === "BR-009")).toBe(false);
+
+    const mgrHiddList = StockAlertListSchema.parse(
+      JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: managerHiddHeader })).payload),
+    );
+    expect(mgrHiddList.alerts.map((a) => a.id)).toEqual([hiddAlert.id]);
 
     const adminList = StockAlertListSchema.parse(
       JSON.parse((await app.inject({ method: "GET", url: "/api/stock-alerts", headers: adminHeader })).payload),
     );
     expect(adminList.alerts.map((a) => a.id).sort()).toEqual(
-      [createdAlert.id, damagedAlert.id, hiddAlert.id].sort(),
+      [createdAlert.id, damagedAlert.id, hiddAlert.id, isaOtherAlert.id].sort(),
+    );
+    expect(new Set(adminList.alerts.filter((a) => a.status === "PENDING").map((a) => a.branchId))).toEqual(
+      new Set(["BR-001", "BR-005", "BR-009"]),
     );
 
     const adminHiddFiltered = StockAlertListSchema.parse(
@@ -236,7 +272,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     expect(persisted?.status).toBe("APPROVED");
     expect(persisted?.decidedAt).toBe(approvedAlert.decidedAt);
 
-    // 9. Admin can reject remaining Hidd alert -> 200, then immutable -> 409
+    // 9. Admin can decide alerts from any branch (BR-005 Hidd, BR-009 Isa Town OTHER) -> 200, then immutable -> 409
     const adminRejectRes = await app.inject({
       method: "PATCH",
       url: `/api/stock-alerts/${hiddAlert.id}/reject`,
@@ -244,6 +280,17 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Stock alerts API [%s]", (re
     });
     expect(adminRejectRes.statusCode).toBe(200);
     expect(StockAlertSchema.parse(JSON.parse(adminRejectRes.payload)).status).toBe("REJECTED");
+
+    const adminApproveIsaRes = await app.inject({
+      method: "PATCH",
+      url: `/api/stock-alerts/${isaOtherAlert.id}/approve`,
+      headers: adminHeader,
+    });
+    expect(adminApproveIsaRes.statusCode).toBe(200);
+    const approvedIsa = StockAlertSchema.parse(JSON.parse(adminApproveIsaRes.payload));
+    expect(approvedIsa.status).toBe("APPROVED");
+    expect(approvedIsa.category).toBe("OTHER");
+    expect(approvedIsa.decidedBy?.role).toBe("admin");
 
     const retryApproveHidd = await app.inject({
       method: "PATCH",

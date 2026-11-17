@@ -21,6 +21,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailPopup";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
 import { EmptyBlock, ErrorBlock, LoadingBlock } from "@/components/shared/states";
@@ -243,6 +244,7 @@ function Logic({
   onBranch: (id: string) => void;
 }) {
   const { user } = useAuth();
+  const { showDetail } = useChartDetail();
   const isBranchAllowed = !user || user.role === "admin" || user.branchIds.includes(position.branch.id);
 
   const salesRows = points.map((point) => ({
@@ -357,7 +359,28 @@ function Logic({
           <CardContent>
             <div className="h-64 w-full">
               <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart data={salesRows}>
+                <ComposedChart
+                  data={salesRows}
+                  className="cursor-pointer"
+                  onClick={(state) => {
+                    const row = pickChartPoint(state, salesRows);
+                    if (!row) return;
+                    const delta = row.stock - position.reorderPoint;
+                    showDetail({
+                      title: `Sales & stock · ${position.branch.name}`,
+                      subtitle: formatDate(row.date),
+                      metrics: [
+                        { label: "Sales units", value: formatNumber(row.sales) },
+                        { label: "On hand units", value: formatNumber(row.stock) },
+                        { label: "Reorder level", value: formatNumber(position.reorderPoint) },
+                        {
+                          label: "Net vs. reorder level",
+                          value: `${delta >= 0 ? "+" : ""}${formatNumber(delta)} units`,
+                        },
+                      ],
+                    });
+                  }}
+                >
                   <CartesianGrid
                     strokeDasharray="3 3"
                     stroke={TOKENS.chart.grid}
@@ -395,6 +418,7 @@ function Logic({
                     name="On hand"
                     stroke={TOKENS.chart.inventoryValue}
                     dot={false}
+                    activeDot={{ r: 5 }}
                     strokeWidth={2}
                   />
                   <ReferenceLine
@@ -422,7 +446,33 @@ function Logic({
             ) : (
               <div className="h-56 w-full">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={coverRows}>
+                  <LineChart
+                    data={coverRows}
+                    className="cursor-pointer"
+                    onClick={(state) => {
+                      const row = pickChartPoint(state, coverRows);
+                      if (!row) return;
+                      showDetail({
+                        title: `Cover trajectory · ${position.branch.name}`,
+                        subtitle: formatDate(row.date),
+                        metrics: [
+                          { label: "Days of stock left", value: formatCover(row.cover) },
+                          {
+                            label: "Target floor",
+                            value: `${formatNumber(policy.receiverCoverDays)}d`,
+                          },
+                          {
+                            label: "Donor floor",
+                            value: `${formatNumber(policy.donorCoverDays)}d`,
+                          },
+                          {
+                            label: "Overstock threshold",
+                            value: `${formatNumber(policy.overstockCoverDays)}d`,
+                          },
+                        ],
+                      });
+                    }}
+                  >
                     <CartesianGrid
                       strokeDasharray="3 3"
                       stroke={TOKENS.chart.grid}
@@ -442,6 +492,7 @@ function Logic({
                       name="Days of stock left"
                       stroke={TOKENS.chart.netBenefit}
                       dot={false}
+                      activeDot={{ r: 5 }}
                       strokeWidth={2}
                     />
                     <ReferenceLine

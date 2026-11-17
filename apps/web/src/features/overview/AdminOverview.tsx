@@ -13,7 +13,9 @@ import {
   YAxis,
 } from "recharts";
 import { ChartCard as SharedChartCard } from "@/components/shared/ChartCard";
+import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailPopup";
 import { PageHeader } from "@/components/shared/PageHeader";
+import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -67,6 +69,7 @@ export function ChartCard({
   kind: "rate" | "money";
 }) {
   const [rangeDays, setRangeDays] = useState<7 | 30 | 90>(90);
+  const { showDetail } = useChartDetail();
   const sliced = useMemo(() => {
     const weeksToKeep = Math.max(1, Math.ceil(rangeDays / 7));
     return data.slice(-weeksToKeep);
@@ -75,7 +78,7 @@ export function ChartCard({
   return (
     <SharedChartCard
       title={title}
-      subtitle="Weekly rollup · drag brush below to zoom"
+      subtitle="Weekly rollup · click any point for exact metrics"
       helpKey={kind === "rate" ? "stockoutRate" : "overstockValue"}
       isEmpty={sliced.length === 0}
       tableData={{
@@ -104,7 +107,23 @@ export function ChartCard({
     >
       <div className="h-60 w-full">
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={sliced}>
+          <LineChart
+            data={sliced}
+            className="cursor-pointer"
+            onClick={(state) => {
+              const point = pickChartPoint(state, sliced);
+              if (!point) return;
+              showDetail({
+                title,
+                subtitle: `Week of ${point.label}`,
+                metrics: [
+                  { label: "Stockout rate", value: formatPct(point.stockoutRate) },
+                  { label: "Inventory value", value: formatMoneyFull(point.inventoryValue) },
+                  { label: "Selected window", value: `Last ${rangeDays} days` },
+                ],
+              });
+            }}
+          >
             <CartesianGrid stroke={TOKENS.chart.grid} strokeDasharray="3 3" strokeOpacity={0.6} />
             <XAxis
               dataKey="label"
@@ -152,6 +171,7 @@ export function ChartCard({
               name={title}
               stroke={color}
               dot={{ r: 3 }}
+              activeDot={{ r: 5 }}
               strokeWidth={2}
             />
             {sliced.length > 3 ? (
@@ -268,6 +288,9 @@ export function AdminOverview({ report, recommendations, totalActions }: AdminOv
           footerLabel="Net of freight, purchase, and markdown costs"
         />
       </section>
+
+      {/* Pending Staff Stock Alerts across all branches */}
+      <PendingStockAlertsCard scope="network" />
 
       {/* Full Network Heatmap & Analytics */}
       <Analytics report={report} rows={recommendations} />

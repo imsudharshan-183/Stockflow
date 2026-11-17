@@ -4,11 +4,33 @@ import type { StockAlertCategory, StockAlertStatus } from "@stockflow/core";
 export const STOCK_ALERT_CATEGORIES: ReadonlyArray<{
   value: StockAlertCategory;
   label: string;
+  helper: string;
   tone: BadgeTone;
 }> = [
-  { value: "CRITICAL_LOW", label: "Critical low", tone: "risk" },
-  { value: "DAMAGED_SHRINKAGE", label: "Damaged / shrinkage", tone: "markdown" },
-  { value: "COUNT_MISMATCH", label: "Count mismatch", tone: "reorder" },
+  {
+    value: "CRITICAL_LOW",
+    label: "Critical low",
+    helper: "Shelf is nearly empty or already out of stock.",
+    tone: "risk",
+  },
+  {
+    value: "DAMAGED_SHRINKAGE",
+    label: "Damaged / Spoiled / Shrinkage",
+    helper: "Broken packaging, early spoilage, or any product that can't be sold.",
+    tone: "markdown",
+  },
+  {
+    value: "COUNT_MISMATCH",
+    label: "Count mismatch",
+    helper: "Physical shelf count differs from the system on-hand balance.",
+    tone: "reorder",
+  },
+  {
+    value: "OTHER",
+    label: "Other",
+    helper: "Any other shelf or floor stock issue your manager should inspect.",
+    tone: "fresh",
+  },
 ];
 
 const CATEGORY_META = Object.fromEntries(
