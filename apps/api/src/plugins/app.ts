@@ -5,6 +5,7 @@ import jwt from "@fastify/jwt";
 import rateLimit from "@fastify/rate-limit";
 import Fastify, { type FastifyInstance } from "fastify";
 import { readEnv, type Env } from "../config/env.js";
+import { redactSecrets } from "../config/redact.js";
 import { registerAuthRoutes } from "../routes/auth.js";
 import { registerCatalogRoutes } from "../routes/catalog.js";
 import { registerLocationRoutes } from "../routes/locations.js";
@@ -28,11 +29,20 @@ const LOCAL_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"] as cons
 export async function buildApp(
   services: StockServices,
   envOverrides?: Partial<Env>,
+  diagnostics?: { startupError?: string | null },
 ): Promise<FastifyInstance> {
   let env: Env;
+  let startupError: string | null = diagnostics?.startupError
+    ? redactSecrets(diagnostics.startupError)
+    : null;
   try {
     env = readEnv();
-  } catch {
+  } catch (err) {
+    if (!startupError && !envOverrides) {
+      startupError = redactSecrets(
+        err instanceof Error ? err.message : "startup configuration error",
+      );
+    }
     env = {
       PORT: 3001,
       HOST: "127.0.0.1",
@@ -93,7 +103,7 @@ export async function buildApp(
     (scope) => {
       registerAuthRoutes(scope, authService, authGuards, env);
       registerUsersRoutes(scope, services.userRepo, authService, authGuards);
-      registerStockRoutes(scope, services, authGuards);
+      registerStockRoutes(scope, services, authGuards, { env, startupError });
       registerLocationRoutes(scope, services, authGuards);
       registerCatalogRoutes(scope, services, authGuards);
       registerSalesEntriesRoutes(scope, services, authGuards);

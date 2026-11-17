@@ -42,6 +42,11 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
   const report = kpis.data;
   const recommendations = queue.data?.recommendations ?? [];
   const totalActions = queue.data?.total ?? 0;
+  const recommendationsLoading = queue.isPending;
+  const recommendationsError = queue.isError ? queue.error.message : null;
+  const onRetryRecommendations = () => {
+    void queue.refetch();
+  };
 
   if (isManager) {
     return (
@@ -49,6 +54,9 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
         report={report}
         recommendations={recommendations}
         totalActions={totalActions}
+        recommendationsLoading={recommendationsLoading}
+        recommendationsError={recommendationsError}
+        onRetryRecommendations={onRetryRecommendations}
       />
     );
   }
@@ -58,6 +66,9 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
       report={report}
       recommendations={recommendations}
       totalActions={totalActions}
+      recommendationsLoading={recommendationsLoading}
+      recommendationsError={recommendationsError}
+      onRetryRecommendations={onRetryRecommendations}
     />
   );
 }

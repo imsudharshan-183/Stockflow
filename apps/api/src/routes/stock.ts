@@ -2,15 +2,19 @@ import {
   BatchDecideRequestSchema,
   BatchDecideResponseSchema,
   BranchDetailSchema,
+  DbHealthSchema,
   ErrorBodySchema,
   HealthSchema,
   ProductDetailSchema,
   RecommendationQuerySchema,
   RecommendationSchema,
   isBranchInScope,
+  type DbHealth,
   type User,
 } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
+import { getMissingRequiredEnvVars, type Env } from "../config/env.js";
+import { redactSecrets } from "../config/redact.js";
 import type { AuthContext } from "../plugins/auth.js";
 import {
   DecisionConflictError,
@@ -18,13 +22,74 @@ import {
   type StockServices,
 } from "../services/index.js";
 
+const HEALTH_DB_CACHE_TTL_MS = 30_000;
+
 export function registerStockRoutes(
   app: FastifyInstance,
   services: StockServices,
   authGuards: AuthContext,
+  diagnostics?: { env?: Partial<Env>; startupError?: string | null },
 ): void {
+  let cachedDbHealth: { statusCode: 200 | 503; body: DbHealth; expiresAt: number } | null = null;
+  let inflightDbPing: Promise<{ statusCode: 200 | 503; body: DbHealth }> | null = null;
+
   app.get("/health", async () => {
-    return HealthSchema.parse({ status: "ok", repository: services.repositoryKind() });
+    return HealthSchema.parse({
+      status: "ok",
+      repository: services.repositoryKind(),
+      startupError: diagnostics?.startupError ? redactSecrets(diagnostics.startupError) : null,
+      missingEnv: getMissingRequiredEnvVars(process.env, diagnostics?.env),
+    });
+  });
+
+  app.get("/health/db", async (_request, reply) => {
+    const now = Date.now();
+    if (cachedDbHealth && now < cachedDbHealth.expiresAt) {
+      return reply.code(cachedDbHealth.statusCode).send(cachedDbHealth.body);
+    }
+
+    if (!inflightDbPing) {
+      inflightDbPing = (async () => {
+        const missingEnv = getMissingRequiredEnvVars(process.env, diagnostics?.env);
+        if (services.repositoryKind() === "memory") {
+          return {
+            statusCode: 503 as const,
+            body: DbHealthSchema.parse({
+              db: "error",
+              name: "ConfigurationError",
+              message: "MongoDB is not configured (MONGODB_URI is unset)",
+              missingEnv,
+            }),
+          };
+        }
+        try {
+          await services.pingDb();
+          return {
+            statusCode: 200 as const,
+            body: DbHealthSchema.parse({ db: "ok", missingEnv }),
+          };
+        } catch (err) {
+          const name = err instanceof Error ? err.name || "Error" : "Error";
+          const rawMessage = err instanceof Error ? err.message : "Database ping failed";
+          return {
+            statusCode: 503 as const,
+            body: DbHealthSchema.parse({
+              db: "error",
+              name,
+              message: redactSecrets(rawMessage),
+              missingEnv,
+            }),
+          };
+        }
+      })().then((result) => {
+        cachedDbHealth = { ...result, expiresAt: Date.now() + HEALTH_DB_CACHE_TTL_MS };
+        inflightDbPing = null;
+        return result;
+      });
+    }
+
+    const result = await inflightDbPing;
+    return reply.code(result.statusCode).send(result.body);
   });
 
   app.get(

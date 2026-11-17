@@ -3,7 +3,8 @@
 All endpoints are mounted under `/api`. Protected routes require a valid JWT access token (cookie or `Authorization: Bearer`) unless `AUTH_ENABLED=false` (synthetic admin).
 
 ## Health & Auth (`/api/health`, `/api/auth/*`)
-- `GET /api/health` — Public health check.
+- `GET /api/health` — Public health check returning `{ status: "ok", repository: "mongo" | "memory", startupError, missingEnv }` immediately without touching the database or loading the dataset.
+- `GET /api/health/db` — Public MongoDB ping check (cached for 30s) returning `200 { db: "ok", missingEnv }` or `503 { db: "error", name, message, missingEnv }` with secrets redacted.
 - `POST /api/auth/login` — Authenticates email + password, sets `HttpOnly` access/refresh cookies, rate-limited.
 - `POST /api/auth/refresh` — Rotates refresh token; rejects deactivated users and reused tokens.
 - `POST /api/auth/logout` — Revokes refresh token and clears auth cookies.

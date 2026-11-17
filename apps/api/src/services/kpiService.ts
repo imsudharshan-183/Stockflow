@@ -11,7 +11,7 @@ import {
 import { DecisionForbiddenError } from "./errors.js";
 import { projectPositionFor } from "./projection.js";
 import { ensureInitializedSyncIfPossible, type StockRuntimeState } from "./runtimeState.js";
-import { isBranchInScope, scopeBranches } from "./scope.js";
+import { isBranchInScope, isMaterialRecommendation, scopeBranches } from "./scope.js";
 
 export class KpiService {
   constructor(private readonly runtime: StockRuntimeState) {}
@@ -180,6 +180,7 @@ export class KpiService {
         : 0;
 
     const scopedPendingRecs = this.runtime.analysis.recommendations.filter((rec) => {
+      if (!isMaterialRecommendation(rec)) return false;
       const status = this.runtime.decisions.get(rec.id) ?? rec.status;
       if (status !== "PENDING") return false;
       return (

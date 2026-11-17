@@ -60,5 +60,6 @@ export interface StockRepository {
     | { status: "not_found" }
     | { status: "already_decided"; alert: StockAlert }
   >;
+  ping?(): Promise<void>;
   close(): Promise<void>;
 }

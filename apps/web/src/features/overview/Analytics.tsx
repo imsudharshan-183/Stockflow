@@ -59,9 +59,15 @@ const ACTION_CONFIG: Record<
 export function Analytics({
   report,
   rows,
+  recommendationsLoading = false,
+  recommendationsError,
+  onRetryRecommendations,
 }: {
   report: KpiSummary;
   rows: readonly Recommendation[];
+  recommendationsLoading?: boolean;
+  recommendationsError?: string | null;
+  onRetryRecommendations?: () => void;
 }) {
   const { showDetail } = useChartDetail();
   const [hiddenActions, setHiddenActions] = useState<ReadonlySet<Action>>(new Set());
@@ -97,6 +103,10 @@ export function Analytics({
         title={LABELS.actionMix.label}
         subtitle="Click a slice for metrics and queue link; click legend to toggle"
         helpKey="actionMix"
+        isLoading={recommendationsLoading}
+        isError={Boolean(recommendationsError)}
+        errorMessage={recommendationsError ?? undefined}
+        onRetry={onRetryRecommendations}
         isEmpty={rows.length === 0}
         tableData={{
           headers: ["Action", "Count", "Estimated gain"],
@@ -263,6 +273,10 @@ export function Analytics({
         title={LABELS.topSkus.label}
         subtitle="Click a bar for exact metrics and product link"
         helpKey="topSkus"
+        isLoading={recommendationsLoading}
+        isError={Boolean(recommendationsError)}
+        errorMessage={recommendationsError ?? undefined}
+        onRetry={onRetryRecommendations}
         isEmpty={skus.length === 0}
         tableData={{
           headers: ["SKU", "Product", "Estimated gain"],

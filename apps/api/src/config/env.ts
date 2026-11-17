@@ -82,9 +82,36 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     ACCESS_TOKEN_TTL: source.ACCESS_TOKEN_TTL,
     REFRESH_TOKEN_TTL: source.REFRESH_TOKEN_TTL,
     ADMIN_PASSWORD: source.ADMIN_PASSWORD,
+    WEB_ORIGIN: source.WEB_ORIGIN,
   });
   if (env.AUTH_ENABLED && !env.JWT_SECRET.trim()) {
     throw new Error("JWT_SECRET must be set when AUTH_ENABLED is true");
   }
   return env;
+}
+
+function isEnvTruthy(value: string | undefined): boolean {
+  if (!value) return false;
+  const normalized = value.toLowerCase().trim();
+  return normalized === "true" || normalized === "1";
+}
+
+/**
+ * Returns the names (never values) of required environment variables that are currently unset.
+ */
+export function getMissingRequiredEnvVars(
+  source: NodeJS.ProcessEnv = process.env,
+  resolvedEnv?: Partial<Env>,
+): string[] {
+  const missing: string[] = [];
+  if (!source.MONGODB_URI?.trim()) {
+    missing.push("MONGODB_URI");
+  }
+  const authEnabled = resolvedEnv?.AUTH_ENABLED ?? isEnvTruthy(source.AUTH_ENABLED);
+  const isHosted = Boolean(source.VERCEL?.trim()) || source.NODE_ENV === "production";
+  const hasJwtSecret = Boolean(resolvedEnv?.JWT_SECRET?.trim() || source.JWT_SECRET?.trim());
+  if ((authEnabled || isHosted) && !hasJwtSecret) {
+    missing.push("JWT_SECRET");
+  }
+  return missing;
 }

@@ -13,7 +13,12 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
     try {
       const health = await app.inject({ method: "GET", url: "/api/health" });
       expect(health.statusCode).toBe(200);
-      expect(JSON.parse(health.body)).toEqual({ status: "ok", repository: "memory" });
+      expect(JSON.parse(health.body)).toEqual({
+        status: "ok",
+        repository: "memory",
+        startupError: null,
+        missingEnv: expect.any(Array),
+      });
       expect(health.headers["x-content-type-options"]).toBe("nosniff");
       expect(health.headers["x-frame-options"]).toBeTruthy();
 
@@ -186,7 +191,12 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
 
       const healthBeforeStart = await app.inject({ method: "GET", url: "/api/health" });
       expect(healthBeforeStart.statusCode).toBe(200);
-      expect(JSON.parse(healthBeforeStart.body)).toEqual({ status: "ok", repository: "memory" });
+      expect(JSON.parse(healthBeforeStart.body)).toEqual({
+        status: "ok",
+        repository: "memory",
+        startupError: null,
+        missingEnv: expect.any(Array),
+      });
       expect(datasetFinishedLoading).toBe(false);
 
       // 2. Trigger lazy dataset + plan load on first use via /api/recommendations (remains pending on datasetGate)
@@ -198,7 +208,12 @@ describe("Platform Security, CORS, Headers, Route Prefix & Cold-Start Perf", () 
       // 3. While loadDataset() is still in-flight and unfinished, /api/health responds immediately
       const healthDuringLoad = await app.inject({ method: "GET", url: "/api/health" });
       expect(healthDuringLoad.statusCode).toBe(200);
-      expect(JSON.parse(healthDuringLoad.body)).toEqual({ status: "ok", repository: "memory" });
+      expect(JSON.parse(healthDuringLoad.body)).toEqual({
+        status: "ok",
+        repository: "memory",
+        startupError: null,
+        missingEnv: expect.any(Array),
+      });
       expect(datasetFinishedLoading).toBe(false);
 
       // 4. Release the dataset load and verify the first-use request completes and logs durations

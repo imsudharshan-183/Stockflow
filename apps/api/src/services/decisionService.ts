@@ -182,7 +182,13 @@ export class DecisionService {
   }
 
   private matches(recommendation: Recommendation, query: RecommendationQuery): boolean {
-    if (query.branch && recommendation.branchId !== query.branch) return false;
+    if (
+      query.branch &&
+      recommendation.branchId !== query.branch &&
+      !(recommendation.action === "TRANSFER" && recommendation.donorBranchId === query.branch)
+    ) {
+      return false;
+    }
     if (query.category && recommendation.category !== query.category) return false;
     if (query.action && recommendation.action !== query.action) return false;
     if (
@@ -199,6 +205,10 @@ export class DecisionService {
     const allBranchIds = this.runtime.data.branches.map((b) => b.id);
     const userBranches =
       user && user.role !== "admin" ? new Set(scopeBranches(user, allBranchIds)) : null;
+
+    if (query.branch && userBranches && !userBranches.has(query.branch)) {
+      return RecommendationListSchema.parse({ recommendations: [], total: 0 });
+    }
 
     // The engine keeps every positive-benefit draft. The queue only shows moves a buyer would act on.
     const recommendations = this.runtime.analysis.recommendations

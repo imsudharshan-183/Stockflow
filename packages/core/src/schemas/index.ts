@@ -335,7 +335,22 @@ export const ProductDetailSchema = z.object({
 export const HealthSchema = z.object({
   status: z.literal("ok"),
   repository: z.enum(["memory", "mongo"]),
+  startupError: z.string().nullable(),
+  missingEnv: z.array(z.string()),
 });
+
+export const DbHealthSchema = z.discriminatedUnion("db", [
+  z.object({
+    db: z.literal("ok"),
+    missingEnv: z.array(z.string()),
+  }),
+  z.object({
+    db: z.literal("error"),
+    name: z.string(),
+    message: z.string(),
+    missingEnv: z.array(z.string()),
+  }),
+]);
 
 export const RecommendationListSchema = z.object({
   recommendations: z.array(RecommendationSchema),
@@ -613,6 +628,7 @@ export type AuditList = z.infer<typeof AuditListSchema>;
 export type RecommendationList = z.infer<typeof RecommendationListSchema>;
 export type ErrorBody = z.infer<typeof ErrorBodySchema>;
 export type Health = z.infer<typeof HealthSchema>;
+export type DbHealth = z.infer<typeof DbHealthSchema>;
 export type SeriesPoint = z.infer<typeof SeriesPointSchema>;
 export type CreateProduct = z.infer<typeof CreateProductSchema>;
 export type UpdateProduct = z.infer<typeof UpdateProductSchema>;

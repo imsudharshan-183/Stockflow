@@ -40,7 +40,7 @@ export async function connectDb(uri?: string): Promise<mongoose.mongo.Db> {
   const targetUri = (uri ?? process.env.MONGODB_URI)?.trim() || DEFAULT_MONGO_URI;
   if (!sharedConnectionPromise) {
     sharedConnectionPromise = mongoose
-      .connect(targetUri, { dbName: "stockflow", serverSelectionTimeoutMS: 15000 })
+      .connect(targetUri, { dbName: "stockflow", serverSelectionTimeoutMS: 8000 })
       .then(async (m) => {
         await SalesEntryModel.createIndexes();
         return m;

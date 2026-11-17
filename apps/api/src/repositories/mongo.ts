@@ -101,7 +101,7 @@ export class MongoRepository implements StockRepository {
     const current = globalCache.__stockflowMongo;
     if (!current || current.uri !== uri) {
       const pending = mongoose
-        .connect(uri, { dbName, serverSelectionTimeoutMS: 15000 })
+        .connect(uri, { dbName, serverSelectionTimeoutMS: 8000 })
         .then(async () => {
           await FactModel.createIndexes();
           await SeriesModel.createIndexes();
@@ -117,6 +117,15 @@ export class MongoRepository implements StockRepository {
     const pending = globalCache.__stockflowMongo?.pending;
     if (!pending) throw new Error("MongoDB connection was not started");
     await pending;
+  }
+
+  async ping(): Promise<void> {
+    await this.ensureConnected();
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error("MongoDB connection has no active database handle");
+    }
+    await db.admin().ping();
   }
 
   async seed(customDataset?: Dataset, cleanAll = true): Promise<void> {

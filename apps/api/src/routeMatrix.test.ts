@@ -60,7 +60,12 @@ describe("route matrix: read-only routes", () => {
     it("200 without a token", async () => {
       const r = await call("GET", "/api/health");
       expect(r.status).toBe(200);
-      expect(r.body).toEqual({ status: "ok", repository: "memory" });
+      expect(r.body).toEqual({
+        status: "ok",
+        repository: "memory",
+        startupError: null,
+        missingEnv: expect.any(Array),
+      });
     });
   });
 

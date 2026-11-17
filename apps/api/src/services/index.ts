@@ -34,6 +34,7 @@ export interface StockServices {
   readonly decisions: DecisionService;
   readonly userRepo: UserRepository;
   repositoryKind: () => "memory" | "mongo";
+  pingDb: () => Promise<void>;
   ensureInitialized: () => Promise<void>;
   ensureInitializedSyncIfPossible: () => void;
   ensureFreshPlan: (options?: { syncDecisions?: boolean; syncAudit?: boolean }) => Promise<void>;
@@ -66,6 +67,12 @@ export function createStockServices(repo: StockRepository): StockServices {
       return repo.users;
     },
     repositoryKind: () => repo.kind,
+    pingDb: async () => {
+      if (!repo.ping) {
+        throw new Error("Database ping is not supported for in-memory repository");
+      }
+      await repo.ping();
+    },
     ensureInitialized: () => ensureInitialized(runtime),
     ensureInitializedSyncIfPossible: () => ensureInitializedSyncIfPossible(runtime),
     ensureFreshPlan: (options) => ensureFreshPlan(runtime, options),

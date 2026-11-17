@@ -188,9 +188,19 @@ interface AdminOverviewProps {
   report: KpiSummary;
   recommendations: readonly Recommendation[];
   totalActions: number;
+  recommendationsLoading?: boolean;
+  recommendationsError?: string | null;
+  onRetryRecommendations?: () => void;
 }
 
-export function AdminOverview({ report, recommendations, totalActions }: AdminOverviewProps) {
+export function AdminOverview({
+  report,
+  recommendations,
+  totalActions,
+  recommendationsLoading = false,
+  recommendationsError = null,
+  onRetryRecommendations,
+}: AdminOverviewProps) {
   const weeks = weeklyPoints(report.trend);
   const avoided = report.backtest.stockoutDaysAvoided;
   const avoidedText =
@@ -293,7 +303,13 @@ export function AdminOverview({ report, recommendations, totalActions }: AdminOv
       <PendingStockAlertsCard scope="network" />
 
       {/* Full Network Heatmap & Analytics */}
-      <Analytics report={report} rows={recommendations} />
+      <Analytics
+        report={report}
+        rows={recommendations}
+        recommendationsLoading={recommendationsLoading}
+        recommendationsError={recommendationsError}
+        onRetryRecommendations={onRetryRecommendations}
+      />
 
       {/* 90-Day Network Trend Charts */}
       <section className="grid gap-6 lg:grid-cols-2">

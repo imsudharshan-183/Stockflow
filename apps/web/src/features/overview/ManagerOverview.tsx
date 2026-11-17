@@ -21,9 +21,18 @@ interface ManagerOverviewProps {
   report: KpiSummary;
   recommendations: readonly Recommendation[];
   totalActions: number;
+  recommendationsLoading?: boolean;
+  recommendationsError?: string | null;
+  onRetryRecommendations?: () => void;
 }
 
-export function ManagerOverview({ report, recommendations }: ManagerOverviewProps) {
+export function ManagerOverview({
+  report,
+  recommendations,
+  recommendationsLoading = false,
+  recommendationsError = null,
+  onRetryRecommendations,
+}: ManagerOverviewProps) {
   const weeks = weeklyPoints(report.trend);
   const branchNames = report.branches.map((b) => b.name).join(", ");
   const pendingApprovalsCount =
@@ -125,7 +134,13 @@ export function ManagerOverview({ report, recommendations }: ManagerOverviewProp
       <PendingStockAlertsCard />
 
       {/* Scoped Cover Grid Heatmap & Analytics (strictly manager's branches) */}
-      <Analytics report={report} rows={recommendations} />
+      <Analytics
+        report={report}
+        rows={recommendations}
+        recommendationsLoading={recommendationsLoading}
+        recommendationsError={recommendationsError}
+        onRetryRecommendations={onRetryRecommendations}
+      />
 
       {/* Cluster Trend Charts */}
       <section className="grid gap-6 lg:grid-cols-2">

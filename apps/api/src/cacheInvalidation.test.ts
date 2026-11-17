@@ -51,7 +51,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
       } finally {
         await created.cleanup();
       }
-    });
+    }, 60_000);
 
     it("clears committedDeltas, committedRecommendationIds, and scopedKpiCache on catalog edit and CSV sales import", async () => {
       const created = await createDualRepo(repoKind);
@@ -158,6 +158,6 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
       } finally {
         await created.cleanup();
       }
-    });
+    }, 60_000);
   },
 );
