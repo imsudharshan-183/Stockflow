@@ -28,7 +28,7 @@ This document records the numbered architectural decisions (`ADR-001`+), trade-o
 StockFlow's replenishment, transfer, and markdown calculations must be deterministic, auditable, and testable without database or network dependencies.
 
 ### Decision
-- All statistical formulas (EWMA velocity, standard deviation, safety stock $z \cdot \sigma \cdot \sqrt{L}$, reorder point $d \cdot L + SS$, cover days) and optimization algorithms (greedy transfer matching, net benefit calculation, 90-day counterfactual backtesting) live in `packages/core/src/engine/`.
+- All statistical formulas (EWMA velocity, standard deviation, safety stock $z \cdot \sigma \cdot \sqrt{L}$, reorder point $d \cdot L + SS$, cover days) and optimization algorithms (greedy transfer matching, net benefit calculation, 45-day counterfactual backtesting) live in `packages/core/src/engine/`.
 - **Invariant**: `packages/core/src/engine/` has zero external dependencies outside TypeScript math and Zod contracts. It is frozen and protected by byte-identical golden snapshot tests (`apps/api/src/__fixtures__/recommendations.json` and `kpis.json`).
 
 ---

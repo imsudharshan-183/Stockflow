@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, X } from "lucide-react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { StockAlertCategoryBadge } from "@/components/shared/StockAlertBadges";
 import { EmptyBlock } from "@/components/shared/states";
@@ -90,8 +91,13 @@ export function PendingStockAlertsCard({ scope = "branch" }: PendingStockAlertsC
                   <TableCell className="font-medium text-foreground">
                     {alert.branchName ? `${alert.branchId} · ${alert.branchName}` : alert.branchId}
                   </TableCell>
-                  <TableCell className="font-mono text-xs text-foreground">
-                    {alert.sku}
+                  <TableCell className="font-mono text-xs">
+                    <Link
+                      to={`/products/${alert.sku}`}
+                      className="font-medium text-primary hover:underline"
+                    >
+                      {alert.sku}
+                    </Link>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{alert.flaggedBy.name}</TableCell>
                   <TableCell className="max-w-md">
