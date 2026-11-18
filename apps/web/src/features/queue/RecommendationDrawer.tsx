@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Check, ExternalLink, X } from "lucide-react";
+import { ArrowRight, Check, ExternalLink, Info, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -18,15 +18,26 @@ import {
   REASON_LABELS,
   actionLabel,
   formatCover,
+  formatDistanceKm,
   formatMoney,
   formatMoneyFull,
+  formatMoneyPrecise,
   formatNumber,
   formatPct,
   formatReasonSentence,
   statusLabel,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { formatProductDisplayName, type Recommendation } from "@stockflow/core";
+import {
+  BAHRAIN_BRANCHES,
+  TRANSFER_COST_PER_KM,
+  TRANSFER_COST_PER_UNIT,
+  TRANSFER_FIXED_COST,
+  formatProductDisplayName,
+  haversineDistanceKm,
+  totalTransferCostBreakdown,
+  type Recommendation,
+} from "@stockflow/core";
 
 export interface RecommendationDrawerProps {
   recommendation: Recommendation | null;
@@ -63,6 +74,27 @@ export function RecommendationDrawer({
     queryFn: () => api.product(sku),
     enabled: open && Boolean(sku),
   });
+
+  const transferFreight = (() => {
+    if (!recommendation || recommendation.action !== "TRANSFER" || !recommendation.donorBranchId) {
+      return null;
+    }
+    const donor = BAHRAIN_BRANCHES.find((b) => b.id === recommendation.donorBranchId);
+    const receiver = BAHRAIN_BRANCHES.find((b) => b.id === recommendation.branchId);
+    if (!donor?.coordinates || !receiver?.coordinates) return null;
+    const distanceKm = haversineDistanceKm(donor.coordinates, receiver.coordinates);
+    const breakdown = totalTransferCostBreakdown(recommendation.quantity, distanceKm, {
+      transferFixedCost: TRANSFER_FIXED_COST,
+      transferCostPerKm: TRANSFER_COST_PER_KM,
+      transferCostPerUnit: TRANSFER_COST_PER_UNIT,
+    });
+    return {
+      distanceKm,
+      ...breakdown,
+    };
+  })();
+
+  const transferMethodologyText = `Transfer cost = fixed dispatch fee + (distance × per-km rate) + (quantity × per-unit handling). Current rates: ${formatMoneyPrecise(TRANSFER_FIXED_COST)} fixed + ${formatMoneyPrecise(TRANSFER_COST_PER_KM)}/km + ${formatMoneyPrecise(TRANSFER_COST_PER_UNIT)}/unit.`;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -232,10 +264,34 @@ export function RecommendationDrawer({
                         {formatMoneyFull(recommendation.metrics.carryingCostSaved)}
                       </dd>
                     </div>
-                    <div className="flex items-center justify-between px-3.5 py-2">
-                      <dt className="text-muted-foreground">− Transfer freight cost</dt>
-                      <dd className="font-medium text-muted-foreground tabular-nums">
-                        {formatMoneyFull(recommendation.metrics.transferCost)}
+                    <div className="flex items-start justify-between gap-2 px-3.5 py-2">
+                      <dt className="flex flex-wrap items-center gap-1.5 text-muted-foreground">
+                        <span>− Transfer freight cost</span>
+                        {recommendation.action === "TRANSFER" ? (
+                          <Tooltip>
+                            <TooltipTrigger
+                              aria-label="Transfer freight cost methodology"
+                              className="inline-flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
+                            >
+                              <Info className="size-3" aria-hidden="true" />
+                              <span>Methodology</span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-xs py-2 text-xs leading-relaxed">
+                              <div className="space-y-1">
+                                <p className="font-semibold">Transfer freight formula</p>
+                                <p>{transferMethodologyText}</p>
+                              </div>
+                            </TooltipContent>
+                          </Tooltip>
+                        ) : null}
+                      </dt>
+                      <dd className="text-right font-medium text-muted-foreground tabular-nums">
+                        <div>{formatMoneyFull(recommendation.metrics.transferCost)}</div>
+                        {transferFreight ? (
+                          <div className="mt-0.5 text-[11px] font-normal text-muted-foreground">
+                            {`${formatDistanceKm(transferFreight.distanceKm)} · ${formatMoneyPrecise(transferFreight.fixedCost)} fixed + ${formatMoneyPrecise(transferFreight.distanceCost)} distance + ${formatMoneyPrecise(transferFreight.unitCost)} handling`}
+                          </div>
+                        ) : null}
                       </dd>
                     </div>
                     <div className="flex items-center justify-between px-3.5 py-2">

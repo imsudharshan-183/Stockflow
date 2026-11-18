@@ -90,6 +90,21 @@ export function formatMoneyFull(value: number): string {
   return formatted === "0" ? "BD 0" : `${sign}BD ${formatted}`;
 }
 
+/**
+ * Exact 3-decimal (fils) Bahraini Dinar formatter for unit costs, freight rate constants,
+ * and line-item methodology disclosures (e.g. BD 1.500, BD 0.150, BD 0.250).
+ */
+export function formatMoneyPrecise(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "BD 0.000";
+  const sign = value < 0 ? "-" : "";
+  return `${sign}BD ${moneyBhd.format(Math.abs(value))}`;
+}
+
+export function formatDistanceKm(km: number): string {
+  if (!Number.isFinite(km) || km < 0) return "—";
+  return `${subOneDecimalFormat.format(km)} km`;
+}
+
 export function formatPct(value: number): string {
   if (!Number.isFinite(value)) return "0.0%";
   return pct.format(value);
