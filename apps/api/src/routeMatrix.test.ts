@@ -213,8 +213,16 @@ describe("route matrix: read-only routes", () => {
       expect(r.status).toBe(200);
       const list = r.body as unknown as RecommendationList;
       expect(list.recommendations.length).toBeGreaterThan(0);
-      expect(list.recommendations.every((x) => MANAMA.has(x.branchId))).toBe(true);
-      const expected = admin.recommendations.filter((x) => MANAMA.has(x.branchId)).map((x) => x.id);
+      expect(
+        list.recommendations.every(
+          (x) => MANAMA.has(x.branchId) || (x.donorBranchId !== null && MANAMA.has(x.donorBranchId)),
+        ),
+      ).toBe(true);
+      const expected = admin.recommendations
+        .filter(
+          (x) => MANAMA.has(x.branchId) || (x.donorBranchId !== null && MANAMA.has(x.donorBranchId)),
+        )
+        .map((x) => x.id);
       expect(list.recommendations.map((x) => x.id)).toEqual(expected);
     });
 
@@ -222,7 +230,11 @@ describe("route matrix: read-only routes", () => {
       const r = await call("GET", "/api/recommendations", t.staff);
       const list = r.body as unknown as RecommendationList;
       expect(list.recommendations.length).toBeGreaterThan(0);
-      expect(list.recommendations.every((x) => x.branchId === "BR-001")).toBe(true);
+      expect(
+        list.recommendations.every(
+          (x) => x.branchId === "BR-001" || x.donorBranchId === "BR-001",
+        ),
+      ).toBe(true);
     });
 
     it("manager filtering by an out-of-scope branch gets an empty list, never that branch's data", async () => {

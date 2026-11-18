@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_POLICY } from "../engine/config.js";
 import { assessPositions, backtest } from "../engine/index.js";
-import { buildProductDetail, buildRecommendations } from "../report/index.js";
+import { analyze, buildBranchDetail, buildProductDetail, buildRecommendations } from "../report/index.js";
 import { at, round2 } from "../round.js";
 import { InventorySnapshotSchema, SalesDailySchema } from "../schemas/index.js";
 import {
@@ -13,6 +13,7 @@ import {
   EXCESS_BRANCH_IDS,
   FAILED_SKU_START,
   FAST_SKU_COUNT,
+  LOW_RISK_BRANCH_IDS,
   PRODUCT_COUNT,
   PROMO_DAY_END,
   PROMO_DAY_START,
@@ -258,5 +259,49 @@ describe("seed", () => {
       expect(r.productName).toBe("SKU-00001");
       expect(r.reason).toContain("SKU-00001");
     }
+  });
+
+  it("maintains realistic 8-15% network AT_RISK with 3 hotspots, 3 low-risk branches, and deadStockValue <= cashReleasable", () => {
+    const report = analyze(data, DEFAULT_POLICY);
+    const totalPositions = data.products.length * data.branches.length;
+    let totalAtRisk = 0;
+
+    const hotspotSet = new Set<string>(CHRONIC_BRANCH_IDS);
+    const lowRiskSet = new Set<string>(LOW_RISK_BRANCH_IDS);
+    expect(hotspotSet.size).toBe(3);
+    expect(lowRiskSet.size).toBe(3);
+
+    for (let bIdx = 0; bIdx < data.branches.length; bIdx += 1) {
+      const branch = at(data.branches, bIdx, "branch");
+      let branchAtRisk = 0;
+      for (let sIdx = 0; sIdx < data.products.length; sIdx += 1) {
+        const pos = at(at(report.positions, sIdx, "sku"), bIdx, "branch");
+        if (pos.status === "AT_RISK") {
+          branchAtRisk += 1;
+          totalAtRisk += 1;
+        }
+      }
+      const share = branchAtRisk / data.products.length;
+      if (hotspotSet.has(branch.id)) {
+        expect(share).toBeGreaterThanOrEqual(0.2);
+        expect(share).toBeLessThanOrEqual(0.3);
+      } else if (lowRiskSet.has(branch.id)) {
+        expect(share).toBeGreaterThanOrEqual(0.02);
+        expect(share).toBeLessThanOrEqual(0.05);
+      } else {
+        expect(share).toBeGreaterThanOrEqual(0.05);
+        expect(share).toBeLessThanOrEqual(0.15);
+      }
+
+      const detail = buildBranchDetail(data, report.positions, report.recommendations, branch.id);
+      expect(detail).not.toBeNull();
+      expect(detail!.deadStockValue).toBeLessThanOrEqual(detail!.cashReleasable);
+    }
+
+    const netShare = totalAtRisk / totalPositions;
+    expect(netShare).toBeGreaterThanOrEqual(0.08);
+    expect(netShare).toBeLessThanOrEqual(0.15);
+    expect(report.kpis.deadStockValue).toBeLessThanOrEqual(report.kpis.cashReleasable);
+    expect((report.kpis.categoryRisk ?? []).length).toBeGreaterThan(0);
   });
 });

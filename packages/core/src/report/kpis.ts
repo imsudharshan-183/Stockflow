@@ -24,15 +24,35 @@ function buildKpiSummary(data: Dataset, policy: Policy, positions: Position[][])
   let deadStockValue = 0;
   let lostSalesAtRisk = 0;
   let cashReleasable = 0;
+  const categoryRiskMap = new Map<
+    string,
+    { category: string; atRiskCount: number; revenueAtRisk: number }
+  >();
   for (let sku = 0; sku < data.products.length; sku += 1) {
     const product = at(data.products, sku, "product");
     const row = at(positions, sku, "position sku");
     for (const position of row) {
-      if (position.status === "OVERSTOCK" && position.velocity < DEAD_VELOCITY_PER_DAY) {
-        deadStockValue += position.onHand * product.cost;
+      if (position.status === "AT_RISK") {
+        const risk = position.lostUnits * product.price;
+        lostSalesAtRisk += risk;
+        const catRow = categoryRiskMap.get(product.category) ?? {
+          category: product.category,
+          atRiskCount: 0,
+          revenueAtRisk: 0,
+        };
+        catRow.atRiskCount += 1;
+        catRow.revenueAtRisk = round3(catRow.revenueAtRisk + risk);
+        categoryRiskMap.set(product.category, catRow);
       }
-      if (position.status === "AT_RISK") lostSalesAtRisk += position.lostUnits * product.price;
-      if (position.status === "OVERSTOCK") cashReleasable += position.surplus * product.cost;
+      if (position.status === "OVERSTOCK") {
+        const excessValue = position.surplus * product.cost;
+        cashReleasable += excessValue;
+        // DECISION: dead stock is tracked as the near-zero velocity subset of overstock excess
+        // so "includes dead stock" on Overstock cards never exceeds total cashReleasable.
+        if (position.velocity < DEAD_VELOCITY_PER_DAY && position.surplus > 0) {
+          deadStockValue += excessValue;
+        }
+      }
     }
   }
 
@@ -69,6 +89,10 @@ function buildKpiSummary(data: Dataset, policy: Policy, positions: Position[][])
   );
   const window = trend.map((point) => point.stockoutRate).slice(-STOCKOUT_RATE_DAYS);
   const branchRisk = riskByBranch(data, positions);
+  const categoryRisk = [...categoryRiskMap.values()].sort(
+    (left, right) =>
+      right.revenueAtRisk - left.revenueAtRisk || left.category.localeCompare(right.category),
+  );
   const coverGrid = coverByBranchCategory(data, positions, categories);
 
   return KpiSummarySchema.parse({
@@ -83,6 +107,7 @@ function buildKpiSummary(data: Dataset, policy: Policy, positions: Position[][])
     categories,
     policy,
     branchRisk,
+    categoryRisk,
     coverGrid,
   });
 }

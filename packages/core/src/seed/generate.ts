@@ -18,6 +18,7 @@ import {
   isExcessBranch,
   isFailedSku,
   isFastSku,
+  isLowRiskBranch,
   productName,
   skuCode,
 } from "./catalog.js";
@@ -63,14 +64,17 @@ export function generateDataset(seed = SEED): Dataset {
       const branch = branches[branchIndex];
       if (!branch) throw new Error("branch missing");
       const mean = planned[skuIndex]?.[branchIndex] ?? 0;
+      const product = products[skuIndex];
+      if (!product) throw new Error("product missing");
       const path = simulateBranchSku(
         rng,
         dates,
         mean,
+        product.leadTimeDays,
         skuIndex,
         branchIndex,
         branch.id,
-        products[skuIndex]?.sku === PROMO_SKU,
+        product.sku === PROMO_SKU,
       );
       branchSales.push(path.sales);
       branchStock.push(path.onHand);
@@ -143,21 +147,57 @@ function plannedMean(skuIndex: number, branchIndex: number, branchId: string): n
   return mean;
 }
 
-function openingUnits(mean: number, skuIndex: number, branchId: string): number {
-  if (isFailedSku(skuIndex)) return 140;
-  if (isFastSku(skuIndex) && isExcessBranch(branchId)) return Math.max(1, Math.round(mean * 85));
-  if (isFastSku(skuIndex) && isChronicBranch(branchId)) return Math.max(0, Math.round(mean * 3));
-  return Math.max(0, Math.round(mean * 20));
+interface StockProfile {
+  opening: number;
+  target: number | null;
 }
 
-function replenishTarget(mean: number, skuIndex: number, branchId: string): number | null {
-  if (isFailedSku(skuIndex)) return null;
-  if (isFastSku(skuIndex) && isExcessBranch(branchId)) return Math.round(mean * 85);
-  if (isFastSku(skuIndex) && isChronicBranch(branchId)) return Math.round(mean * 3);
-  return Math.round(mean * 20);
+// ASSUMPTION: analytical ROP-aware stocking targets keep network AT_RISK in a realistic 8-15% band,
+// with 3 hotspot branches (20-30%), 3 low-risk branches (2-5%), 4 excess branches, 8 slow/failed SKUs, and 1 promo spike.
+function branchSkuStockProfile(
+  mean: number,
+  leadTimeDays: number,
+  cycle: number,
+  skuIndex: number,
+  branchIndex: number,
+  branchId: string,
+): StockProfile {
+  if (isFailedSku(skuIndex)) {
+    return { opening: 140, target: null };
+  }
+  if (isFastSku(skuIndex) && isExcessBranch(branchId)) {
+    const excessTarget = Math.max(1, Math.round(mean * 85));
+    return { opening: excessTarget, target: excessTarget };
+  }
+
+  const isShort = isChronicBranch(branchId);
+  const isLowRisk = isLowRiskBranch(branchId);
+  const riskRoll = (skuIndex * 31 + branchIndex * 13) % 100;
+  const isShortPosition = isShort
+    ? isFastSku(skuIndex) || riskRoll < 15
+    : isLowRisk
+      ? riskRoll < 3
+      : riskRoll < 10;
+
+  if (isShortPosition) {
+    return {
+      opening: Math.max(1, Math.round(mean * (isShort ? 2.5 : 3.2))),
+      target: Math.max(1, Math.round(mean * (isShort ? 3 : 4))),
+    };
+  }
+
+  // Analytical upper bound on EWMA reorderPoint (velocity * L + z * sigma * sqrt(L))
+  // plus cycle depletion buffer so healthy positions stay above ROP yet below the 60-day overstock threshold.
+  const expectedRop =
+    mean * leadTimeDays + 2.1 * Math.sqrt(Math.max(0.05, mean) * leadTimeDays);
+  const reorderFloor = Math.ceil(expectedRop + mean * 2 + 2);
+  const healthyTarget = Math.min(
+    Math.round(mean * 52),
+    Math.max(reorderFloor + 2, Math.round(reorderFloor + mean * (cycle * 0.9 + 3))),
+  );
+  return { opening: healthyTarget, target: healthyTarget };
 }
 
-// ASSUMPTION: three branches are kept short, four are kept long, eight SKUs barely sell, and one SKU has a five-times spike. Those stories are the regression cases.
 // DECISION: each branch-SKU refills on its own 7–21 day cadence so the network chart is not one shared sawtooth. A single weekday refill was rejected for that reason.
 function replenishmentSchedule(skuIndex: number, branchIndex: number): { cycle: number; phase: number } {
   const cycle = 7 + ((skuIndex * 17 + branchIndex * 3) % 15);
@@ -169,6 +209,7 @@ function simulateBranchSku(
   rng: () => number,
   dates: readonly string[],
   mean: number,
+  leadTimeDays: number,
   skuIndex: number,
   branchIndex: number,
   branchId: string,
@@ -177,13 +218,21 @@ function simulateBranchSku(
   const sales: number[] = [];
   const onHandSeries: number[] = [];
   const demandSeries: number[] = [];
-  let onHand = openingUnits(mean, skuIndex, branchId);
-  const fillRate = isFastSku(skuIndex) && isChronicBranch(branchId) ? 0.5 : 1;
   const schedule = replenishmentSchedule(skuIndex, branchIndex);
+  const profile = branchSkuStockProfile(
+    mean,
+    leadTimeDays,
+    schedule.cycle,
+    skuIndex,
+    branchIndex,
+    branchId,
+  );
+  let onHand = profile.opening;
+  const fillRate = isFastSku(skuIndex) && isChronicBranch(branchId) ? 0.5 : 1;
 
   for (let day = 0; day < dates.length; day++) {
     if (day % schedule.cycle === schedule.phase) {
-      const target = replenishTarget(mean, skuIndex, branchId);
+      const target = profile.target;
       if (target !== null && onHand < target) {
         onHand += Math.round((target - onHand) * fillRate);
       }

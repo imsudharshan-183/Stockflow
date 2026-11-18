@@ -33,10 +33,13 @@ export function buildBranchDetail(
     const product = at(data.products, sku, "product");
     const position = at(at(positions, sku, "position sku"), branchIndex, "position branch");
     inventoryValue += position.onHand * product.cost;
-    if (position.status === "OVERSTOCK" && position.velocity < DEAD_VELOCITY_PER_DAY) {
-      deadStockValue += position.onHand * product.cost;
+    if (position.status === "OVERSTOCK") {
+      const excessValue = position.surplus * product.cost;
+      cashReleasable += excessValue;
+      if (position.velocity < DEAD_VELOCITY_PER_DAY && position.surplus > 0) {
+        deadStockValue += excessValue;
+      }
     }
-    if (position.status === "OVERSTOCK") cashReleasable += position.surplus * product.cost;
     if (position.status === "AT_RISK") lostSalesAtRisk += position.lostUnits * product.price;
   }
 

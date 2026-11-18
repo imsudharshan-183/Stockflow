@@ -243,6 +243,13 @@ export const BranchRiskSchema = z.object({
   revenueAtRisk: z.number(),
 });
 
+export const CategoryRiskSchema = z.object({
+  category: z.string(),
+  atRiskCount: z.number().int().nonnegative(),
+  revenueAtRisk: z.number(),
+});
+export type CategoryRisk = z.infer<typeof CategoryRiskSchema>;
+
 export const CoverCellSchema = z.object({
   branchId: z.string(),
   branchName: z.string(),
@@ -269,6 +276,7 @@ export const KpiSchema = z.object({
   categories: z.array(z.string()),
   policy: PolicySchema,
   branchRisk: z.array(BranchRiskSchema),
+  categoryRisk: z.array(CategoryRiskSchema).optional(),
   coverGrid: z.array(CoverCellSchema),
   operational: KpiOperationalRollupSchema.optional(),
   scope: z.array(z.string()).optional(),

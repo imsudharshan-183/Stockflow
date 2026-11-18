@@ -348,10 +348,12 @@ export function haversineDistanceKm(
   return 2 * earthRadiusKm * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-/** Under-replenished fast movers. */
+/** Under-replenished fast movers (20% to 30% AT_RISK hotspot branches). */
 export const CHRONIC_BRANCH_IDS = ["BR-004", "BR-005", "BR-009"] as const;
 /** Over-allocated fast movers. */
 export const EXCESS_BRANCH_IDS = ["BR-011", "BR-012", "BR-013", "BR-014"] as const;
+/** Well-stocked branches with low stockout exposure (2% to 5% AT_RISK). */
+export const LOW_RISK_BRANCH_IDS = ["BR-003", "BR-010", "BR-015"] as const;
 
 export const PRODUCT_COUNT = 500;
 export const DAY_COUNT = 120;
@@ -422,4 +424,8 @@ export function isChronicBranch(branchId: string): boolean {
 
 export function isExcessBranch(branchId: string): boolean {
   return (EXCESS_BRANCH_IDS as readonly string[]).includes(branchId);
+}
+
+export function isLowRiskBranch(branchId: string): boolean {
+  return (LOW_RISK_BRANCH_IDS as readonly string[]).includes(branchId);
 }
