@@ -100,6 +100,9 @@
   --chart-3: #B45309;
   --chart-4: #0284C7;
   --chart-5: #BE123C;
+  --chart-transfer: #7C3AED;
+  --chart-reorder: #2563EB;
+  --chart-markdown: #D97706;
 
   --radius: 12px;
 }
@@ -183,6 +186,10 @@
   --shadow-primary-hover: 0 2px 4px rgba(37, 99, 235, 0.4), 0 10px 22px -4px rgba(59, 130, 246, 0.55);
   --shadow-pop: 0 12px 40px -8px rgba(0, 0, 0, 0.65);
   --shadow-badge: 0 1px 1px rgba(0, 0, 0, 0.25);
+
+  --chart-transfer: #A78BFA;
+  --chart-reorder: #60A5FA;
+  --chart-markdown: #FBBF24;
 }
 
 body {
@@ -305,6 +312,17 @@ select.custom-select::-ms-expand {
   width: min(16.5rem, 86vw);
   max-width: 16.5rem;
   padding: 0;
+}
+
+/* Semantic chart legend dot utilities */
+.bg-chart-transfer {
+  background-color: var(--chart-transfer);
+}
+.bg-chart-reorder {
+  background-color: var(--chart-reorder);
+}
+.bg-chart-markdown {
+  background-color: var(--chart-markdown);
 }
 
 /* Reduced motion support */

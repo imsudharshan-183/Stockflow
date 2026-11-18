@@ -191,6 +191,40 @@ export class CatalogService {
       this.runtime.analysis.kpis.branchRisk.map((r) => [r.branchId, r]),
     );
 
+    // DECISION: compute network-wide sales at risk first so every branch's sidebar health dot
+    // is judged relative to the network median rather than absolute share bands.
+    const networkBranchRisk = new Map<string, number>();
+    for (const branch of this.runtime.data.branches) {
+      networkBranchRisk.set(branch.id, 0);
+    }
+    for (let bIdx = 0; bIdx < this.runtime.data.branches.length; bIdx += 1) {
+      const branch = this.runtime.data.branches[bIdx]!;
+      let branchLostSales = 0;
+      for (let sIdx = 0; sIdx < this.runtime.data.products.length; sIdx += 1) {
+        const product = this.runtime.data.products[sIdx];
+        if (!product || product.status === "archived") continue;
+        const pos = projectPositionFor(
+          this.runtime.data,
+          this.runtime.analysis,
+          this.runtime.committedDeltas,
+          sIdx,
+          bIdx,
+        );
+        if (pos?.status === "AT_RISK") {
+          branchLostSales += pos.lostUnits * product.price;
+        }
+      }
+      networkBranchRisk.set(branch.id, Math.round(branchLostSales * 100) / 100);
+    }
+    const sortedRisks = [...networkBranchRisk.values()].sort((a, b) => a - b);
+    const mid = Math.floor(sortedRisks.length / 2);
+    const medianRisk =
+      sortedRisks.length === 0
+        ? 0
+        : sortedRisks.length % 2 === 1
+          ? sortedRisks[mid]!
+          : (sortedRisks[mid - 1]! + sortedRisks[mid]!) / 2;
+
     const locations: LocationSummaryItem[] = [];
     for (let bIdx = 0; bIdx < this.runtime.data.branches.length; bIdx += 1) {
       const branch = this.runtime.data.branches[bIdx]!;
@@ -229,9 +263,13 @@ export class CatalogService {
         return rec.branchId === branch.id || rec.donorBranchId === branch.id;
       }).length;
 
-      const share = totalSkus > 0 ? atRiskCount / totalSkus : 0;
+      const roundedRisk = Math.round(lostSalesAtRisk * 100) / 100;
       const health: LocationSummaryItem["health"] =
-        share >= 0.25 ? "red" : share >= 0.1 || atRiskCount > 0 ? "amber" : "green";
+        roundedRisk <= medianRisk
+          ? "green"
+          : roundedRisk <= medianRisk * 1.5
+            ? "amber"
+            : "red";
 
       locations.push({
         branch,
@@ -241,7 +279,7 @@ export class CatalogService {
         totalSkus,
         pendingCount,
         stockoutRate: riskByBranch.get(branch.id)?.stockoutRate ?? 0,
-        lostSalesAtRisk: Math.round(lostSalesAtRisk * 100) / 100,
+        lostSalesAtRisk: roundedRisk,
         cashReleasable: Math.round(cashReleasable * 100) / 100,
       });
     }

@@ -21,11 +21,16 @@ export class KpiService {
     lostSalesAtRisk: number;
     cashReleasable: number;
     revenueAtRiskByBranch: Map<string, number>;
+    categoryRisk: Array<{ category: string; atRiskCount: number; revenueAtRisk: number }>;
   } {
     let deadStockValue = 0;
     let lostSalesAtRisk = 0;
     let cashReleasable = 0;
     const revenueAtRiskByBranch = new Map<string, number>();
+    const categoryRiskMap = new Map<
+      string,
+      { category: string; atRiskCount: number; revenueAtRisk: number }
+    >();
 
     for (let sku = 0; sku < this.runtime.data.products.length; sku += 1) {
       const product = this.runtime.data.products[sku];
@@ -40,21 +45,35 @@ export class KpiService {
           bIdx,
         );
         if (!branch || !position) continue;
-        if (position.status === "OVERSTOCK" && position.velocity < DEAD_VELOCITY_PER_DAY) {
-          deadStockValue += position.onHand * product.cost;
-        }
         if (position.status === "AT_RISK") {
           const risk = position.lostUnits * product.price;
           lostSalesAtRisk += risk;
           revenueAtRiskByBranch.set(branch.id, (revenueAtRiskByBranch.get(branch.id) ?? 0) + risk);
+          const catRow = categoryRiskMap.get(product.category) ?? {
+            category: product.category,
+            atRiskCount: 0,
+            revenueAtRisk: 0,
+          };
+          catRow.atRiskCount += 1;
+          catRow.revenueAtRisk = round3(catRow.revenueAtRisk + risk);
+          categoryRiskMap.set(product.category, catRow);
         }
         if (position.status === "OVERSTOCK") {
-          cashReleasable += position.surplus * product.cost;
+          const excessValue = position.surplus * product.cost;
+          cashReleasable += excessValue;
+          if (position.velocity < DEAD_VELOCITY_PER_DAY && position.surplus > 0) {
+            deadStockValue += excessValue;
+          }
         }
       }
     }
 
-    return { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch };
+    const categoryRisk = [...categoryRiskMap.values()].sort(
+      (left, right) =>
+        right.revenueAtRisk - left.revenueAtRisk || left.category.localeCompare(right.category),
+    );
+
+    return { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch, categoryRisk };
   }
 
   kpis(user?: User, branchId?: string): KpiSummary {
@@ -64,8 +83,13 @@ export class KpiService {
         return this.runtime.analysis.kpis;
       }
       const allBranchIndices = this.runtime.data.branches.map((_, idx) => idx);
-      const { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch } =
-        this.accumulateProjectedKpis(allBranchIndices);
+      const {
+        deadStockValue,
+        lostSalesAtRisk,
+        cashReleasable,
+        revenueAtRiskByBranch,
+        categoryRisk,
+      } = this.accumulateProjectedKpis(allBranchIndices);
 
       return {
         ...this.runtime.analysis.kpis,
@@ -76,6 +100,7 @@ export class KpiService {
           ...row,
           revenueAtRisk: round3(revenueAtRiskByBranch.get(row.branchId) ?? 0),
         })),
+        categoryRisk,
       };
     }
 
@@ -109,8 +134,13 @@ export class KpiService {
       if (branch && userBranches.has(branch.id)) branchIndices.push(bIdx);
     }
 
-    const { deadStockValue, lostSalesAtRisk, cashReleasable, revenueAtRiskByBranch } =
-      this.accumulateProjectedKpis(branchIndices);
+    const {
+      deadStockValue,
+      lostSalesAtRisk,
+      cashReleasable,
+      revenueAtRiskByBranch,
+      categoryRisk,
+    } = this.accumulateProjectedKpis(branchIndices);
 
     const branchRisk = this.runtime.analysis.kpis.branchRisk
       .filter((b) => userBranches.has(b.branchId))
@@ -201,6 +231,7 @@ export class KpiService {
       ...this.runtime.analysis.kpis,
       branches,
       branchRisk,
+      categoryRisk,
       coverGrid,
       trend,
       backtest: scopedBacktest,

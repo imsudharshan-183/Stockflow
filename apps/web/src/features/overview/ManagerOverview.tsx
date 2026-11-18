@@ -8,6 +8,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { ChartCard, weeklyPoints } from "@/features/overview/AdminOverview";
+import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
+import { ProofOfValuePanel } from "@/features/overview/ProofOfValuePanel";
 import {
   formatDate,
   formatMoney,
@@ -20,6 +22,7 @@ import type { KpiSummary, Recommendation } from "@stockflow/core";
 interface ManagerOverviewProps {
   report: KpiSummary;
   recommendations: readonly Recommendation[];
+  selectedLocation?: string | null;
   totalActions: number;
   recommendationsLoading?: boolean;
   recommendationsError?: string | null;
@@ -29,6 +32,7 @@ interface ManagerOverviewProps {
 export function ManagerOverview({
   report,
   recommendations,
+  selectedLocation = null,
   recommendationsLoading = false,
   recommendationsError = null,
   onRetryRecommendations,
@@ -130,6 +134,15 @@ export function ManagerOverview({
         />
       </section>
 
+      {/* Needs Attention Today Strip */}
+      <NeedsAttentionStrip
+        report={report}
+        recommendations={recommendations}
+        isLoading={recommendationsLoading}
+        error={recommendationsError}
+        onRetry={onRetryRecommendations}
+      />
+
       {/* Scoped Pending Staff Stock Alerts */}
       <PendingStockAlertsCard />
 
@@ -137,9 +150,16 @@ export function ManagerOverview({
       <Analytics
         report={report}
         rows={recommendations}
+        selectedLocation={selectedLocation}
         recommendationsLoading={recommendationsLoading}
         recommendationsError={recommendationsError}
         onRetryRecommendations={onRetryRecommendations}
+      />
+
+      {/* Counterfactual Proof of Value Panel */}
+      <ProofOfValuePanel
+        backtest={report.backtest}
+        scopeLabel={selectedLocation ? `${report.branches[0]?.name ?? selectedLocation}` : "Cluster"}
       />
 
       {/* Cluster Trend Charts */}

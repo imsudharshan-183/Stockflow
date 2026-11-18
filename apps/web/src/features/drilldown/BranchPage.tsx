@@ -795,6 +795,7 @@ export function BranchPage({
                     ? `Category: ${trendCat}`
                     : "All categories";
                 showDetail({
+                  targetCard: "locationTrend",
                   title: branchLabel,
                   subtitle: `Daily trend · ${formatDate(point.date)}`,
                   metrics: [

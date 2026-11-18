@@ -53,6 +53,7 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
       <ManagerOverview
         report={report}
         recommendations={recommendations}
+        selectedLocation={selectedLocation}
         totalActions={totalActions}
         recommendationsLoading={recommendationsLoading}
         recommendationsError={recommendationsError}
@@ -65,6 +66,7 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
     <AdminOverview
       report={report}
       recommendations={recommendations}
+      selectedLocation={selectedLocation}
       totalActions={totalActions}
       recommendationsLoading={recommendationsLoading}
       recommendationsError={recommendationsError}

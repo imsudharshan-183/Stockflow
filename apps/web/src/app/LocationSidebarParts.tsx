@@ -4,7 +4,8 @@ import { NavLink } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { formatNumber } from "@/lib/format";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { formatMoney, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { LocationSummaryItem } from "@stockflow/core";
 
@@ -184,7 +185,7 @@ export function LocationSwitcher({
                       <span className="flex min-w-0 items-center gap-2">
                         <span
                           className={cn("size-2 shrink-0 rounded-full", healthDotClass(loc.health))}
-                          title={healthLabel(loc.health)}
+                          title={`${healthLabel(loc.health)} · ${formatNumber(loc.atRiskCount)} SKUs at risk · ${formatMoney(loc.lostSalesAtRisk)} sales at risk`}
                         />
                         <span className="truncate">{loc.branch.name}</span>
                       </span>
@@ -268,30 +269,42 @@ export function SidebarLocationsList({
             {visible.map((loc) => {
               const to = `/branches/${loc.branch.id}`;
               const active = pathname === to;
+              const tooltipText = `${formatNumber(loc.atRiskCount)} SKUs at risk (${formatMoney(loc.lostSalesAtRisk)} sales at risk)`;
               return (
                 <li key={loc.branch.id}>
-                  <NavLink
-                    to={to}
-                    className={cn(
-                      "flex h-8 items-center justify-between gap-2 rounded-lg px-2.5 text-xs transition-colors",
-                      active
-                        ? "bg-primary-soft font-medium text-primary-text"
-                        : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
-                    )}
-                  >
-                    <span className="flex min-w-0 items-center gap-2">
-                      <span
-                        className={cn("size-2 shrink-0 rounded-full", healthDotClass(loc.health))}
-                        aria-label={healthLabel(loc.health)}
-                      />
-                      <span className="truncate">{loc.branch.name}</span>
-                    </span>
-                    {loc.atRiskCount > 0 ? (
-                      <Badge tone={loc.health === "red" ? "risk" : "over"} className="px-1.5 py-0 text-[10px]">
-                        {formatNumber(loc.atRiskCount)}
-                      </Badge>
-                    ) : null}
-                  </NavLink>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <NavLink
+                          to={to}
+                          aria-label={`${loc.branch.name}: ${tooltipText}`}
+                          className={cn(
+                            "flex h-8 items-center justify-between gap-2 rounded-lg px-2.5 text-xs transition-colors",
+                            active
+                              ? "bg-primary-soft font-medium text-primary-text"
+                              : "text-muted-foreground hover:bg-row-hover hover:text-foreground",
+                          )}
+                        >
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span
+                              className={cn("size-2 shrink-0 rounded-full", healthDotClass(loc.health))}
+                              aria-label={`${healthLabel(loc.health)}: ${tooltipText}`}
+                            />
+                            <span className="truncate">{loc.branch.name}</span>
+                          </span>
+                          {loc.atRiskCount > 0 ? (
+                            <Badge tone={loc.health === "red" ? "risk" : "over"} className="px-1.5 py-0 text-[10px]">
+                              {formatNumber(loc.atRiskCount)}
+                            </Badge>
+                          ) : null}
+                        </NavLink>
+                      }
+                    />
+                    <TooltipContent side="right" className="text-xs">
+                      <p className="font-semibold">{loc.branch.name}</p>
+                      <p className="text-muted-foreground">{tooltipText}</p>
+                    </TooltipContent>
+                  </Tooltip>
                 </li>
               );
             })}

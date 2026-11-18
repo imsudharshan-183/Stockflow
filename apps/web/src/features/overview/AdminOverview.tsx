@@ -21,6 +21,8 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
+import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
+import { ProofOfValuePanel } from "@/features/overview/ProofOfValuePanel";
 import {
   formatDate,
   formatMoney,
@@ -114,6 +116,7 @@ export function ChartCard({
               const point = pickChartPoint<WeekPoint>(state, event);
               if (!point) return;
               showDetail({
+                targetCard: title,
                 title,
                 subtitle: `Week of ${point.label}`,
                 metrics: [
@@ -187,6 +190,7 @@ export function ChartCard({
 interface AdminOverviewProps {
   report: KpiSummary;
   recommendations: readonly Recommendation[];
+  selectedLocation?: string | null;
   totalActions: number;
   recommendationsLoading?: boolean;
   recommendationsError?: string | null;
@@ -196,6 +200,7 @@ interface AdminOverviewProps {
 export function AdminOverview({
   report,
   recommendations,
+  selectedLocation = null,
   totalActions,
   recommendationsLoading = false,
   recommendationsError = null,
@@ -299,6 +304,15 @@ export function AdminOverview({
         />
       </section>
 
+      {/* Needs Attention Today Strip */}
+      <NeedsAttentionStrip
+        report={report}
+        recommendations={recommendations}
+        isLoading={recommendationsLoading}
+        error={recommendationsError}
+        onRetry={onRetryRecommendations}
+      />
+
       {/* Pending Staff Stock Alerts across all branches */}
       <PendingStockAlertsCard scope="network" />
 
@@ -306,9 +320,16 @@ export function AdminOverview({
       <Analytics
         report={report}
         rows={recommendations}
+        selectedLocation={selectedLocation}
         recommendationsLoading={recommendationsLoading}
         recommendationsError={recommendationsError}
         onRetryRecommendations={onRetryRecommendations}
+      />
+
+      {/* Counterfactual Proof of Value Panel */}
+      <ProofOfValuePanel
+        backtest={report.backtest}
+        scopeLabel={selectedLocation ? `${report.branches[0]?.name ?? selectedLocation}` : "Network"}
       />
 
       {/* 90-Day Network Trend Charts */}

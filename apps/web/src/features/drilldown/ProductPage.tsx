@@ -15,12 +15,14 @@ import {
   Legend,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { ChartCard } from "@/components/shared/ChartCard";
 import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailPopup";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
@@ -50,6 +52,7 @@ import {
   formatReasonSentence,
   statusLabel,
 } from "@/lib/format";
+import { LABELS } from "@/lib/labels";
 import { TOKENS } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 
@@ -257,6 +260,42 @@ function Logic({
     cover: position.velocity > 0 ? point.onHand / position.velocity : null,
   }));
 
+  const horizonDays = Math.max(21, position.leadTimeDays * 2);
+  const startAvailable = Math.max(0, position.onHand - (position.reserved ?? 0));
+  const inTransit = position.inTransit ?? 0;
+  const velocity = Math.max(0, position.velocity);
+  const rec = position.recommendation;
+  const recArrivalDay = rec
+    ? rec.action === "REORDER"
+      ? position.leadTimeDays
+      : rec.action === "TRANSFER"
+        ? Math.min(2, horizonDays)
+        : 0
+    : null;
+  const recQty = rec && rec.action !== "MARKDOWN" ? rec.quantity : 0;
+  const planVelocity = rec?.action === "MARKDOWN" ? velocity * 1.5 : velocity;
+  const stockoutDay =
+    velocity > 0 && startAvailable <= velocity * horizonDays
+      ? Math.ceil(startAvailable / velocity)
+      : null;
+  const stockoutLabel = stockoutDay !== null ? `D+${stockoutDay}` : null;
+  const leadEndLabel = `D+${position.leadTimeDays}`;
+
+  const projectionRows = Array.from({ length: horizonDays + 1 }, (_, day) => {
+    const baseline = Math.round(Math.max(0, startAvailable - velocity * day) * 10) / 10;
+    const inbound = day >= 1 ? inTransit : 0;
+    const actionInbound = recArrivalDay !== null && day >= recArrivalDay ? recQty : 0;
+    const withPlan =
+      Math.round(Math.max(0, startAvailable + inbound + actionInbound - planVelocity * day) * 10) / 10;
+    return {
+      dayLabel: `D+${day}`,
+      dayOffset: day,
+      baseline,
+      withPlan,
+      reorderPoint: position.reorderPoint,
+    };
+  });
+
   return (
     <div className="grid gap-5 lg:grid-cols-[310px_1fr]">
       <Card className="rounded-2xl border border-border shadow-card">
@@ -352,179 +391,318 @@ function Logic({
       </Card>
 
       <div className="space-y-5">
-        <Card className="rounded-2xl border border-border shadow-card">
-          <CardHeader>
-            <CardTitle>Sales and stock</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <ComposedChart
-                  data={salesRows}
-                  className="cursor-pointer"
-                  onClick={(state, event) => {
-                    const row = pickChartPoint<{ date: string; sales: number; stock: number }>(
-                      state,
-                      event,
-                    );
-                    if (!row) return;
-                    const delta = row.stock - position.reorderPoint;
-                    showDetail({
-                      title: `Sales & stock · ${position.branch.name}`,
-                      subtitle: formatDate(row.date),
-                      metrics: [
-                        { label: "Sales units", value: formatNumber(row.sales) },
-                        { label: "On hand units", value: formatNumber(row.stock) },
-                        { label: "Reorder level", value: formatNumber(position.reorderPoint) },
-                        {
-                          label: "Net vs. reorder level",
-                          value: `${delta >= 0 ? "+" : ""}${formatNumber(delta)} units`,
-                        },
-                      ],
-                    });
+        <ChartCard
+          detailId="stockProjection"
+          title={LABELS.stockProjection.label}
+          subtitle={`Forward ${formatNumber(horizonDays)}-day horizon at ${formatNumber(velocity)}/day velocity · lead time ${formatNumber(position.leadTimeDays)}d shaded`}
+          helpKey="stockProjection"
+          heightClass="h-64"
+          isEmpty={projectionRows.length === 0}
+          tableData={{
+            headers: ["Day", "Projected on-hand (no action)", "With recommended action", "Reorder level"],
+            rows: projectionRows.map((r) => [
+              r.dayLabel,
+              formatNumber(r.baseline),
+              formatNumber(r.withPlan),
+              formatNumber(r.reorderPoint),
+            ]),
+          }}
+        >
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={projectionRows}
+                className="cursor-pointer"
+                onClick={(state, event) => {
+                  const row = pickChartPoint<{
+                    dayLabel: string;
+                    dayOffset: number;
+                    baseline: number;
+                    withPlan: number;
+                    reorderPoint: number;
+                  }>(state, event);
+                  if (!row) return;
+                  showDetail({
+                    targetCard: "stockProjection",
+                    title: `${LABELS.stockProjection.label} · ${row.dayLabel}`,
+                    subtitle: `${position.branch.name} (${horizonDays}-day horizon)`,
+                    metrics: [
+                      { label: "Baseline on-hand", value: `${formatNumber(row.baseline)} units` },
+                      { label: "With plan", value: `${formatNumber(row.withPlan)} units` },
+                      { label: "Reorder level", value: `${formatNumber(row.reorderPoint)} units` },
+                      {
+                        label: "Projected stockout day",
+                        value: stockoutDay !== null ? `Day ${stockoutDay}` : `>${horizonDays}d`,
+                      },
+                    ],
+                  });
+                }}
+              >
+                <CartesianGrid strokeDasharray="3 3" stroke={TOKENS.chart.grid} strokeOpacity={0.6} />
+                <ReferenceArea
+                  x1="D+0"
+                  x2={leadEndLabel}
+                  fill={TOKENS.chart.reorder}
+                  fillOpacity={0.08}
+                />
+                <XAxis
+                  dataKey="dayLabel"
+                  minTickGap={20}
+                  tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                />
+                <YAxis tick={{ fontSize: 11, fill: TOKENS.chart.axis }} width={40} />
+                <Tooltip content={<ProjectionTip />} />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="baseline"
+                  name="Projected on-hand (no action)"
+                  stroke={TOKENS.chart.stockoutRate}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                  strokeWidth={2}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="withPlan"
+                  name="With recommended action"
+                  stroke={TOKENS.chart.healthy}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                  strokeWidth={2}
+                />
+                <ReferenceLine
+                  y={position.reorderPoint}
+                  stroke={TOKENS.chart.markdown}
+                  strokeDasharray="4 4"
+                  label={{
+                    value: "Reorder level",
+                    position: "insideTopRight",
+                    fill: TOKENS.chart.markdown,
+                    fontSize: 11,
                   }}
-                >
-                  <CartesianGrid
-                    strokeDasharray="3 3"
-                    stroke={TOKENS.chart.grid}
-                    strokeOpacity={0.6}
-                  />
-                  <XAxis
-                    dataKey="date"
-                    tickFormatter={formatDate}
-                    minTickGap={28}
-                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
-                  />
-                  <YAxis
-                    yAxisId="sales"
-                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
-                    width={36}
-                  />
-                  <YAxis
-                    yAxisId="stock"
-                    orientation="right"
-                    tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
-                    width={40}
-                  />
-                  <Tooltip content={<UnitTip />} />
-                  <Legend />
-                  <Bar
-                    yAxisId="sales"
-                    dataKey="sales"
-                    name="Sales"
-                    fill={TOKENS.chart.markdown}
-                  />
-                  <Line
-                    yAxisId="stock"
-                    type="monotone"
-                    dataKey="stock"
-                    name="On hand"
-                    stroke={TOKENS.chart.inventoryValue}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                    strokeWidth={2}
-                  />
+                />
+                {stockoutLabel ? (
                   <ReferenceLine
-                    yAxisId="stock"
-                    y={position.reorderPoint}
-                    stroke={TOKENS.chart.reorder}
-                    strokeDasharray="4 4"
-                    label="Reorder"
-                  />
-                </ComposedChart>
-              </ResponsiveContainer>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border border-border shadow-card">
-          <CardHeader>
-            <CardTitle>Days of stock left trajectory</CardTitle>
-          </CardHeader>
-          <CardContent>
-            {position.velocity <= 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No in-stock demand, so cover is not a number of days.
-              </p>
-            ) : (
-              <div className="h-56 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart
-                    data={coverRows}
-                    className="cursor-pointer"
-                    onClick={(state, event) => {
-                      const row = pickChartPoint<{ date: string; cover: number | null }>(
-                        state,
-                        event,
-                      );
-                      if (!row) return;
-                      showDetail({
-                        title: `Cover trajectory · ${position.branch.name}`,
-                        subtitle: formatDate(row.date),
-                        metrics: [
-                          { label: "Days of stock left", value: formatCover(row.cover) },
-                          {
-                            label: "Target floor",
-                            value: `${formatNumber(policy.receiverCoverDays)}d`,
-                          },
-                          {
-                            label: "Donor floor",
-                            value: `${formatNumber(policy.donorCoverDays)}d`,
-                          },
-                          {
-                            label: "Overstock threshold",
-                            value: `${formatNumber(policy.overstockCoverDays)}d`,
-                          },
-                        ],
-                      });
+                    x={stockoutLabel}
+                    stroke={TOKENS.chart.stockoutRate}
+                    strokeDasharray="3 3"
+                    label={{
+                      value: `Stockout ${stockoutLabel}`,
+                      position: "insideTopLeft",
+                      fill: TOKENS.chart.stockoutRate,
+                      fontSize: 10,
                     }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      stroke={TOKENS.chart.grid}
-                      strokeOpacity={0.6}
-                    />
-                    <XAxis
-                      dataKey="date"
-                      tickFormatter={formatDate}
-                      minTickGap={28}
-                      tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
-                    />
-                    <YAxis tick={{ fontSize: 11, fill: TOKENS.chart.axis }} width={36} />
-                    <Tooltip content={<CoverTip />} />
-                    <Line
-                      type="monotone"
-                      dataKey="cover"
-                      name="Days of stock left"
-                      stroke={TOKENS.chart.netBenefit}
-                      dot={false}
-                      activeDot={{ r: 5 }}
-                      strokeWidth={2}
-                    />
-                    <ReferenceLine
-                      y={policy.receiverCoverDays}
-                      stroke={TOKENS.chart.reorder}
-                      strokeDasharray="4 4"
-                      label="14d target"
-                    />
-                    <ReferenceLine
-                      y={policy.donorCoverDays}
-                      stroke={TOKENS.chart.markdown}
-                      strokeDasharray="4 4"
-                      label="30d donor floor"
-                    />
-                    <ReferenceLine
-                      y={policy.overstockCoverDays}
-                      stroke={TOKENS.chart.stockoutRate}
-                      strokeDasharray="4 4"
-                      label="60d overstock"
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  />
+                ) : null}
+                {rec && recArrivalDay !== null ? (
+                  <ReferenceLine
+                    x={`D+${recArrivalDay}`}
+                    stroke={TOKENS.chart.healthy}
+                    strokeDasharray="3 3"
+                    label={{
+                      value:
+                        recQty > 0
+                          ? `${actionLabel(rec.action)} +${formatNumber(recQty)}`
+                          : actionLabel(rec.action),
+                      position: "top",
+                      fill: TOKENS.chart.healthy,
+                      fontSize: 10,
+                    }}
+                  />
+                ) : null}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+
+        <ChartCard
+          detailId="productSales"
+          title="Sales and stock"
+          subtitle={`${position.branch.name} · 120-day sales units vs. on-hand inventory`}
+          helpKey="reorderPoint"
+          heightClass="h-64"
+          isEmpty={salesRows.length === 0}
+          tableData={{
+            headers: ["Date", "Sales units", "On hand"],
+            rows: salesRows.map((r) => [
+              formatDate(r.date),
+              formatNumber(r.sales),
+              formatNumber(r.stock),
+            ]),
+          }}
+        >
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart
+                data={salesRows}
+                className="cursor-pointer"
+                onClick={(state, event) => {
+                  const row = pickChartPoint<{ date: string; sales: number; stock: number }>(
+                    state,
+                    event,
+                  );
+                  if (!row) return;
+                  const delta = row.stock - position.reorderPoint;
+                  showDetail({
+                    targetCard: "productSales",
+                    title: `Sales & stock · ${position.branch.name}`,
+                    subtitle: formatDate(row.date),
+                    metrics: [
+                      { label: "Sales units", value: formatNumber(row.sales) },
+                      { label: "On hand units", value: formatNumber(row.stock) },
+                      { label: "Reorder level", value: formatNumber(position.reorderPoint) },
+                      {
+                        label: "Net vs. reorder level",
+                        value: `${delta >= 0 ? "+" : ""}${formatNumber(delta)} units`,
+                      },
+                    ],
+                  });
+                }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={TOKENS.chart.grid}
+                  strokeOpacity={0.6}
+                />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={formatDate}
+                  minTickGap={28}
+                  tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                />
+                <YAxis
+                  yAxisId="sales"
+                  tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                  width={36}
+                />
+                <YAxis
+                  yAxisId="stock"
+                  orientation="right"
+                  tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                  width={40}
+                />
+                <Tooltip content={<UnitTip />} />
+                <Legend />
+                <Bar
+                  yAxisId="sales"
+                  dataKey="sales"
+                  name="Sales"
+                  fill={TOKENS.chart.markdown}
+                />
+                <Line
+                  yAxisId="stock"
+                  type="monotone"
+                  dataKey="stock"
+                  name="On hand"
+                  stroke={TOKENS.chart.inventoryValue}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                  strokeWidth={2}
+                />
+                <ReferenceLine
+                  yAxisId="stock"
+                  y={position.reorderPoint}
+                  stroke={TOKENS.chart.reorder}
+                  strokeDasharray="4 4"
+                  label="Reorder"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
+
+        <ChartCard
+          detailId="productCover"
+          title="Days of stock left trajectory"
+          subtitle={`${position.branch.name} · Historical cover days vs. policy thresholds`}
+          helpKey="coverDays"
+          heightClass="h-56"
+          isEmpty={position.velocity <= 0}
+          emptyTitle="No in-stock demand"
+          emptyBody="Cover trajectory is omitted when recent in-stock velocity is zero."
+          tableData={{
+            headers: ["Date", "Days of stock left"],
+            rows: coverRows.map((r) => [formatDate(r.date), formatCover(r.cover)]),
+          }}
+        >
+          <div className="h-56 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart
+                data={coverRows}
+                className="cursor-pointer"
+                onClick={(state, event) => {
+                  const row = pickChartPoint<{ date: string; cover: number | null }>(
+                    state,
+                    event,
+                  );
+                  if (!row) return;
+                  showDetail({
+                    targetCard: "productCover",
+                    title: `Cover trajectory · ${position.branch.name}`,
+                    subtitle: formatDate(row.date),
+                    metrics: [
+                      { label: "Days of stock left", value: formatCover(row.cover) },
+                      {
+                        label: "Target floor",
+                        value: `${formatNumber(policy.receiverCoverDays)}d`,
+                      },
+                      {
+                        label: "Donor floor",
+                        value: `${formatNumber(policy.donorCoverDays)}d`,
+                      },
+                      {
+                        label: "Overstock threshold",
+                        value: `${formatNumber(policy.overstockCoverDays)}d`,
+                      },
+                    ],
+                  });
+                }}
+              >
+                <CartesianGrid
+                  strokeDasharray="3 3"
+                  stroke={TOKENS.chart.grid}
+                  strokeOpacity={0.6}
+                />
+                <XAxis
+                  dataKey="date"
+                  tickFormatter={formatDate}
+                  minTickGap={28}
+                  tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
+                />
+                <YAxis tick={{ fontSize: 11, fill: TOKENS.chart.axis }} width={36} />
+                <Tooltip content={<CoverTip />} />
+                <Line
+                  type="monotone"
+                  dataKey="cover"
+                  name="Days of stock left"
+                  stroke={TOKENS.chart.netBenefit}
+                  dot={false}
+                  activeDot={{ r: 5 }}
+                  strokeWidth={2}
+                />
+                <ReferenceLine
+                  y={policy.receiverCoverDays}
+                  stroke={TOKENS.chart.reorder}
+                  strokeDasharray="4 4"
+                  label="14d target"
+                />
+                <ReferenceLine
+                  y={policy.donorCoverDays}
+                  stroke={TOKENS.chart.markdown}
+                  strokeDasharray="4 4"
+                  label="30d donor floor"
+                />
+                <ReferenceLine
+                  y={policy.overstockCoverDays}
+                  stroke={TOKENS.chart.stockoutRate}
+                  strokeDasharray="4 4"
+                  label="60d overstock"
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </ChartCard>
       </div>
     </div>
   );
@@ -570,6 +748,27 @@ function CoverTip({
     <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-card tabular-nums">
       <p className="font-semibold">{formatDate(point.date)}</p>
       <p className="mt-0.5">Cover: {formatCover(point.cover)}</p>
+    </div>
+  );
+}
+
+function ProjectionTip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: ReadonlyArray<{
+    payload?: { dayLabel: string; baseline: number; withPlan: number; reorderPoint: number };
+  }>;
+}) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
+  return (
+    <div className="rounded-xl border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-card tabular-nums">
+      <p className="font-semibold">{point.dayLabel}</p>
+      <p className="mt-0.5">No action: {formatNumber(point.baseline)} units</p>
+      <p>With action: {formatNumber(point.withPlan)} units</p>
+      <p className="text-muted-foreground">Reorder level: {formatNumber(point.reorderPoint)} units</p>
     </div>
   );
 }

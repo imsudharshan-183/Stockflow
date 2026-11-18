@@ -5,6 +5,16 @@ const moneyBhd = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 3,
 });
 
+const wholeMoneyFormat = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
+});
+
+const compactDecimalFormat = new Intl.NumberFormat("en-US", {
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 1,
+});
+
 const pct = new Intl.NumberFormat("en-US", {
   style: "percent",
   minimumFractionDigits: 1,
@@ -36,24 +46,48 @@ const stamp = new Intl.DateTimeFormat("en-US", {
   timeZone: "UTC",
 });
 
-/**
- * Bahraini Dinar (BHD) currency formatter with 3 decimal places (fils) and a BD label
- * (e.g. BD 3.250, BD 1,240.500).
- */
-export function formatMoney(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "BD 0.000";
-  const sign = value < 0 ? "-" : "";
-  return `${sign}BD ${moneyBhd.format(Math.abs(value))}`;
+function formatCompactMagnitude(abs: number): string {
+  const roundedFils = Math.round(abs * 1000) / 1000;
+  if (roundedFils === 0) return "0";
+  if (roundedFils < 1) return moneyBhd.format(roundedFils);
+  const roundedWhole = Math.round(abs);
+  if (roundedWhole < 1_000) return wholeMoneyFormat.format(roundedWhole);
+  const k = Math.round((abs / 1_000) * 10) / 10;
+  if (k < 1_000) return `${compactDecimalFormat.format(k)}K`;
+  const m = Math.round((abs / 1_000_000) * 10) / 10;
+  return `${compactDecimalFormat.format(m)}M`;
+}
+
+function formatFullMagnitude(abs: number): string {
+  const roundedFils = Math.round(abs * 1000) / 1000;
+  if (roundedFils === 0) return "0";
+  if (roundedFils < 1) return moneyBhd.format(roundedFils);
+  return wholeMoneyFormat.format(Math.round(abs));
 }
 
 /**
- * Bahraini Dinar (BHD) currency formatter with 3 decimal places (fils) and a BD label
- * for tables and detail views (e.g. BD 0.950, BD 3.250, BD 1,240.500).
+ * Compact Bahraini Dinar (BHD) currency formatter for KPI cards, summary badges, and axes
+ * (e.g. BD 0.750, BD 420, BD 9.4K, BD 1.2M).
+ */
+export function formatMoney(value: number): string {
+  if (!Number.isFinite(value) || value === 0) return "BD 0";
+  const sign = value < 0 ? "-" : "";
+  const formatted = formatCompactMagnitude(Math.abs(value));
+  return formatted === "0" ? "BD 0" : `${sign}BD ${formatted}`;
+}
+
+export const formatMoneyCompact = formatMoney;
+
+/**
+ * Full-precision Bahraini Dinar (BHD) currency formatter for tables and detail panels:
+ * whole BD with thousands separators, preserving 3 decimals (fils) only below BD 1
+ * (e.g. BD 0.750, BD 186, BD 1,241).
  */
 export function formatMoneyFull(value: number): string {
-  if (!Number.isFinite(value) || value === 0) return "BD 0.000";
+  if (!Number.isFinite(value) || value === 0) return "BD 0";
   const sign = value < 0 ? "-" : "";
-  return `${sign}BD ${moneyBhd.format(Math.abs(value))}`;
+  const formatted = formatFullMagnitude(Math.abs(value));
+  return formatted === "0" ? "BD 0" : `${sign}BD ${formatted}`;
 }
 
 export function formatPct(value: number): string {

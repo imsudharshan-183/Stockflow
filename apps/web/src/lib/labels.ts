@@ -101,10 +101,10 @@ export const LABELS = {
   deadStockValue: {
     key: "deadStockValue",
     label: "Dead stock value",
-    shortHelp: "Cost value of overstocked items with virtually no recent sales.",
+    shortHelp: "Excess capital in overstocked items with virtually no recent sales.",
     longHelp:
-      "Inventory with near-zero velocity that will not clear organically without intervention.",
-    formula: "Sum of (on-hand units × unit cost) where velocity < 0.05/day.",
+      "Subset of overstock surplus above the 30-day donor floor with near-zero daily velocity (< 0.05 units/day) that will not clear organically without intervention.",
+    formula: "Sum of (surplus units × unit cost) where status is Overstock and velocity < 0.05/day.",
     whatToDo:
       "Approve markdowns to clear shelf space and recover cash.",
   },
@@ -124,9 +124,19 @@ export const LABELS = {
     shortHelp: "Branches with the highest Sales at risk and stockout exposure.",
     longHelp:
       "Highlights which stores need buyer attention first.",
-    formula: "Branches ranked by Sales at risk (BD).",
+    formula: "Top 8 branches ranked by Sales at risk (BD).",
     whatToDo:
       "Click any branch bar to open its Location dashboard.",
+  },
+  atRiskByCategory: {
+    key: "atRiskByCategory",
+    label: "At-risk by category",
+    shortHelp: "Categories at this location ranked by projected 7-day Sales at risk.",
+    longHelp:
+      "Shows which product departments at the selected store account for the highest shortage exposure.",
+    formula: "Sum of Sales at risk (BD) grouped by product category for At-risk SKUs.",
+    whatToDo:
+      "Click any category bar to open this branch's inventory table filtered to that category.",
   },
   coverHeatmap: {
     key: "coverHeatmap",
@@ -157,6 +167,16 @@ export const LABELS = {
     formula: "Daily sum of units sold and on-hand units over the selected 7/30/90-day window.",
     whatToDo:
       "Use the range buttons and brush to zoom into recent spikes or stockouts.",
+  },
+  stockProjection: {
+    key: "stockProjection",
+    label: "Stock projection",
+    shortHelp: "Forward inventory trajectory over the supplier lead-time horizon.",
+    longHelp:
+      "Projects current available stock down at daily EWMA velocity versus the planned trajectory after incoming transit and recommended action arrival.",
+    formula: "S_base(t) = max(0, (onHand - reserved) - velocity * t) over max(21, 2 * leadTimeDays).",
+    whatToDo:
+      "Approve reorders or inbound transfers when the baseline curve crosses below the Reorder level before replenishment arrives.",
   },
 } as const satisfies Record<string, LabelEntry>;
 
