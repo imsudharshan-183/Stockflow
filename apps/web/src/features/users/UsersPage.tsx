@@ -488,17 +488,10 @@ function CreateUserForm({
 
   const handleRoleChange = (nextRole: Role) => {
     setRole(nextRole);
-    if (nextRole === "staff" && selectedBranches.length > 1) {
-      setSelectedBranches(selectedBranches.slice(0, 1));
-    }
   };
 
   const toggleBranch = (bId: string) => {
     setLocalError(null);
-    if (role === "staff") {
-      setSelectedBranches(selectedBranches.includes(bId) ? [] : [bId]);
-      return;
-    }
     if (selectedBranches.includes(bId)) {
       setSelectedBranches(selectedBranches.filter((id) => id !== bId));
     } else {
@@ -510,10 +503,6 @@ function CreateUserForm({
     e.preventDefault();
     if (selectedBranches.length === 0) {
       setLocalError("Select at least one branch.");
-      return;
-    }
-    if (role === "staff" && selectedBranches.length !== 1) {
-      setLocalError("Staff accounts must be assigned to exactly 1 branch.");
       return;
     }
     setLocalError(null);
@@ -581,7 +570,7 @@ function CreateUserForm({
             <option key={r} value={r}>
               {r === "manager"
                 ? "Manager (Assigned branches, can approve/reject)"
-                : "Staff (Single branch, read-only)"}
+                : "Staff (Assigned branches, floor view & alerts)"}
             </option>
           ))}
         </select>
@@ -589,8 +578,7 @@ function CreateUserForm({
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">
-          Assigned branches ({selectedBranches.length} selected
-          {role === "staff" ? " · max 1 for staff" : ""})
+          Assigned branches ({selectedBranches.length} selected)
         </label>
         <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
           {branches.map((b) => (
@@ -651,17 +639,10 @@ function EditUserForm({
 
   const handleRoleChange = (nextRole: Role) => {
     setRole(nextRole);
-    if (nextRole === "staff" && selectedBranches.length > 1) {
-      setSelectedBranches(selectedBranches.slice(0, 1));
-    }
   };
 
   const toggleBranch = (bId: string) => {
     setLocalError(null);
-    if (role === "staff") {
-      setSelectedBranches(selectedBranches.includes(bId) ? [] : [bId]);
-      return;
-    }
     if (selectedBranches.includes(bId)) {
       setSelectedBranches(selectedBranches.filter((id) => id !== bId));
     } else {
@@ -673,10 +654,6 @@ function EditUserForm({
     e.preventDefault();
     if (selectedBranches.length === 0) {
       setLocalError("Select at least one branch.");
-      return;
-    }
-    if (role === "staff" && selectedBranches.length !== 1) {
-      setLocalError("Staff accounts must be assigned to exactly 1 branch.");
       return;
     }
     setLocalError(null);
@@ -719,7 +696,7 @@ function EditUserForm({
             <option key={r} value={r}>
               {r === "manager"
                 ? "Manager (Assigned branches, can approve/reject)"
-                : "Staff (Single branch, read-only)"}
+                : "Staff (Assigned branches, floor view & alerts)"}
             </option>
           ))}
         </select>
@@ -727,8 +704,7 @@ function EditUserForm({
 
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-muted-foreground">
-          Assigned branches ({selectedBranches.length} selected
-          {role === "staff" ? " · max 1 for staff" : ""})
+          Assigned branches ({selectedBranches.length} selected)
         </label>
         <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
           {branches.map((b) => (

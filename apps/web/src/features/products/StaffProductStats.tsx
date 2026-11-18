@@ -34,6 +34,7 @@ import {
 } from "@/components/ui/table";
 import { useAuth } from "@/features/auth/AuthContext";
 import { queryKeys } from "@/hooks/queryKeys";
+import { resolveStaffActiveBranch, useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
 import { formatCover, formatDateTime, formatNumber } from "@/lib/format";
 import {
@@ -74,7 +75,19 @@ export function StaffProductStats() {
   const [flagNote, setFlagNote] = useState("");
   const limit = 25;
 
-  const staffBranchId = user?.branchIds?.[0] ?? "Store";
+  const assignedBranchIds = useMemo(
+    () => (user?.branchIds && user.branchIds.length > 0 ? user.branchIds : ["Store"]),
+    [user?.branchIds],
+  );
+  const { selectedLocation, setSelectedLocation } = useLocationScope();
+  const staffBranchId = resolveStaffActiveBranch(assignedBranchIds, selectedLocation) ?? "Store";
+
+  const handleBranchSwitch = (nextBranchId: string) => {
+    if (nextBranchId === staffBranchId) return;
+    setSelectedLocation(nextBranchId);
+    setPage(1);
+    setFlagTarget(null);
+  };
 
   const queryParams: ProductListQuery = useMemo(
     () => ({
@@ -167,6 +180,33 @@ export function StaffProductStats() {
         title={headerTitle}
         subtitle={headerSubtitle}
         breadcrumbs={[{ label: "Store" }, { label: "Store inventory" }]}
+        actions={
+          assignedBranchIds.length > 1 ? (
+            <div
+              role="tablist"
+              aria-label="Assigned branches"
+              className="flex flex-wrap items-center gap-1.5"
+            >
+              {assignedBranchIds.map((bId) => {
+                const branch = BAHRAIN_BRANCHES.find((b) => b.id === bId);
+                const isActive = bId === staffBranchId;
+                return (
+                  <Button
+                    key={bId}
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    size="sm"
+                    variant={isActive ? "primary" : "secondary"}
+                    onClick={() => handleBranchSwitch(bId)}
+                  >
+                    {branch ? `${branch.name} (${bId})` : bId}
+                  </Button>
+                );
+              })}
+            </div>
+          ) : undefined
+        }
       />
 
       {branchSummary ? (
