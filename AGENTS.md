@@ -6,9 +6,9 @@ StockFlow is a morning decision and action queue system for a 15-branch Bahrain 
 ## Architecture Map
 - `packages/core`: Pure TypeScript domain logic and Zod schemas (no I/O or DB drivers).
   - `src/engine/`: EWMA demand forecasting, safety stock, classification, greedy matching, Haversine transfer freight & net benefit, backtest.
-  - `src/report/`: DTOs, KPI rollups, branch & product detail views, plain-language reason formatting.
+  - `src/report/`: DTOs, KPI rollups (including `categoryRisk` and dead-stock surplus subset `deadStockValue <= cashReleasable`), branch & product detail views, plain-language reason formatting.
   - `src/schemas/`: Zod contracts and pure RBAC helpers (`can`, `scopeBranches`, `canManageRole`, `isBranchInScope`).
-  - `src/seed/`: Single-source-of-truth Bahrain geography (`BAHRAIN_BRANCHES`), category-tiered 3-decimal BHD catalog, and deterministic 120-day sales history.
+  - `src/seed/`: Single-source-of-truth Bahrain geography (`BAHRAIN_BRANCHES`), category-tiered 3-decimal BHD catalog, and deterministic 120-day sales history with analytical ROP-calibrated stocking (`~12.29%` network `AT_RISK` instead of `~42%`: 3 hotspot branches `BR-004`/`BR-005`/`BR-009` in `20–30%`, 3 low-risk branches `BR-003`/`BR-010`/`BR-015` in `2–5%`, and 9 standard/excess branches in `~9–12%`).
 - `apps/api`: Fastify API server (MongoDB or in-memory repository).
   - `src/config/`: Env validation (`env.ts`) and secret redaction (`redact.ts`).
   - `src/db.ts`: Shared MongoDB connection (`stockflow` DB), `sales_entries` upsert, and `recomputeForSku` hook.
@@ -17,10 +17,11 @@ StockFlow is a morning decision and action queue system for a 15-branch Bahrain 
   - `src/plugins/`: Fastify app setup, auth guards, error handling.
   - `src/routes/`: HTTP endpoints under `/api/*` (`auth`, `stock`, `stockAlerts`, `catalog`, `locations`, `salesEntries`, `users`).
 - `apps/web`: React 19 + Vite + Tailwind CSS + Base UI frontend.
-  - `src/app/`: `Shell.tsx` (sidebar, top bar, theme/user menus) and `App.tsx` (routes).
+  - `src/app/`: `Shell.tsx`, `LocationSidebarParts.tsx` (network-relative location health dots — green `<= median`, amber `<= 1.5x`, red `> 1.5x` sales at risk — with at-risk SKU count tooltips), and `App.tsx` (routes).
   - `src/components/ui/`: Shared primitives (`Button`, `Badge`, `Table`, `Card`, `Dialog`, `Sheet`, `Input`, `Tabs`, `Tooltip`, etc.).
-  - `src/lib/`: `tokens.ts`, `format.ts`, `api.ts`, `utils.ts`.
-  - `src/features/`: `overview` (`AdminOverview`, `ManagerOverview`), `queue`, `drilldown` (`BranchPage`, `ProductPage`), `products` (`ProductsPage`, `StaffProductStats`), `data`, `audit`, `users`, `auth`.
+  - `src/components/shared/`: `ChartCard.tsx` and `ChartDetailPopup.tsx` (`targetCard`-scoped inline `ChartDetailStrip` inside the clicked chart card instead of a fixed viewport popover).
+  - `src/lib/`: `tokens.ts` (semantic action colors: violet Transfer, blue Reorder, amber Markdown), `format.ts` (`formatMoney` compact `BD 9.4K` for KPI cards/axes; `formatMoneyFull` whole `BD` with separators and 3 decimals only `< BD 1` for tables/details), `labels.ts`, `api.ts`, `utils.ts`.
+  - `src/features/`: `overview` (`AdminOverview`, `ManagerOverview`, `Analytics`, `riskChart.ts` scope-aware top-8 locations vs. `At-risk by category`, `NeedsAttentionStrip.tsx`, `ProofOfValuePanel.tsx`), `queue`, `drilldown` (`BranchPage`, `ProductPage` with lead-time horizon forward stock projection chart), `products` (`ProductsPage`, `StaffProductStats`), `data`, `audit`, `users`, `auth`.
 
 ## Non-Negotiable Invariants
 1. **Engine purity**: Never modify `packages/core/src/engine` without explicit mathematical justification.
