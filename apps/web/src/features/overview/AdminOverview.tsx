@@ -1,4 +1,4 @@
-import { ArrowRight, Boxes, CircleDollarSign, TrendingUp, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -207,7 +207,6 @@ export function AdminOverview({
 }: AdminOverviewProps) {
   const weeks = weeklyPoints(report.trend);
   const projected = recommendations.reduce((sum, row) => sum + row.netBenefit, 0);
-  const pendingCount = recommendations.filter((row) => row.status === "PENDING").length;
 
   return (
     <div className="space-y-6">
@@ -248,8 +247,8 @@ export function AdminOverview({
         </div>
       </section>
 
-      {/* 4 Distinct Network KPI Cards */}
-      <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 3 Distinct Network KPI Cards */}
+      <section className="grid gap-5 sm:grid-cols-3">
         <KpiCard
           label="Stockout rate"
           value={formatPct(report.stockoutRate)}
@@ -279,15 +278,6 @@ export function AdminOverview({
           tone="info"
           footerLabel="Positions below reorder level"
         />
-        <KpiCard
-          label="Estimated gain"
-          value={formatMoney(projected)}
-          note={`Across ${formatNumber(pendingCount)} pending / ${formatNumber(totalActions)} total actions`}
-          formula="Sum of estimated gain across today's ranked transfers, reorders, and markdowns."
-          icon={TrendingUp}
-          tone="gain"
-          footerLabel="Net of freight, purchase, and markdown costs"
-        />
       </section>
 
       {/* Needs Attention Today Strip */}
@@ -299,8 +289,11 @@ export function AdminOverview({
         onRetry={onRetryRecommendations}
       />
 
-      {/* Pending Staff Stock Alerts across all branches */}
-      <PendingStockAlertsCard scope="network" />
+      {/* Pending Staff Stock Alerts (scoped to selectedLocation when chosen) */}
+      <PendingStockAlertsCard
+        scope={selectedLocation ? "branch" : "network"}
+        branchId={selectedLocation}
+      />
 
       {/* Full Network Heatmap & Analytics */}
       <Analytics

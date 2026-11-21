@@ -48,6 +48,8 @@ export function ManagerOverview({
       .filter((row) => row.status === "PENDING")
       .reduce((sum, row) => sum + row.netBenefit, 0);
   const atRiskCount = report.operational?.atRiskBranchCount ?? 0;
+  const managerBranchId =
+    selectedLocation ?? (report.branches.length === 1 ? (report.branches[0]?.id ?? null) : null);
 
   return (
     <div className="space-y-6">
@@ -144,7 +146,7 @@ export function ManagerOverview({
       />
 
       {/* Scoped Pending Staff Stock Alerts */}
-      <PendingStockAlertsCard />
+      <PendingStockAlertsCard branchId={managerBranchId} />
 
       {/* Scoped Cover Grid Heatmap & Analytics (strictly manager's branches) */}
       <Analytics

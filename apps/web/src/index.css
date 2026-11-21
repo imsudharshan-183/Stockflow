@@ -325,6 +325,25 @@ select.custom-select::-ms-expand {
   background-color: var(--chart-markdown);
 }
 
+/* Container queries for compact card responsive layouts */
+.\@container {
+  container-type: inline-size;
+}
+@container (min-width: 28rem) {
+  .\@\[28rem\]\:flex-row {
+    flex-direction: row;
+  }
+  .\@\[28rem\]\:items-center {
+    align-items: center;
+  }
+  .\@\[28rem\]\:h-52 {
+    height: 13rem;
+  }
+  .\@\[28rem\]\:w-56 {
+    width: 14rem;
+  }
+}
+
 /* Reduced motion support */
 @media (prefers-reduced-motion: reduce) {
   *,

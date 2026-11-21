@@ -19,5 +19,6 @@ export const queryKeys = {
   locationTrend: (id: string, query?: Partial<LocationTrendQuery>) =>
     ["locationTrend", id, query ?? {}] as const,
   salesEntries: (query?: Record<string, unknown>) => ["salesEntries", query ?? {}] as const,
-  stockAlerts: ["stockAlerts"] as const,
+  stockAlerts: (branchId?: string) =>
+    branchId ? (["stockAlerts", branchId] as const) : (["stockAlerts"] as const),
 };
