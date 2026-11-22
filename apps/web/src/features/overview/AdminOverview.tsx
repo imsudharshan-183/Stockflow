@@ -21,7 +21,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
-import { ProofOfValuePanel } from "@/features/overview/ProofOfValuePanel";
 import {
   formatDate,
   formatMoney,
@@ -303,12 +302,6 @@ export function AdminOverview({
         recommendationsLoading={recommendationsLoading}
         recommendationsError={recommendationsError}
         onRetryRecommendations={onRetryRecommendations}
-      />
-
-      {/* Counterfactual Proof of Value Panel */}
-      <ProofOfValuePanel
-        backtest={report.backtest}
-        scopeLabel={selectedLocation ? `${report.branches[0]?.name ?? selectedLocation}` : "Network"}
       />
 
       {/* 90-Day Network Trend Charts */}
