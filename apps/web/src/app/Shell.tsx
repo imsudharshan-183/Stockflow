@@ -327,11 +327,11 @@ export function Shell() {
         ) : null}
       </nav>
 
-      {/* Sidebar Footer: Help + Theme */}
+      {/* Sidebar Footer: Help */}
       <div
         className={cn(
           "border-t border-border p-2.5 flex items-center",
-          isRailCollapsed ? "flex-col gap-2" : "justify-between gap-2",
+          isRailCollapsed ? "justify-center" : "justify-start",
         )}
       >
         <Button
@@ -348,7 +348,6 @@ export function Shell() {
           <HelpCircle className="size-4 shrink-0" aria-hidden="true" />
           {!isRailCollapsed ? <span>Glossary</span> : null}
         </Button>
-        <ModeToggle />
       </div>
     </>
   );

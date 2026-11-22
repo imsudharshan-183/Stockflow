@@ -32,7 +32,7 @@ export function GlossaryDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] max-w-2xl overflow-hidden flex flex-col">
+      <DialogContent className="flex max-h-[85vh] w-full flex-col gap-3 overflow-hidden sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <BookOpen className="size-4 text-primary" aria-hidden="true" />
@@ -42,7 +42,7 @@ export function GlossaryDialog({
             Plain-language definitions, formulas, and recommended buyer actions for every metric.
           </DialogDescription>
         </DialogHeader>
-        <div className="relative mt-2">
+        <div className="relative">
           <Search
             className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
             aria-hidden="true"
@@ -55,7 +55,7 @@ export function GlossaryDialog({
             aria-label="Search glossary"
           />
         </div>
-        <div className="mt-3 flex-1 space-y-3 overflow-y-auto pr-1">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pr-1">
           {filtered.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               No matching terms found.
@@ -64,24 +64,28 @@ export function GlossaryDialog({
             filtered.map((item) => (
               <div
                 key={item.key}
-                className="rounded-xl border border-border bg-surface/50 p-3.5"
+                className="rounded-xl border border-border bg-card p-4"
               >
                 <div className="text-sm font-semibold text-foreground">{item.label}</div>
                 <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                   {item.longHelp}
                 </p>
-                <div className="mt-2 grid gap-2 sm:grid-cols-2">
-                  <div className="rounded-lg bg-muted/60 px-2.5 py-1.5">
+                <div className="mt-2.5 grid grid-cols-1 items-stretch gap-2.5 sm:grid-cols-2">
+                  <div className="flex h-full min-w-0 flex-col rounded-lg border border-border bg-secondary px-3 py-2">
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       Formula
                     </div>
-                    <div className="mt-0.5 text-[11px] text-foreground">{item.formula}</div>
+                    <div className="mt-1 break-words text-xs leading-relaxed text-foreground">
+                      {item.formula}
+                    </div>
                   </div>
-                  <div className="rounded-lg bg-muted/60 px-2.5 py-1.5">
+                  <div className="flex h-full min-w-0 flex-col rounded-lg border border-border bg-secondary px-3 py-2">
                     <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                       What to do
                     </div>
-                    <div className="mt-0.5 text-[11px] text-foreground">{item.whatToDo}</div>
+                    <div className="mt-1 break-words text-xs leading-relaxed text-foreground">
+                      {item.whatToDo}
+                    </div>
                   </div>
                 </div>
               </div>

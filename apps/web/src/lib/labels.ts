@@ -108,6 +108,16 @@ export const LABELS = {
     whatToDo:
       "Approve markdowns to clear shelf space and recover cash.",
   },
+  markdown: {
+    key: "markdown",
+    label: "Markdown",
+    shortHelp: "Planned retail price reduction to clear excess or slow-moving stock.",
+    longHelp:
+      "A targeted price cut used to clear overstock and recover working capital at the same branch when transferring surplus to another store isn't needed or cost-effective.",
+    formula: "Holding cost saved + cash recovered from discounted sales − price discount cost.",
+    whatToDo:
+      "Approve recommended markdowns in the Action queue to free shelf space and cash on slow-moving surplus.",
+  },
   actionMix: {
     key: "actionMix",
     label: "Action mix",

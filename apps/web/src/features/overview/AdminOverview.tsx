@@ -1,4 +1,4 @@
-import { ArrowRight, Boxes, CircleDollarSign, TrendingUp, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -18,7 +18,6 @@ import { PageHeader } from "@/components/shared/PageHeader";
 import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
@@ -207,13 +206,7 @@ export function AdminOverview({
   onRetryRecommendations,
 }: AdminOverviewProps) {
   const weeks = weeklyPoints(report.trend);
-  const avoided = report.backtest.stockoutDaysAvoided;
-  const avoidedText =
-    avoided >= 0
-      ? `${formatNumber(avoided)} fewer stockout days`
-      : `${formatNumber(Math.abs(avoided))} more stockout days`;
   const projected = recommendations.reduce((sum, row) => sum + row.netBenefit, 0);
-  const pendingCount = recommendations.filter((row) => row.status === "PENDING").length;
 
   return (
     <div className="space-y-6">
@@ -236,14 +229,6 @@ export function AdminOverview({
               ? `${formatNumber(totalActions)} ranked actions worth ${formatMoney(projected)} in estimated gain`
               : "Evaluating today's network recommendations..."}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            With StockFlow:{" "}
-            <span className="font-medium text-foreground">{avoidedText}</span> and{" "}
-            <span className="font-medium text-foreground">
-              {formatMoney(report.backtest.cashReleased)}
-            </span>{" "}
-            capital released over the last {report.backtest.windowDays} days.
-          </p>
         </div>
 
         <div className="shrink-0">
@@ -262,8 +247,8 @@ export function AdminOverview({
         </div>
       </section>
 
-      {/* 4 Distinct Network KPI Cards */}
-      <section className="grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 3 Distinct Network KPI Cards */}
+      <section className="grid gap-5 sm:grid-cols-3">
         <KpiCard
           label="Stockout rate"
           value={formatPct(report.stockoutRate)}
@@ -293,15 +278,6 @@ export function AdminOverview({
           tone="info"
           footerLabel="Positions below reorder level"
         />
-        <KpiCard
-          label="Estimated gain"
-          value={formatMoney(projected)}
-          note={`Across ${formatNumber(pendingCount)} pending / ${formatNumber(totalActions)} total actions`}
-          formula="Sum of estimated gain across today's ranked transfers, reorders, and markdowns."
-          icon={TrendingUp}
-          tone="gain"
-          footerLabel="Net of freight, purchase, and markdown costs"
-        />
       </section>
 
       {/* Needs Attention Today Strip */}
@@ -313,8 +289,11 @@ export function AdminOverview({
         onRetry={onRetryRecommendations}
       />
 
-      {/* Pending Staff Stock Alerts across all branches */}
-      <PendingStockAlertsCard scope="network" />
+      {/* Pending Staff Stock Alerts (scoped to selectedLocation when chosen) */}
+      <PendingStockAlertsCard
+        scope={selectedLocation ? "branch" : "network"}
+        branchId={selectedLocation}
+      />
 
       {/* Full Network Heatmap & Analytics */}
       <Analytics
@@ -349,27 +328,6 @@ export function AdminOverview({
           kind="money"
         />
       </section>
-
-      {/* Action Queue Callout Card */}
-      <Card className="rounded-2xl border border-border bg-card shadow-card">
-        <CardContent className="flex flex-col items-start justify-between gap-4 py-2 sm:flex-row sm:items-center">
-          <div>
-            <h2 className="text-base font-semibold text-foreground">
-              Ready to act on today's recommendations?
-            </h2>
-            <p className="mt-0.5 text-sm text-muted-foreground">
-              {`${formatNumber(pendingCount)} pending actions (${formatMoney(projected)} total estimated gain) are ready for review, batch approval, or drilldown in the Action Queue.`}
-            </p>
-          </div>
-          <Link
-            to="/queue"
-            className={cn(buttonVariants({ variant: "secondary", size: "default" }), "shrink-0")}
-          >
-            View full queue
-            <ArrowRight className="size-4" aria-hidden="true" />
-          </Link>
-        </CardContent>
-      </Card>
     </div>
   );
 }

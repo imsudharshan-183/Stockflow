@@ -142,8 +142,9 @@ export function Analytics({
           ]),
         }}
       >
-        <div className="flex flex-col items-center gap-4 sm:flex-row sm:items-center">
-          <div className="relative h-52 w-56 shrink-0">
+        <div className="@container w-full">
+        <div className="flex w-full flex-col items-center gap-4 @[28rem]:flex-row @[28rem]:items-center">
+          <div className="relative h-44 w-44 shrink-0 @[28rem]:h-52 @[28rem]:w-56">
             <ResponsiveContainer width="100%" height="100%">
               <PieChart margin={{ top: 18, right: 28, bottom: 18, left: 28 }}>
                 <Pie
@@ -293,6 +294,7 @@ export function Analytics({
               );
             })}
           </ul>
+        </div>
         </div>
       </ChartCard>
 

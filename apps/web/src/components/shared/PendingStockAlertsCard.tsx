@@ -21,14 +21,19 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 
 interface PendingStockAlertsCardProps {
   scope?: "branch" | "network";
+  branchId?: string | null;
 }
 
-export function PendingStockAlertsCard({ scope = "branch" }: PendingStockAlertsCardProps) {
+export function PendingStockAlertsCard({
+  scope = "branch",
+  branchId = null,
+}: PendingStockAlertsCardProps) {
   const queryClient = useQueryClient();
+  const branchParam = branchId || undefined;
 
   const alertsQuery = useQuery({
-    queryKey: queryKeys.stockAlerts,
-    queryFn: () => api.listStockAlerts(),
+    queryKey: queryKeys.stockAlerts(branchParam),
+    queryFn: () => api.listStockAlerts(branchParam),
   });
 
   const decideAlertMutation = useMutation({
@@ -38,7 +43,7 @@ export function PendingStockAlertsCard({ scope = "branch" }: PendingStockAlertsC
       toast.success(
         `Stock alert for ${updated.sku} ${updated.status === "APPROVED" ? "approved" : "rejected"}`,
       );
-      await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts() });
     },
     onError: (err: Error) => toast.error(err.message),
   });

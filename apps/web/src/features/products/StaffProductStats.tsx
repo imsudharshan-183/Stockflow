@@ -105,9 +105,10 @@ export function StaffProductStats() {
     queryFn: () => api.listCatalogProducts(queryParams),
   });
 
+  const staffBranchParam = staffBranchId !== "Store" ? staffBranchId : undefined;
   const alertsQuery = useQuery({
-    queryKey: queryKeys.stockAlerts,
-    queryFn: () => api.listStockAlerts(),
+    queryKey: queryKeys.stockAlerts(staffBranchParam),
+    queryFn: () => api.listStockAlerts(staffBranchParam),
     enabled: Boolean(user),
   });
 
@@ -118,7 +119,7 @@ export function StaffProductStats() {
       setFlagTarget(null);
       setFlagCategory("CRITICAL_LOW");
       setFlagNote("");
-      await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts });
+      await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts() });
     },
     onError: (err: Error) => toast.error(err.message),
   });

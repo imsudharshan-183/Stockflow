@@ -330,8 +330,8 @@ export const api = {
   },
 
   // Stock alerts
-  listStockAlerts: (): Promise<StockAlertList> =>
-    request("/api/stock-alerts", StockAlertListSchema),
+  listStockAlerts: (branchId?: string): Promise<StockAlertList> =>
+    request(withQuery("/api/stock-alerts", branchId ? { branchId } : {}), StockAlertListSchema),
   createStockAlert: (payload: CreateStockAlert): Promise<StockAlert> =>
     request("/api/stock-alerts", StockAlertSchema, {
       method: "POST",
