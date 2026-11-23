@@ -89,23 +89,25 @@ packages/core/src
 apps/api/src
   config/           Env loading, validation and secret redaction
   plugins/          Fastify app, auth guards, error handler
-  routes/           auth, stock, stockAlerts, catalog, locations, salesEntries, users, health
-  services/         StockService (cached morning plan, committedDeltas projection, decisions), AuthService
+  routes/           auth, branches, catalog, locations, salesEntries, stock, stockAlerts, users
+  services/         KpiService, CatalogService, StockAlertService, DecisionService, AuthService
   repositories/     Memory, MongoDB and the repository interface
+  scripts/          seed-mongo, seed-users, resetDecisions, benchCold
+  __tests__/, test/ Dual-repository API Vitest suites, test helpers, and golden __fixtures__
 apps/web/src
   app/              Shell and role-guarded routes
   components/ui     Shared primitives (Button, Badge, Table, Dialog, Card, ...)
-  components/shared Empty/error/loading states, charts, glossaries
-  features/         overview, queue, drilldown, products, data, audit, users, auth
+  components/shared Empty/error/loading states, theme toggle, charts, glossaries
+  features/         overview, queue, branches, products, data, audit, users, auth
   hooks/, lib/      Query keys, API client, design tokens, formatters
-docs/               DECISIONS, API, FRONTEND, TESTING, DEMO, NAMING
+docs/               ADR, DECISIONS, API, FRONTEND, TESTING, DEMO, NAMING, PROPOSAL
 scripts/            check-ui.mjs, smoke.mjs
 ```
 
 ## Data flow
 
 1. The repository loads the seeded dataset from MongoDB (or builds it deterministically in memory when `MONGODB_URI` is unset).
-2. `StockService` computes the morning plan lazily on the first request for the current `dataVersion` and persists it (gzipped) in `plan_cache`. Other instances and cold starts read the stored plan instead of recomputing. Actions at or below BD 9.500 net benefit and sub-minimum transfers are suppressed by the service queue.
+2. The stock services (`KpiService`, `CatalogService`, `DecisionService`, and `StockAlertService` sharing `StockRuntimeState`) compute the morning plan lazily on the first request for the current `dataVersion` and persist it (gzipped) in `plan_cache`. Other instances and cold starts read the stored plan instead of recomputing. Actions at or below BD 9.500 net benefit and sub-minimum transfers are suppressed by the service queue.
 3. Read endpoints (`/api/kpis`, `/api/recommendations`, `/api/locations/:id/*`, `/api/branches/:id`, `/api/products/:sku`, `/api/catalog/products`) apply role and branch scoping after the plan is built and project live `committedDeltas` (reserved donor stock, in-transit receiver stock).
 4. Approve, reject and batch-decide write immutable `actions` and `audit` rows without bumping `dataVersion`. They overlay `committedDeltas` and reject donor over-allocation with `409 Conflict`.
 5. Store `staff` can flag `AT_RISK` items via `POST /api/stock-alerts`; scoped `manager` and `admin` users approve or reject them once. Sales entries, imports and catalog changes bump `dataVersion` and refresh the plan.

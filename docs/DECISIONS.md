@@ -1,6 +1,6 @@
 # Decisions
 
-The algorithm notes, modeling assumptions, and operational security summary live here. For the numbered Architecture Decision Records (`ADR-001`+), see [DECISIONS.md](../DECISIONS.md); for setup and the folder map, see [README.md](../README.md).
+The algorithm notes, modeling assumptions, and operational security summary live here. For the numbered Architecture Decision Records (`ADR-001`+), see [docs/ADR.md](ADR.md); for setup and the folder map, see [README.md](../README.md).
 
 ## Problem framing
 

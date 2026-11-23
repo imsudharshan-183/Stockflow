@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Shell } from "@/app/Shell";
 import { ChartDetailProvider } from "@/components/shared/ChartDetailPopup";
 import { EmptyBlock, LoadingBlock } from "@/components/shared/states";
-import { ThemeProvider } from "@/components/theme-provider";
+import { ThemeProvider } from "@/components/shared/ThemeProvider";
 import { AuthProvider, useAuth } from "@/features/auth/AuthContext";
 import type { Role } from "@stockflow/core";
 
@@ -29,7 +29,7 @@ const DataEntryPage = lazy(() =>
   import("@/features/data/DataEntryPage").then((m) => ({ default: m.DataEntryPage })),
 );
 const BranchPage = lazy(() =>
-  import("@/features/drilldown/BranchPage").then((m) => ({ default: m.BranchPage })),
+  import("@/features/branches/BranchPage").then((m) => ({ default: m.BranchPage })),
 );
 const BranchesManagePage = lazy(() =>
   import("@/features/branches/BranchesManagePage").then((m) => ({
@@ -37,7 +37,7 @@ const BranchesManagePage = lazy(() =>
   })),
 );
 const ProductPage = lazy(() =>
-  import("@/features/drilldown/ProductPage").then((m) => ({ default: m.ProductPage })),
+  import("@/features/products/ProductPage").then((m) => ({ default: m.ProductPage })),
 );
 
 function RequireAuth({ children }: { children: ReactNode }) {

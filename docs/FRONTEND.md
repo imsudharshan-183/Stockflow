@@ -3,7 +3,7 @@
 ## Design System & Guardrails
 - **Color & Surface Layering (`src/index.css`, `src/lib/tokens.ts`)**:
   - Calm Blue primary brand (`#2563EB` light / `#3B82F6` dark), layered slate surfaces (`--bg`, `--surface`, `--table-header`, `--row-hover`, `--row-selected`), and semantic tokens (`gain`, `risk`, `warn`, `info`, `indigo`, `neutral`).
-  - Full Light / Dark / System support via `ThemeProvider` (`components/theme-provider.tsx`) and `ModeToggle` (`components/mode-toggle.tsx`), persisted under `stockflow-theme`.
+  - Full Light / Dark / System support via `ThemeProvider` (`components/shared/ThemeProvider.tsx`) and `ModeToggle` (`components/shared/ModeToggle.tsx`), persisted under `stockflow-theme`.
 - **Shared Primitives (`src/components/ui/`)**:
   - `Button` (`button.tsx`): Only button implementation allowed across the app. Variants: `default`/`primary`, `secondary`/`outline`, `soft-success`, `soft-danger`, `destructive`, `ghost`, `link`. Supports `loading` spinner and `tooltip` props.
   - `Badge` (`badge.tsx`): Rounded pill badges (`rounded-full`, `1px` inset ring, optional `dot`) for actions (`transfer`, `reorder`, `markdown`), statuses (`pending`, `approved`, `rejected`), roles (`admin`, `manager`, `staff`), and inventory health (`risk`, `over`, `ok`, `fresh`). Priority is conveyed by sort order and `BD` amount, not a separate priority badge. `StockDeltaBadges` (`components/shared/StockDeltaBadges.tsx`) surfaces `In transit` and `Reserved` pills with `formatNumber()` on branch and product position tables.

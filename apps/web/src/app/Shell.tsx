@@ -20,7 +20,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { LocationSwitcher, SidebarLocationsList } from "@/app/LocationSidebarParts";
-import { ModeToggle } from "@/components/mode-toggle";
+import { ModeToggle } from "@/components/shared/ModeToggle";
 import { CommandPalette } from "@/components/shared/CommandPalette";
 import { GlossaryDialog } from "@/components/shared/GlossaryDialog";
 import { Badge } from "@/components/ui/badge";
