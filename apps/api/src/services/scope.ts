@@ -73,22 +73,65 @@ export function computeActivePlan(data: Dataset): Analysis {
     }
   }
 
-  if (activeProducts.length === data.products.length) {
-    return analyze(data, DEFAULT_POLICY);
+  const productFilteredDataset: Dataset =
+    activeProducts.length === data.products.length
+      ? data
+      : {
+          ...data,
+          products: activeProducts,
+          sales: activeIndices.map(
+            (i) => data.sales[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
+          ),
+          onHand: activeIndices.map(
+            (i) => data.onHand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
+          ),
+          demand: activeIndices.map(
+            (i) => data.demand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
+          ),
+        };
+
+  const archivedBranchIndices = new Set<number>();
+  const archivedBranchIds = new Set<string>();
+  for (let bIdx = 0; bIdx < data.branches.length; bIdx += 1) {
+    const b = data.branches[bIdx]!;
+    if (b.status === "archived") {
+      archivedBranchIndices.add(bIdx);
+      archivedBranchIds.add(b.id);
+    }
   }
 
-  const activeDataset: Dataset = {
-    ...data,
-    products: activeProducts,
-    sales: activeIndices.map(
-      (i) => data.sales[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
-    ),
-    onHand: activeIndices.map(
-      (i) => data.onHand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
-    ),
-    demand: activeIndices.map(
-      (i) => data.demand[i] ?? Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
-    ),
+  const baseAnalysis = analyze(productFilteredDataset, DEFAULT_POLICY);
+  if (archivedBranchIndices.size === 0) {
+    return baseAnalysis;
+  }
+
+  // Zero-mask archived branches when building active recommendations and live branch/KPI exposure so
+  // archived locations neither source nor receive stock, while preserving historical trend & positions.
+  const maskBranchRows = (bySku: readonly (readonly (readonly number[])[])[]): number[][][] =>
+    bySku.map((byBranch) =>
+      byBranch.map((series, bIdx) =>
+        archivedBranchIndices.has(bIdx) ? new Array(numDays).fill(0) : [...series],
+      ),
+    );
+
+  const planningDataset: Dataset = {
+    ...productFilteredDataset,
+    sales: maskBranchRows(productFilteredDataset.sales),
+    onHand: maskBranchRows(productFilteredDataset.onHand),
+    demand: maskBranchRows(productFilteredDataset.demand),
   };
-  return analyze(activeDataset, DEFAULT_POLICY);
+  const planningAnalysis = analyze(planningDataset, DEFAULT_POLICY);
+
+  return {
+    recommendations: planningAnalysis.recommendations,
+    kpis: {
+      ...planningAnalysis.kpis,
+      trend: baseAnalysis.kpis.trend,
+      backtest: baseAnalysis.kpis.backtest,
+      branches: baseAnalysis.kpis.branches.filter((b) => !archivedBranchIds.has(b.id)),
+      branchRisk: baseAnalysis.kpis.branchRisk.filter((r) => !archivedBranchIds.has(r.branchId)),
+      coverGrid: baseAnalysis.kpis.coverGrid.filter((c) => !archivedBranchIds.has(c.branchId)),
+    },
+    positions: baseAnalysis.positions,
+  };
 }

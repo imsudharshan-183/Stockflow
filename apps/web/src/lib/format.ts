@@ -200,3 +200,10 @@ export function statusLabel(status: RecommendationStatus): string {
   if (status === "REJECTED") return "Rejected";
   return "Pending";
 }
+
+export function formatCoordinates(coordinates?: readonly [number, number]): string {
+  if (!coordinates) return "—";
+  const lat = (Math.round(coordinates[0] * 10_000) / 10_000).toFixed(4);
+  const lng = (Math.round(coordinates[1] * 10_000) / 10_000).toFixed(4);
+  return `${lat}, ${lng}`;
+}

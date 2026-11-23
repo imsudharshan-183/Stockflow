@@ -2,12 +2,51 @@ import { z } from "zod";
 import { ActedBySchema } from "./auth.js";
 export * from "./auth.js";
 
+export const BranchStatusSchema = z.enum(["active", "archived"]);
+export type BranchStatus = z.infer<typeof BranchStatusSchema>;
+
 export const BranchSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
   city: z.string().min(1),
   region: z.string().min(1),
   coordinates: z.tuple([z.number(), z.number()]).optional(),
+  status: BranchStatusSchema.default("active"),
+});
+
+export const CreateBranchSchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(60, "Name must be 60 characters or less"),
+  city: z.string().trim().min(1, "City is required").max(60, "City must be 60 characters or less"),
+  region: z.string().trim().min(1, "Region is required").max(60, "Region must be 60 characters or less"),
+  coordinates: z
+    .tuple([
+      z.number().min(-90, "Latitude must be between -90 and 90").max(90, "Latitude must be between -90 and 90"),
+      z.number().min(-180, "Longitude must be between -180 and 180").max(180, "Longitude must be between -180 and 180"),
+    ])
+    .optional(),
+});
+
+export const UpdateBranchSchema = z.object({
+  name: z.string().trim().min(1, "Name cannot be empty").max(60, "Name must be 60 characters or less").optional(),
+  city: z.string().trim().min(1, "City cannot be empty").max(60, "City must be 60 characters or less").optional(),
+  region: z.string().trim().min(1, "Region cannot be empty").max(60, "Region must be 60 characters or less").optional(),
+  coordinates: z
+    .tuple([
+      z.number().min(-90, "Latitude must be between -90 and 90").max(90, "Latitude must be between -90 and 90"),
+      z.number().min(-180, "Longitude must be between -180 and 180").max(180, "Longitude must be between -180 and 180"),
+    ])
+    .optional(),
+  status: BranchStatusSchema.optional(),
+});
+
+export const BranchListQuerySchema = z.object({
+  status: BranchStatusSchema.optional(),
+  search: z.string().optional(),
+});
+
+export const BranchListResponseSchema = z.object({
+  branches: z.array(BranchSchema),
+  total: z.number().int().nonnegative(),
 });
 
 export const ProductStatusSchema = z.enum(["active", "awaiting_history", "archived"]);
@@ -612,7 +651,11 @@ export const StockAlertListSchema = z.object({
 });
 export type StockAlertList = z.infer<typeof StockAlertListSchema>;
 
-export type Branch = z.infer<typeof BranchSchema>;
+export type Branch = z.input<typeof BranchSchema>;
+export type CreateBranch = z.infer<typeof CreateBranchSchema>;
+export type UpdateBranch = z.infer<typeof UpdateBranchSchema>;
+export type BranchListQuery = z.infer<typeof BranchListQuerySchema>;
+export type BranchListResponse = z.infer<typeof BranchListResponseSchema>;
 export type Product = z.infer<typeof ProductSchema>;
 export type Action = z.infer<typeof ActionSchema>;
 export type RecommendationStatus = z.infer<typeof StatusSchema>;

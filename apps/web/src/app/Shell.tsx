@@ -78,6 +78,9 @@ function breadcrumbForPath(pathname: string, role?: Role): { section: string; pa
   if (pathname.startsWith("/users")) {
     return { section: "Admin", page: "Users" };
   }
+  if (pathname === "/branches/manage") {
+    return { section: "Admin", page: "Branches" };
+  }
   if (pathname.startsWith("/branches/")) {
     const id = pathname.split("/")[2] ?? "Location";
     return { section: "Locations", page: id };
@@ -241,7 +244,10 @@ export function Shell() {
     : [];
 
   const adminNav: NavItem[] = canManageUsers
-    ? [{ to: "/users", label: "Users", icon: Users, matchPaths: ["/users"] }]
+    ? [
+        { to: "/users", label: "Users", icon: Users, matchPaths: ["/users"] },
+        { to: "/branches/manage", label: "Branches", icon: MapPin, matchPaths: ["/branches/manage"] },
+      ]
     : [];
 
   const scopeSummary =

@@ -53,3 +53,24 @@ export class StockAlertValidationError extends Error {
     this.name = "StockAlertValidationError";
   }
 }
+
+export class BranchConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BranchConflictError";
+  }
+}
+
+export class BranchNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BranchNotFoundError";
+  }
+}
+
+export class BranchValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "BranchValidationError";
+  }
+}

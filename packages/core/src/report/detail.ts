@@ -97,7 +97,7 @@ export function buildProductDetail(
   const views: PositionView[] = row.map((position) => {
     const branch = at(data.branches, position.branchIndex, "branch");
     return {
-      branch,
+      branch: { ...branch, status: branch.status ?? "active" },
       onHand: position.onHand,
       velocity: stat(position.velocity, "velocity"),
       sigmaDemand: stat(position.sigma, "sigma"),

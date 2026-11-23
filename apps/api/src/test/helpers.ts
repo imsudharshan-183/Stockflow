@@ -231,6 +231,20 @@ export class FixedDatasetRepository implements StockRepository {
     else this.data.products.push(product);
     return Promise.resolve();
   }
+  saveBranch(branch: Branch): Promise<void> {
+    const idx = this.data.branches.findIndex((b) => b.id === branch.id);
+    if (idx >= 0) this.data.branches[idx] = branch;
+    else {
+      this.data.branches.push(branch);
+      const numDays = this.data.dates.length;
+      for (let sIdx = 0; sIdx < this.data.products.length; sIdx += 1) {
+        this.data.sales[sIdx]?.push(new Array(numDays).fill(0));
+        this.data.onHand[sIdx]?.push(new Array(numDays).fill(0));
+        this.data.demand[sIdx]?.push(new Array(numDays).fill(0));
+      }
+    }
+    return Promise.resolve();
+  }
   removeProduct(sku: string): Promise<void> {
     const idx = this.data.products.findIndex((p) => p.sku === sku);
     if (idx >= 0) this.data.products.splice(idx, 1);

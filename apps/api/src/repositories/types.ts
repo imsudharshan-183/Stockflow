@@ -3,6 +3,7 @@ import type {
   ActionRecord,
   Analysis,
   AuditEntry,
+  Branch,
   Dataset,
   Product,
   ProductChangeRecord,
@@ -43,6 +44,7 @@ export interface StockRepository {
   saveDecisionBatch(records: ActionRecord[], entries: AuditEntry[]): Promise<SaveDecisionBatchResult>;
   clearDecisions(): Promise<{ actionsRemoved: number; auditsRemoved: number }>;
   saveProduct(product: Product): Promise<void>;
+  saveBranch(branch: Branch): Promise<void>;
   removeProduct(sku: string): Promise<void>;
   listProductChanges(sku: string): Promise<ProductChangeRecord[]>;
   saveProductChange(change: ProductChangeRecord): Promise<void>;

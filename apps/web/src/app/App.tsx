@@ -31,6 +31,11 @@ const DataEntryPage = lazy(() =>
 const BranchPage = lazy(() =>
   import("@/features/drilldown/BranchPage").then((m) => ({ default: m.BranchPage })),
 );
+const BranchesManagePage = lazy(() =>
+  import("@/features/branches/BranchesManagePage").then((m) => ({
+    default: m.BranchesManagePage,
+  })),
+);
 const ProductPage = lazy(() =>
   import("@/features/drilldown/ProductPage").then((m) => ({ default: m.ProductPage })),
 );
@@ -104,6 +109,14 @@ export function App() {
                 element={
                   <RequireRole role="admin">
                     <UsersPage />
+                  </RequireRole>
+                }
+              />
+              <Route
+                path="branches/manage"
+                element={
+                  <RequireRole role="admin">
+                    <BranchesManagePage />
                   </RequireRole>
                 }
               />

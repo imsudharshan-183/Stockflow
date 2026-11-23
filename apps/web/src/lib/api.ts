@@ -2,6 +2,9 @@ import {
   AuditListSchema,
   BatchDecideResponseSchema,
   BranchDetailSchema,
+  BranchListResponseSchema,
+  BranchSchema,
+  CreateBranchSchema,
   CreateProductSchema,
   CreateUserSchema,
   ErrorBodySchema,
@@ -19,12 +22,17 @@ import {
   RecommendationSchema,
   StockAlertListSchema,
   StockAlertSchema,
+  UpdateBranchSchema,
   UpdateProductSchema,
   UpdateUserSchema,
   UserListSchema,
   UserSchema,
   type AuditList,
+  type Branch,
   type BranchDetail,
+  type BranchListQuery,
+  type BranchListResponse,
+  type CreateBranch,
   type CreateProduct,
   type CreateStockAlert,
   type CreateUser,
@@ -47,6 +55,7 @@ import {
   type RecommendationQuery,
   type StockAlert,
   type StockAlertList,
+  type UpdateBranch,
   type UpdateProduct,
   type UpdateUser,
   type User,
@@ -227,6 +236,22 @@ export const api = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids: [...ids], decision, ...(reasonCode ? { reasonCode } : {}) }),
+    }),
+
+  // Branches Admin
+  listBranches: (query?: Partial<BranchListQuery>): Promise<BranchListResponse> =>
+    request(withQuery("/api/branches", (query ?? {}) as Record<string, unknown>), BranchListResponseSchema),
+  createBranch: (data: CreateBranch): Promise<Branch> =>
+    request("/api/branches", BranchSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(CreateBranchSchema.parse(data)),
+    }),
+  updateBranch: (id: string, data: UpdateBranch): Promise<Branch> =>
+    request(`/api/branches/${encodeURIComponent(id)}`, BranchSchema, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(UpdateBranchSchema.parse(data)),
     }),
 
   // Catalog Products

@@ -6,6 +6,7 @@ import {
   type ActionRecord,
   type Analysis,
   type AuditEntry,
+  type Branch,
   type Dataset,
   type Product,
   type ProductChangeRecord,
@@ -206,6 +207,23 @@ export class InMemoryRepository implements StockRepository {
       data.sales.push(data.branches.map(() => data.dates.map(() => 0)));
       data.onHand.push(data.branches.map(() => data.dates.map(() => 0)));
       data.demand.push(data.branches.map(() => data.dates.map(() => 0)));
+    }
+    return Promise.resolve();
+  }
+
+  saveBranch(branch: Branch): Promise<void> {
+    const data = this.getDataset();
+    const idx = data.branches.findIndex((b) => b.id === branch.id);
+    if (idx >= 0) {
+      data.branches[idx] = branch;
+    } else {
+      data.branches.push(branch);
+      const numDays = data.dates.length;
+      for (let sIdx = 0; sIdx < data.products.length; sIdx += 1) {
+        data.sales[sIdx]?.push(new Array(numDays).fill(0));
+        data.onHand[sIdx]?.push(new Array(numDays).fill(0));
+        data.demand[sIdx]?.push(new Array(numDays).fill(0));
+      }
     }
     return Promise.resolve();
   }
