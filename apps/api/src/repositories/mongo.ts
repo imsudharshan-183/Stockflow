@@ -13,6 +13,7 @@ import {
   type ActionRecord,
   type Analysis,
   type AuditEntry,
+  type Branch,
   type Dataset,
   type Product,
   type ProductChangeRecord,
@@ -128,6 +129,7 @@ export class MongoRepository implements StockRepository {
     await db.admin().ping();
   }
 
+  // IMPORTANT: Seeding is a full destructive reset and will wipe any branch (or product) added through the admin UI.
   async seed(customDataset?: Dataset, cleanAll = true): Promise<void> {
     await this.ensureConnected();
     clearMemorySalesEntries();
@@ -429,6 +431,20 @@ export class MongoRepository implements StockRepository {
     }
   }
 
+  async saveBranch(branch: Branch): Promise<void> {
+    await this.ensureConnected();
+    const updated = await MetaModel.updateOne(
+      { _id: "dataset", "branches.id": branch.id },
+      { $set: { "branches.$": branch } },
+    );
+    if (updated.matchedCount === 0) {
+      await MetaModel.updateOne(
+        { _id: "dataset" },
+        { $push: { branches: branch } },
+      );
+    }
+  }
+
   async removeProduct(sku: string): Promise<void> {
     await this.ensureConnected();
     await MetaModel.updateOne(
@@ -588,14 +604,12 @@ export class MongoRepository implements StockRepository {
       for (const branch of meta.branches) {
         const series = byKey.get(`${product.sku}|${branch.id}`);
         if (!series) {
-          if (product.status === "awaiting_history") {
-            const zeros = new Array(meta.dates.length).fill(0);
-            skuSales.push(zeros);
-            skuStock.push(zeros);
-            skuDemand.push(zeros);
-            continue;
-          }
-          throw new Error(`missing series for ${product.sku} at ${branch.id}`);
+          // Cold-start fallback for awaiting_history SKUs and newly created admin branches without pre-seeded series.
+          const zeros = new Array(meta.dates.length).fill(0);
+          skuSales.push(zeros);
+          skuStock.push([...zeros]);
+          skuDemand.push([...zeros]);
+          continue;
         }
         if (series.sales.length !== meta.dates.length) {
           throw new Error(`series length mismatch for ${product.sku} at ${branch.id}`);

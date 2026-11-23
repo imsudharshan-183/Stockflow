@@ -82,7 +82,9 @@ export class KpiService {
       if (this.runtime.committedDeltas.size === 0) {
         return this.runtime.analysis.kpis;
       }
-      const allBranchIndices = this.runtime.data.branches.map((_, idx) => idx);
+      const allBranchIndices = this.runtime.data.branches.flatMap((b, idx) =>
+        b.status === "archived" ? [] : [idx],
+      );
       const {
         deadStockValue,
         lostSalesAtRisk,

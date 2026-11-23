@@ -16,6 +16,7 @@ describe("auth helpers and schemas", () => {
     expect(can("admin", "recommendations:decide")).toBe(true);
     expect(can("admin", "audit:read")).toBe(true);
     expect(can("admin", "users:manage")).toBe(true);
+    expect(can("admin", "branches:manage")).toBe(true);
     expect(can("admin", "branches:view_all")).toBe(true);
     expect(can("admin", "products:manage")).toBe(true);
     expect(can("admin", "dashboard:financial:network")).toBe(true);
@@ -30,6 +31,7 @@ describe("auth helpers and schemas", () => {
     expect(can("manager", "recommendations:decide")).toBe(true);
     expect(can("manager", "audit:read")).toBe(true);
     expect(can("manager", "users:manage")).toBe(false);
+    expect(can("manager", "branches:manage")).toBe(false);
     expect(can("manager", "branches:view_all")).toBe(false);
     expect(can("manager", "products:manage")).toBe(false);
     expect(can("manager", "dashboard:financial:network")).toBe(false);
@@ -44,6 +46,7 @@ describe("auth helpers and schemas", () => {
     expect(can("staff", "recommendations:decide")).toBe(false);
     expect(can("staff", "audit:read")).toBe(false);
     expect(can("staff", "users:manage")).toBe(false);
+    expect(can("staff", "branches:manage")).toBe(false);
     expect(can("staff", "branches:view_all")).toBe(false);
     expect(can("staff", "products:manage")).toBe(false);
     expect(can("staff", "dashboard:financial:network")).toBe(false);

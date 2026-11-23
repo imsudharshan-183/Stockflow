@@ -21,9 +21,15 @@ All endpoints are mounted under `/api`. Protected routes require a valid JWT acc
 - `GET /api/products/:sku` — Product detail DTO across scoped branches with projected `onHand`, `coverDays`, `reserved`, and `inTransit`.
 - `GET /api/audit` — Decision audit log, newest first, scoped to caller's branches (`admin`/`manager`).
 
+## Branches (`/api/branches/*`)
+*(Guarded with `branches:manage` — `admin` only; returns `403 Forbidden` for `manager` and `staff`. Note that `BranchSchema` carries `status: "active" | "archived"`, and mutations recompute the active plan, clear `committedDeltas`/`committedRecommendationIds`/`scopedKpiCache`, and bump `dataVersion`.)*
+- `GET /api/branches` — Admin branch directory including archived branches (`?status=active|archived`, `?search=`).
+- `POST /api/branches` — Create a branch with sequential `BR-0xx` ID (`BR-016+`), pushing cold-start zero-filled `sales`, `onHand`, and `demand` arrays onto every product.
+- `PATCH /api/branches/:id` — Edit branch details (`name`, `city`, `region`, `coordinates`) or toggle reversible `status` (`"active"` ⇄ `"archived"`).
+
 ## Locations (`/api/locations/*`)
 *(Guarded with `dashboard:financial:scoped`; returns `403 Forbidden` for `staff`.)*
-- `GET /api/locations` — Scoped branch list with health summary (`admin`/`manager`).
+- `GET /api/locations` — Scoped active branch list with health summary (`admin`/`manager`; excludes `archived` branches, while historical `/api/locations/:id/trend`, `GET /api/branches/:id`, `kpis.trend`, and `/api/audit` preserve archived branch history).
 - `GET /api/locations/:id/summary` — Location-scoped KPIs, needs/gives/markdowns, cover bands, and category×status heatmap (`admin`/`manager` in scope).
 - `GET /api/locations/:id/inventory` — Paginated, filtered inventory for a scoped location with projected stock, cover, `reserved`, and `inTransit` (`admin`/`manager` in scope).
 - `GET /api/locations/:id/trend` — Sales vs. on-hand time series (`sku` or `category`, `range=7|30|90`, `admin`/`manager` in scope).

@@ -1,5 +1,7 @@
 import {
   BranchDetailSchema,
+  BranchListResponseSchema,
+  BranchSchema,
   DEFAULT_POLICY,
   LocationInventoryResponseSchema,
   LocationListResponseSchema,
@@ -14,7 +16,11 @@ import {
   buildProductDetail,
   can,
   matchesProductQuery,
+  type Branch,
   type BranchDetail,
+  type BranchListQuery,
+  type BranchListResponse,
+  type CreateBranch,
   type CreateProduct,
   type LocationCategoryHeatmapCell,
   type LocationInventoryItem,
@@ -37,17 +43,21 @@ import {
   type ProductStatus,
   type ProductDetailWithHistory,
   type Recommendation,
+  type UpdateBranch,
   type UpdateProduct,
   type User,
 } from "@stockflow/core";
 import { recomputeForSku, upsertSalesEntry } from "../db.js";
 import {
+  BranchConflictError,
+  BranchNotFoundError,
   DecisionForbiddenError,
   ProductConflictError,
   ProductNotFoundError,
   ProductValidationError,
 } from "./errors.js";
 import {
+  clearAllCommittedDeltas,
   clearCommittedForSku,
   projectAllPositions,
   projectPositionFor,
@@ -195,10 +205,12 @@ export class CatalogService {
     // is judged relative to the network median rather than absolute share bands.
     const networkBranchRisk = new Map<string, number>();
     for (const branch of this.runtime.data.branches) {
+      if (branch.status === "archived") continue;
       networkBranchRisk.set(branch.id, 0);
     }
     for (let bIdx = 0; bIdx < this.runtime.data.branches.length; bIdx += 1) {
       const branch = this.runtime.data.branches[bIdx]!;
+      if (branch.status === "archived") continue;
       let branchLostSales = 0;
       for (let sIdx = 0; sIdx < this.runtime.data.products.length; sIdx += 1) {
         const product = this.runtime.data.products[sIdx];
@@ -228,6 +240,7 @@ export class CatalogService {
     const locations: LocationSummaryItem[] = [];
     for (let bIdx = 0; bIdx < this.runtime.data.branches.length; bIdx += 1) {
       const branch = this.runtime.data.branches[bIdx]!;
+      if (branch.status === "archived") continue;
       if (!allowedSet.has(branch.id)) continue;
 
       let atRiskCount = 0;
@@ -272,7 +285,7 @@ export class CatalogService {
             : "red";
 
       locations.push({
-        branch,
+        branch: { ...branch, status: branch.status ?? "active" },
         health,
         atRiskCount,
         overstockCount,
@@ -663,8 +676,9 @@ export class CatalogService {
         totalSkus += 1;
         statusCounts[pos.status] += 1;
       }
+      const summaryBranch = this.runtime.data.branches[branchIdx]!;
       branchSummary = {
-        branch: this.runtime.data.branches[branchIdx]!,
+        branch: { ...summaryBranch, status: summaryBranch.status ?? "active" },
         totalSkus,
         statusCounts,
       };
@@ -1108,18 +1122,165 @@ export class CatalogService {
     return { salesEntriesCount: entriesCount };
   }
 
-  private async recomputeAnalysisForProduct(sku: string): Promise<void> {
-    clearCommittedForSku(
-      this.runtime.committedDeltas,
-      this.runtime.committedRecommendationIds,
-      sku,
+  async listBranches(query: BranchListQuery, user: User): Promise<BranchListResponse> {
+    await ensureInitialized(this.runtime);
+    if (!can(user.role, "branches:manage")) {
+      throw new DecisionForbiddenError("Only administrators can manage branches");
+    }
+
+    let list = [...this.runtime.data.branches];
+    if (query.status) {
+      list = list.filter((b) => (b.status ?? "active") === query.status);
+    }
+    if (query.search && query.search.trim().length > 0) {
+      const q = query.search.trim().toLowerCase();
+      list = list.filter(
+        (b) =>
+          b.id.toLowerCase().includes(q) ||
+          b.name.toLowerCase().includes(q) ||
+          b.city.toLowerCase().includes(q) ||
+          b.region.toLowerCase().includes(q),
+      );
+    }
+
+    const branches = list.map((b) =>
+      BranchSchema.parse({
+        ...b,
+        status: b.status ?? "active",
+      }),
     );
+
+    return BranchListResponseSchema.parse({
+      branches,
+      total: branches.length,
+    });
+  }
+
+  async createBranch(input: CreateBranch, user: User): Promise<Branch> {
+    await ensureInitialized(this.runtime);
+    if (!can(user.role, "branches:manage")) {
+      throw new DecisionForbiddenError("Only administrators can manage branches");
+    }
+
+    const normalizedName = input.name.trim();
+    const conflict = this.runtime.data.branches.find(
+      (b) => b.name.trim().toLowerCase() === normalizedName.toLowerCase(),
+    );
+    if (conflict) {
+      throw new BranchConflictError(`Branch name "${normalizedName}" already exists`);
+    }
+
+    const numericIds = this.runtime.data.branches.map((b) => {
+      const match = b.id.match(/^BR-(\d+)$/);
+      return match ? parseInt(match[1]!, 10) : 0;
+    });
+    const nextNum = Math.max(0, ...numericIds) + 1;
+    const id = `BR-${String(nextNum).padStart(3, "0")}`;
+
+    const newBranch: Branch = BranchSchema.parse({
+      id,
+      name: normalizedName,
+      city: input.city.trim(),
+      region: input.region.trim(),
+      ...(input.coordinates ? { coordinates: input.coordinates } : {}),
+      status: "active",
+    });
+
+    // Cold-start mechanic: push zero-filled daily history arrays onto every existing product
+    // along the branch axis, matching createCatalogProduct's mirror loop along the product axis.
+    this.runtime.data.branches.push(newBranch);
+    const numDays = this.runtime.data.dates.length;
+    for (let sIdx = 0; sIdx < this.runtime.data.products.length; sIdx += 1) {
+      this.runtime.data.sales[sIdx]?.push(new Array(numDays).fill(0));
+      this.runtime.data.onHand[sIdx]?.push(new Array(numDays).fill(0));
+      this.runtime.data.demand[sIdx]?.push(new Array(numDays).fill(0));
+    }
+
+    await this.runtime.repo.saveBranch(newBranch);
+    await this.recomputeAnalysisForProduct();
+
+    return newBranch;
+  }
+
+  async updateBranch(id: string, input: UpdateBranch, user: User): Promise<Branch> {
+    await ensureInitialized(this.runtime);
+    if (!can(user.role, "branches:manage")) {
+      throw new DecisionForbiddenError("Only administrators can manage branches");
+    }
+
+    const branch = this.runtime.data.branches.find((b) => b.id === id);
+    if (!branch) {
+      throw new BranchNotFoundError(`Branch ${id} not found`);
+    }
+
+    if (input.name !== undefined && input.name.trim().toLowerCase() !== branch.name.trim().toLowerCase()) {
+      const conflict = this.runtime.data.branches.find(
+        (b) => b.id !== id && b.name.trim().toLowerCase() === input.name!.trim().toLowerCase(),
+      );
+      if (conflict) {
+        throw new BranchConflictError(`Branch name "${input.name.trim()}" already exists`);
+      }
+    }
+
+    let changed = false;
+    if (input.name !== undefined && input.name.trim() !== branch.name) {
+      branch.name = input.name.trim();
+      changed = true;
+    }
+    if (input.city !== undefined && input.city.trim() !== branch.city) {
+      branch.city = input.city.trim();
+      changed = true;
+    }
+    if (input.region !== undefined && input.region.trim() !== branch.region) {
+      branch.region = input.region.trim();
+      changed = true;
+    }
+    if (
+      input.coordinates !== undefined &&
+      (!branch.coordinates ||
+        branch.coordinates[0] !== input.coordinates[0] ||
+        branch.coordinates[1] !== input.coordinates[1])
+    ) {
+      branch.coordinates = input.coordinates;
+      changed = true;
+    }
+    const prevStatus = branch.status ?? "active";
+    if (input.status !== undefined && input.status !== prevStatus) {
+      branch.status = input.status;
+      changed = true;
+    } else if (branch.status === undefined) {
+      branch.status = "active";
+    }
+
+    if (changed) {
+      await this.runtime.repo.saveBranch(branch);
+      await this.recomputeAnalysisForProduct();
+    }
+
+    return BranchSchema.parse({ ...branch, status: branch.status ?? "active" });
+  }
+
+  private async recomputeAnalysisForProduct(sku?: string): Promise<void> {
+    if (sku) {
+      clearCommittedForSku(
+        this.runtime.committedDeltas,
+        this.runtime.committedRecommendationIds,
+        sku,
+      );
+    } else {
+      clearAllCommittedDeltas(
+        this.runtime.committedDeltas,
+        this.runtime.committedRecommendationIds,
+      );
+    }
     this.runtime.analysis = computeActivePlan(this.runtime.data);
     this.runtime.scopedKpiCache.clear();
     await this.runtime.repo.saveAnalysis(this.runtime.analysis);
     await commitPlanVersion(this.runtime);
-    for (const b of this.runtime.data.branches) {
-      await recomputeForSku(b.id, sku);
+    if (sku) {
+      for (const b of this.runtime.data.branches) {
+        await recomputeForSku(b.id, sku);
+      }
     }
   }
 }

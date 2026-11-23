@@ -12,6 +12,7 @@ if (env.MONGODB_URI.trim().length === 0) {
 
 try {
   const repo = await MongoRepository.connect(env.MONGODB_URI);
+  // IMPORTANT: Seeding is a full destructive reset and will wipe any branch (or product) added through the admin UI.
   await repo.seed();
   await repo.close();
   console.log("Seeded the stockflow database");

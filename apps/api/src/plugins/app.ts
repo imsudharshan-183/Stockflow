@@ -7,6 +7,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { readEnv, type Env } from "../config/env.js";
 import { redactSecrets } from "../config/redact.js";
 import { registerAuthRoutes } from "../routes/auth.js";
+import { registerBranchRoutes } from "../routes/branches.js";
 import { registerCatalogRoutes } from "../routes/catalog.js";
 import { registerLocationRoutes } from "../routes/locations.js";
 import { registerSalesEntriesRoutes } from "../routes/salesEntries.js";
@@ -105,6 +106,7 @@ export async function buildApp(
       registerUsersRoutes(scope, services.userRepo, authService, authGuards);
       registerStockRoutes(scope, services, authGuards, { env, startupError });
       registerLocationRoutes(scope, services, authGuards);
+      registerBranchRoutes(scope, services, authGuards);
       registerCatalogRoutes(scope, services, authGuards);
       registerSalesEntriesRoutes(scope, services, authGuards);
       registerStockAlertsRoutes(scope, services, authGuards);

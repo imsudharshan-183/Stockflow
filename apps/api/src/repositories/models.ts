@@ -9,6 +9,7 @@ const branchSchema = new Schema(
     city: { type: String, required: true },
     region: { type: String, required: true },
     coordinates: { type: [Number], default: undefined },
+    status: { type: String, enum: ["active", "archived"], default: "active" },
   },
   { _id: false },
 );

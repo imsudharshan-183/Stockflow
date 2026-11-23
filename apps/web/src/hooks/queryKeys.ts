@@ -21,4 +21,6 @@ export const queryKeys = {
   salesEntries: (query?: Record<string, unknown>) => ["salesEntries", query ?? {}] as const,
   stockAlerts: (branchId?: string) =>
     branchId ? (["stockAlerts", branchId] as const) : (["stockAlerts"] as const),
+  adminBranches: (status?: string) =>
+    status ? (["adminBranches", status] as const) : (["adminBranches"] as const),
 };
