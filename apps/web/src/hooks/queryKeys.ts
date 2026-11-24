@@ -45,6 +45,8 @@ export const queryKeys = {
     status ? (["adminBranches", status] as const) : (["adminBranches"] as const),
 };
 
+// Invalidate all operational query families together after any mutation so KPIs, drilldowns,
+// queue tabs, alerts, and audit views never drift out of sync across physical and overlay layers.
 export async function invalidateOperationalQueries(queryClient: QueryClient): Promise<void> {
   await Promise.all([
     queryClient.invalidateQueries({ queryKey: ["kpis"] }),

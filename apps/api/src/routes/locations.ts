@@ -19,6 +19,7 @@ export function registerLocationRoutes(
   // overstockValue, cashReleasable, netBenefit) and are gated by dashboard:financial:scoped (403 for staff).
   const requireScopedDashboard = authGuards.requirePermission("dashboard:financial:scoped");
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; non-admin sees assigned branches).
   app.get(
     "/locations",
     { preHandler: [requireScopedDashboard] },
@@ -28,6 +29,7 @@ export function registerLocationRoutes(
     },
   );
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; 404 out of assigned branch scope).
   app.get(
     "/locations/:id/summary",
     { preHandler: [requireScopedDashboard] },
@@ -42,6 +44,7 @@ export function registerLocationRoutes(
     },
   );
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; 404 out of assigned branch scope).
   app.get(
     "/locations/:id/inventory",
     { preHandler: [requireScopedDashboard] },
@@ -57,6 +60,7 @@ export function registerLocationRoutes(
     },
   );
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; 404 out of assigned branch scope).
   app.get(
     "/locations/:id/trend",
     { preHandler: [requireScopedDashboard] },

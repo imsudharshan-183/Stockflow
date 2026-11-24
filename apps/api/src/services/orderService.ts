@@ -548,6 +548,8 @@ export class OrderService {
     return { nextStatus: decision.nextStatus, isAdminOverride: decision.isAdminOverride };
   }
 
+  // IMPORTANT: Intent states (SUGGESTED, OPEN_REQUEST, AWAITING_DONOR) never reserve inventory.
+  // Only entering COMMITTED writes `committedDeltas` and enforces the synchronous 409 surplus guard.
   private stageOrderCommitDelta(
     order: ReplenishmentOrder,
   ): Array<{ sku: string; branchId: string; reserved: number; inTransit: number }> {
@@ -1045,6 +1047,8 @@ export class OrderService {
       throw new OrderConflictError("Order transition already in progress");
     }
 
+    // IMPORTANT: Stage in-memory delta under the inflight lock before persistence, rolling back if
+    // the DB write fails or conflicts so concurrent commits cannot double-allocate donor surplus.
     this.runtime.inflightOrderIds.add(order.id);
     let staged: Array<{ sku: string; branchId: string; reserved: number; inTransit: number }> = [];
     try {
@@ -1406,6 +1410,8 @@ export class OrderService {
 
     this.runtime.orders.set(saved.order.id, saved.order);
     this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
+    // IMPORTANT: Clear only receiver `inTransit` on delivery; donor `reserved` remains until physical
+    // donor stock updates arrive and bump `dataVersion`, preventing temporary double-release of surplus.
     if (saved.order.type === "TRANSFER" || saved.order.type === "REORDER") {
       adjustCommittedDelta(
         this.runtime.committedDeltas,
@@ -1441,6 +1447,8 @@ export class OrderService {
       throw new OrderConflictError("Reopen window (24 hours) has expired for this order");
     }
 
+    // Release any committed reservation overlay before resetting status; downstream bumpDecisionVersion
+    // refreshes projections and KPIs without bumping dataVersion or recomputing plan_cache.
     const committed = this.runtime.committedRecommendationIds.get(order.id);
     if (committed) {
       if (committed.action === "TRANSFER") {

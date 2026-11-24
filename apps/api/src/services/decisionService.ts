@@ -184,6 +184,7 @@ export class DecisionService {
     return applied;
   }
 
+  // Reverts optimistic committedDeltas staging when DB persistence fails or loses an optimistic-lock race.
   private rollbackStagedDeltas(
     recId: string,
     entries: readonly { sku: string; branchId: string; reserved: number; inTransit: number }[],
@@ -241,7 +242,8 @@ export class DecisionService {
     }
 
     if (!query.view) {
-      // The engine keeps every positive-benefit draft. The queue only shows moves a buyer would act on.
+      // IMPORTANT: Filter materiality and assigned branches post-plan rather than pre-plan so
+      // network donor rankings match the un-scoped optimization while buyers act only on in-scope moves.
       const recommendations = this.runtime.analysis.recommendations
         .filter(isMaterialRecommendation)
         .filter((recommendation) => {

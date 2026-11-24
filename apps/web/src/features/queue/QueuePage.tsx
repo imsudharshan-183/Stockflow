@@ -315,6 +315,8 @@ export function QueuePage() {
   );
 
   function writeFilters(next: Partial<QueueFilters>) {
+    // Always reset to page 1 on filter/tab change so narrowing filters never strands users on an empty page;
+    // omit default params (tab=suggested, view=pending, page=1) to keep bookmarkable URLs clean.
     const merged: QueueFilters = { ...filters, page: 1, ...next };
     const upcoming = new URLSearchParams();
     if (merged.tab !== "suggested") upcoming.set("tab", merged.tab);

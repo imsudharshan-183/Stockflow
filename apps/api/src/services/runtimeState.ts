@@ -82,6 +82,9 @@ export function createStockRuntimeState(
   };
 }
 
+// IMPORTANT: Order/decision transitions bump only `decisionVersion` and clear `scopedKpiCache`.
+// They intentionally never bump `dataVersion` (`planVersion`) because approvals overlay `committedDeltas`
+// onto the cached network plan instead of triggering an expensive engine recomputation.
 export function bumpDecisionVersion(state: StockRuntimeState): number {
   state.decisionVersion += 1;
   state.scopedKpiCache.clear();
@@ -161,6 +164,8 @@ export async function ensureInitialized(state: StockRuntimeState): Promise<void>
   if (state.initialized) return;
 
   if (!state.inflightRefresh) {
+    // IMPORTANT: Deduplicate concurrent cold-start loads behind inflightRefresh so parallel initial requests
+    // share one dataset read and plan build instead of computing the network plan multiple times.
     state.inflightRefresh = (async () => {
       if (state.initialized) return;
 
@@ -273,6 +278,8 @@ export async function ensureFreshPlan(
   if (currentVersion === state.planVersion) return;
 
   if (!state.inflightRefresh) {
+    // IMPORTANT: Deduplicate concurrent plan rebuilds behind one promise so parallel API requests
+    // after a sales/catalog write (`dataVersion` bump) share a single dataset load and engine run.
     state.inflightRefresh = (async () => {
       if (currentVersion === state.planVersion) return;
 

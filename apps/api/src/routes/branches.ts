@@ -68,6 +68,7 @@ export function registerBranchRoutes(
   app.register(async (adminScope) => {
     adminScope.addHook("preHandler", authGuards.requirePermission("branches:manage"));
 
+    // RBAC: Admin only (branches:manage via adminScope hook; returns active/archived branches).
     adminScope.get("/branches", async (request, reply) => {
       const parsed = BranchListQuerySchema.safeParse(cleanQuery(request.query));
       if (!parsed.success) {
@@ -88,6 +89,7 @@ export function registerBranchRoutes(
       }
     });
 
+    // RBAC: Admin only (branches:manage via adminScope hook; creates branch + zero-filled history).
     adminScope.post("/branches", async (request, reply) => {
       const normalized = normalizeBranchBody(request.body);
       if (!normalized.ok) {
@@ -126,6 +128,7 @@ export function registerBranchRoutes(
       }
     });
 
+    // RBAC: Admin only (branches:manage via adminScope hook; updates details or archives/unarchives).
     adminScope.patch("/branches/:id", async (request, reply) => {
       const pathParsed = PathIdSchema.safeParse(request.params);
       if (!pathParsed.success) {

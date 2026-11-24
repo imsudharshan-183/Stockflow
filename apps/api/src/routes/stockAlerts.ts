@@ -35,6 +35,7 @@ export function registerStockAlertsRoutes(
   services: StockServices,
   authGuards: AuthContext,
 ): void {
+  // RBAC: Admin, manager, staff (stock:flag or stock:flag:decide; non-admin sees assigned branches only).
   app.get(
     "/stock-alerts",
     // DECISION: Both staff (read own submitted branch alerts) and manager/admin (review queue)
@@ -54,6 +55,7 @@ export function registerStockAlertsRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (stock:flag; caller must belong to alert branchId).
   app.post(
     "/stock-alerts",
     { preHandler: [authGuards.requirePermission("stock:flag")] },
@@ -74,6 +76,7 @@ export function registerStockAlertsRoutes(
     },
   );
 
+  // RBAC: Admin and manager (stock:flag:decide; 403 for staff; branch scope enforced inside service).
   app.post(
     "/stock-alerts/:id/resolve",
     { preHandler: [authGuards.requirePermission("stock:flag:decide")] },
@@ -101,6 +104,7 @@ export function registerStockAlertsRoutes(
     },
   );
 
+  // RBAC: Admin and manager (stock:flag:decide; 403 for staff; legacy approval endpoint).
   app.patch(
     "/stock-alerts/:id/approve",
     { preHandler: [authGuards.requirePermission("stock:flag:decide")] },
@@ -109,6 +113,7 @@ export function registerStockAlertsRoutes(
     },
   );
 
+  // RBAC: Admin and manager (stock:flag:decide; 403 for staff; legacy dismissal endpoint).
   app.patch(
     "/stock-alerts/:id/reject",
     { preHandler: [authGuards.requirePermission("stock:flag:decide")] },

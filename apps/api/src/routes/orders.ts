@@ -71,6 +71,7 @@ export function registerOrderRoutes(
   authGuards: AuthContext,
 ): void {
   // Register before /orders/:id so "donor-candidates" never binds as an order id.
+  // RBAC: Admin and manager (recommendations:decide; finds eligible transfer donors).
   app.get(
     "/orders/donor-candidates",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -101,6 +102,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (recommendations:read; non-admin filtered to assigned branch orders).
   app.get(
     "/orders",
     { preHandler: [authGuards.requirePermission("recommendations:read")] },
@@ -125,6 +127,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; enforces targetBranchId scope inside service).
   app.post(
     "/orders",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -146,6 +149,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (recommendations:read; 404 when order branches fall outside user scope).
   app.get(
     "/orders/:id",
     { preHandler: [authGuards.requirePermission("recommendations:read")] },
@@ -163,6 +167,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; receiver manager or admin opens donor approval).
   app.post(
     "/orders/:id/request",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -192,6 +197,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; donor branch manager sends or admin overrides with force+comment).
   app.post(
     "/orders/:id/commit",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -221,6 +227,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; donor declines incoming transfer or receiver rejects suggestion).
   app.post(
     "/orders/:id/decline",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -250,6 +257,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; receiver or admin reassigns declined transfer to another donor).
   app.post(
     "/orders/:id/reroute",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -279,6 +287,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; requester or admin cancels pending request before commit).
   app.post(
     "/orders/:id/cancel",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -308,6 +317,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (orders:receive; receiving-branch user or admin marks order DELIVERED).
   app.post(
     "/orders/:id/receive",
     { preHandler: [authGuards.requirePermission("orders:receive")] },
@@ -337,6 +347,7 @@ export function registerOrderRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; reopens recent decision within 24h window and user scope).
   app.post(
     "/orders/:id/reopen",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },

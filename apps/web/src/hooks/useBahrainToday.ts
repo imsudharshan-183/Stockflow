@@ -5,6 +5,8 @@ import { getBahrainToday, type BahrainToday } from "@/lib/bahrainDate";
  * Returns Asia/Bahrain's current business date and re-checks every minute so the
  * date label updates at Bahrain midnight even if a browser tab remains open.
  */
+// Refresh at Bahrain midnight (and on tab resume, since browsers throttle background timers) so
+// date pickers and stale-data badges flip at 00:00 UTC+3 without requiring a manual page reload.
 export function useBahrainToday(nowFn: () => number = () => Date.now()): BahrainToday {
   const [today, setToday] = useState<BahrainToday>(() => getBahrainToday(nowFn()));
 

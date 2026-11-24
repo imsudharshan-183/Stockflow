@@ -55,6 +55,7 @@ export function registerUsersRoutes(
   app.register(async (adminScope) => {
     adminScope.addHook("preHandler", authGuards.requirePermission("users:manage"));
 
+    // RBAC: Admin only (users:manage via adminScope hook; returns sanitized user summaries).
     adminScope.get("/users", async () => {
       const records = await userRepo.list();
       return UserListSchema.parse({
@@ -62,6 +63,7 @@ export function registerUsersRoutes(
       });
     });
 
+    // RBAC: Admin only (users:manage via adminScope hook; enforces canManageRole hierarchy on create).
     adminScope.post("/users", async (request, reply) => {
       const parsed = RouteCreateUserSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -93,6 +95,7 @@ export function registerUsersRoutes(
       return reply.code(201).send(UserSchema.parse(toPublicUser(created)));
     });
 
+    // RBAC: Admin only (users:manage via adminScope hook; enforces canManageRole and self-protection).
     adminScope.patch("/users/:id", async (request, reply) => {
       const { id } = request.params as { id: string };
       const parsed = RouteUpdateUserSchema.safeParse(request.body);
@@ -158,6 +161,7 @@ export function registerUsersRoutes(
       return UserSchema.parse(toPublicUser(updated));
     });
 
+    // RBAC: Admin only (users:manage via adminScope hook; enforces canManageRole over target user).
     adminScope.post("/users/:id/reset-password", async (request, reply) => {
       const { id } = request.params as { id: string };
       const parsed = ResetPasswordSchema.safeParse(request.body);
@@ -183,6 +187,7 @@ export function registerUsersRoutes(
       return { ok: true };
     });
 
+    // RBAC: Admin only (users:manage via adminScope hook; deactivates lower-privileged targets and revokes tokens).
     adminScope.delete("/users/:id", async (request, reply) => {
       const { id } = request.params as { id: string };
       const target = await userRepo.findById(id);

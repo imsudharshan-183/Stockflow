@@ -50,6 +50,7 @@ export function registerStockRoutes(
   let cachedDbHealth: { statusCode: 200 | 503; body: DbHealth; expiresAt: number } | null = null;
   let inflightDbPing: Promise<{ statusCode: 200 | 503; body: DbHealth }> | null = null;
 
+  // RBAC: Public liveness probe (secret-redacted diagnostics only).
   app.get("/health", async () => {
     return HealthSchema.parse({
       status: "ok",
@@ -59,6 +60,7 @@ export function registerStockRoutes(
     });
   });
 
+  // RBAC: Public DB readiness probe (cached 5s, secret-redacted).
   app.get("/health/db", async (_request, reply) => {
     const now = Date.now();
     if (cachedDbHealth && now < cachedDbHealth.expiresAt) {
@@ -109,6 +111,7 @@ export function registerStockRoutes(
     return reply.code(result.statusCode).send(result.body);
   });
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; non-admin sliced to assigned branches).
   app.get(
     "/kpis",
     { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
@@ -132,6 +135,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff; non-admin sliced to assigned branches).
   app.get(
     "/kpis/live",
     { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
@@ -152,6 +156,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (audit:read; 403 for staff; non-admin filtered to assigned branches).
   app.get(
     "/audit",
     { preHandler: [authGuards.requirePermission("audit:read")] },
@@ -169,6 +174,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (recommendations:read; non-admin filtered to assigned branches).
   app.get(
     "/recommendations",
     { preHandler: [authGuards.requirePermission("recommendations:read")] },
@@ -179,6 +185,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (dashboard:financial:scoped; 403 for staff or out-of-scope branch).
   app.get(
     "/branches/:id",
     // DECISION: Branch detail exposes financial BD rollups (deadStockValue, lostSalesAtRisk, netBenefit)
@@ -196,6 +203,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (catalog:view; non-admin inventory rows scoped to assigned branches).
   app.get(
     "/products/:sku",
     { preHandler: [authGuards.requirePermission("catalog:view")] },
@@ -208,6 +216,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; 403 for staff or out-of-scope branch).
   app.post(
     "/recommendations/:id/approve",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -216,6 +225,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; 403 for staff or out-of-scope branch).
   app.post(
     "/recommendations/:id/reject",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -225,6 +235,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; 403 for staff or expired 24h reopen window).
   app.post(
     "/recommendations/:id/reopen",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
@@ -250,6 +261,7 @@ export function registerStockRoutes(
     },
   );
 
+  // RBAC: Admin and manager (recommendations:decide; per-item branch scope enforced inside service).
   app.post(
     "/recommendations/batch/decide",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },

@@ -129,6 +129,8 @@ export class KpiService {
 
   kpis(user?: User, branchId?: string): KpiSummary {
     ensureInitializedSyncIfPossible(this.runtime);
+    // IMPORTANT: Post-plan scoping—@stockflow/core runs once on the full network so cross-branch donor
+    // matching stays intact; this method slices KPIs to the caller's allowed branches afterward.
     if (!branchId && (!user || can(user.role, "dashboard:financial:network"))) {
       if (this.runtime.committedDeltas.size === 0) {
         return this.runtime.analysis.kpis;
@@ -178,6 +180,8 @@ export class KpiService {
       }
     }
     const scopedList = branchId ? [branchId] : allowedList;
+    // IMPORTANT: Key cached rollups by sorted branch IDs + `planVersion` (physical stock/sales writes)
+    // + `decisionVersion` (order overlay changes) so neither stale data nor cross-branch leaks occur.
     const cacheKey = `${[...scopedList].sort().join("|")}::v${this.runtime.planVersion}::d${this.runtime.decisionVersion}`;
     const cached = this.runtime.scopedKpiCache.get(cacheKey);
     if (cached) return cached;
@@ -366,6 +370,8 @@ export class KpiService {
 
     const nowMs = this.runtime.now();
     const computedAt = new Date(nowMs).toISOString();
+    // IMPORTANT: Compare against Asia/Bahrain (UTC+3) today so midnight sales near UTC day
+    // boundaries never misclassify yesterday's close as current or stale.
     const todayBahrain = getBahrainToday(nowMs).isoDate;
     const asOfDataDate = this.computeAsOfDataDate(branchIndices);
     const staleDataDays = Math.max(0, diffCalendarDays(todayBahrain, asOfDataDate));

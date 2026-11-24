@@ -110,6 +110,8 @@ export interface LifecycleEvaluation {
   effectiveStatus: "PENDING" | "APPROVED" | "REJECTED";
 }
 
+// DECISION: Break the 3-day decline snooze early only on a +/-50% deterioration so transient daily noise
+// does not re-nag buyers, while genuine stockout spikes surface for immediate re-evaluation.
 function isWorsened(
   currentNetBenefit: number,
   currentCoverDays: number | null,
@@ -130,6 +132,8 @@ function isWorsened(
   return false;
 }
 
+// DECISION: Lifecycle buckets (pending / in_progress / decided) and 24h reopen eligibility are computed
+// on read using the injectable `nowMs` clock rather than cron mutations—avoiding DB write races and dataVersion bumps.
 export function evaluateDecisionLifecycle(params: {
   recExists: boolean;
   currentNetBenefit: number;
@@ -189,12 +193,15 @@ export function evaluateDecisionLifecycle(params: {
         order.origin === "ENGINE" &&
         order.events.length === 1 &&
         order.events[0]?.action === "MIGRATED";
+      // Un-reopened workflow orders stay In Progress until RECEIVED so cross-branch dispatch never
+      // silently drops off the active queue; migrated legacy approvals still age out at APPROVED_ACTIVE_DAYS.
       const bucket: QueueLifecycleView =
         isMigratedLegacyOnly &&
         Number.isFinite(refMs) &&
         nowMs - refMs >= config.approvedActiveDays * DAY_MS
           ? "decided"
           : "in_progress";
+      // Enforce 24h reopen cutoff from commit/request timestamp so settled fulfillment cannot be undone later.
       const canReopen = Number.isFinite(refMs) ? nowMs - refMs <= reopenWindowMs : false;
       return {
         bucket,

@@ -357,6 +357,7 @@ export function registerSalesEntriesRoutes(
   /**
    * GET /api/sales-entries/template.csv
    */
+  // RBAC: Admin, manager, staff (sales:enter; downloads blank sample CSV template).
   app.get(
     "/sales-entries/template.csv",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
@@ -374,6 +375,7 @@ export function registerSalesEntriesRoutes(
    * GET /api/sales/imports
    * Recent CSV import history (admin sees all, manager/staff see only their own).
    */
+  // RBAC: Authenticated (any role; admin sees all imports, manager/staff see only their own uploads).
   app.get(
     "/sales/imports",
     { preHandler: [authGuards.authenticate] },
@@ -392,6 +394,7 @@ export function registerSalesEntriesRoutes(
    * GET /api/sales-entries
    * Paginated, filtered, branch-scoped list of recorded sales entries.
    */
+  // RBAC: Admin, manager, staff (sales:enter; non-admin restricted to assigned branches, 403 otherwise).
   app.get(
     "/sales-entries",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
@@ -430,6 +433,7 @@ export function registerSalesEntriesRoutes(
    * POST /api/sales-entries
    * Manual single-entry upsert on (branchId, sku, date).
    */
+  // RBAC: Admin, manager, staff (sales:enter; enforces isBranchInScope on target branchId).
   app.post(
     "/sales-entries",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
@@ -488,6 +492,7 @@ export function registerSalesEntriesRoutes(
    * PATCH /api/sales-entries/:id
    * Edits unitsSold and/or onHand only; branchId, sku, and date are immutable.
    */
+  // RBAC: Admin, manager, staff (sales:enter; enforces isBranchInScope on existing entry branchId).
   app.patch(
     "/sales-entries/:id",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
@@ -558,6 +563,7 @@ export function registerSalesEntriesRoutes(
   /**
    * DELETE /api/sales-entries/:id
    */
+  // RBAC: Admin, manager, staff (sales:enter; enforces isBranchInScope on target entry branchId).
   app.delete(
     "/sales-entries/:id",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
@@ -605,6 +611,7 @@ export function registerSalesEntriesRoutes(
    * POST /api/sales-entries/import
    * Bulk CSV upload via multipart/form-data field "file" (max 5MB).
    */
+  // RBAC: Admin, manager, staff (sales:enter; per-row branch scope enforced inside validation loop).
   app.post(
     "/sales-entries/import",
     { preHandler: [authGuards.requirePermission("sales:enter")] },

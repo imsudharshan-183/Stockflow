@@ -16,7 +16,7 @@ export function registerAuthRoutes(
   authGuards: AuthContext,
   env: Env,
 ): void {
-  // Rate limited login route
+  // RBAC: Public (rate-limited 5 req/min; verifies credentials and sets HTTP-only refresh cookie).
   app.post(
     "/auth/login",
     {
@@ -65,6 +65,7 @@ export function registerAuthRoutes(
     },
   );
 
+  // RBAC: Public with valid refresh cookie/token (rotates refresh token and issues new access JWT).
   app.post("/auth/refresh", async (request, reply) => {
     try {
       const cookieToken = request.cookies[COOKIE_NAME];
@@ -102,6 +103,7 @@ export function registerAuthRoutes(
     }
   });
 
+  // RBAC: Public (revokes presented refresh cookie/token).
   app.post("/auth/logout", async (request, reply) => {
     const refreshToken = request.cookies[COOKIE_NAME];
     await authService.logout(refreshToken);
@@ -109,6 +111,7 @@ export function registerAuthRoutes(
     return { ok: true };
   });
 
+  // RBAC: Authenticated (any active role; returns current user session).
   app.get(
     "/auth/me",
     { preHandler: [authGuards.authenticate] },

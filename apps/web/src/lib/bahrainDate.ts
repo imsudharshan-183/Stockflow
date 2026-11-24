@@ -1,3 +1,5 @@
+// Always anchor "today" and date arithmetic to Asia/Bahrain (UTC+3) so browsers in other
+// time zones do not validate daily sales entries or flag stale banners against the wrong calendar day.
 export const BAHRAIN_TIME_ZONE = "Asia/Bahrain";
 
 const bahrainPartsFormatter = new Intl.DateTimeFormat("en-GB", {

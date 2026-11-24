@@ -40,7 +40,8 @@ export function useLocationScope() {
     return null;
   }, [isStaff, user, urlLocation, savedLocation, isAllowed]);
 
-  // Sync saved location into URL if URL doesn't have one
+  // Sync saved location into URL if URL doesn't have one (skipped for single-branch staff whose
+  // branch scope is fixed and needs no URL query switcher).
   useEffect(() => {
     if (!urlLocation && selectedLocation && (!isStaff || (user?.branchIds.length ?? 0) > 1)) {
       setSearchParams(

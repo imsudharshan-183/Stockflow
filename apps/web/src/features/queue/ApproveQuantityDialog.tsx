@@ -67,6 +67,8 @@ export function ApproveQuantityDialog({
     }
   }, [open, order]);
 
+  // Mirror OrderService.commit server bounds client-side: transfers respect minTransferQty and live donor
+  // surplus without exceeding engine recommendation; reorders allow up to 2x with required comment.
   const minQty = order?.type === "TRANSFER" ? DEFAULT_POLICY.minTransferQty : 1;
   const maxQty = useMemo(() => {
     if (!order) return 0;
@@ -116,6 +118,8 @@ export function ApproveQuantityDialog({
       order.engineSnapshot.unitPrice !== undefined &&
       order.engineSnapshot.unitCost !== undefined
     ) {
+      // Re-run @stockflow/core benefit physics when unit economics exist; fall back to proportional
+      // scaling only for legacy migrated orders whose snapshot lacks unitPrice/unitCost.
       const benefit = computeActionBenefitForQuantity({
         type: order.type,
         quantity: parsedQty,

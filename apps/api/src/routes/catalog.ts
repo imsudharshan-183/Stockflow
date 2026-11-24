@@ -27,7 +27,7 @@ export function registerCatalogRoutes(
   services: StockServices,
   authGuards: AuthContext,
 ): void {
-  // Publicly readable for authenticated users (admin, manager, staff) with catalog:view
+  // RBAC: Admin, manager, staff (catalog:view; non-admin queries exclude archived products).
   app.get(
     "/catalog/products",
     { preHandler: [authGuards.requirePermission("catalog:view")] },
@@ -50,6 +50,7 @@ export function registerCatalogRoutes(
     },
   );
 
+  // RBAC: Admin, manager, staff (catalog:view; single SKU catalog metadata and history).
   app.get(
     "/catalog/products/:sku",
     { preHandler: [authGuards.requirePermission("catalog:view")] },
@@ -70,6 +71,7 @@ export function registerCatalogRoutes(
   app.register(async (adminScope) => {
     adminScope.addHook("preHandler", authGuards.requirePermission("products:manage"));
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.post("/catalog/products", async (request, reply) => {
       const parsed = CreateProductSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -91,6 +93,7 @@ export function registerCatalogRoutes(
       }
     });
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.patch("/catalog/products/:sku", async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {
@@ -126,6 +129,7 @@ export function registerCatalogRoutes(
       }
     });
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.patch("/catalog/products/:sku/archive", async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {
@@ -151,6 +155,7 @@ export function registerCatalogRoutes(
       }
     });
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.patch("/catalog/products/:sku/restore", async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {
@@ -173,6 +178,7 @@ export function registerCatalogRoutes(
       }
     });
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.delete("/catalog/products/:sku", async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {
@@ -198,6 +204,7 @@ export function registerCatalogRoutes(
       }
     });
 
+    // RBAC: Admin only (products:manage via adminScope hook).
     adminScope.post("/catalog/products/:sku/sample-history", async (request, reply) => {
       const pathParsed = PathSkuSchema.safeParse(request.params);
       if (!pathParsed.success) {
