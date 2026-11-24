@@ -204,9 +204,12 @@ export {
   totalTransferCost,
   totalTransferCostBreakdown,
   wasInStock,
+  computeActionBenefitForQuantity,
 } from "./engine/index.js";
 export type {
   ActionDraft,
+  ActionQuantityBenefitInput,
+  ActionQuantityBenefitResult,
   CommittedDelta,
   CommittedDeltaStore,
   Forecaster,
@@ -264,6 +267,7 @@ export {
   OrderStatusSchema,
   OrderTransitionActionSchema,
   OrderTypeSchema,
+  QuantityChangeReasonSchema,
   ReplenishmentOrderSchema,
   ResolveStockAlertResponseSchema,
   TERMINAL_ORDER_STATUSES,
@@ -291,6 +295,7 @@ export type {
   OrderStatus,
   OrderTransitionAction,
   OrderType,
+  QuantityChangeReason,
   ReplenishmentOrder,
   ResolveStockAlertResponse,
   TransitionDecision,

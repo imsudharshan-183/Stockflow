@@ -284,6 +284,7 @@ export class StockAlertService {
         sourceBranchId: sourceBranch?.id ?? null,
         sourceBranchName: sourceBranch?.name ?? null,
         quantity,
+        qty: quantity,
         requestedBy: actor,
         linkedAlertId: existing.id,
         engineSnapshot,

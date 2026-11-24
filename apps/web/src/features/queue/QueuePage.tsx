@@ -48,6 +48,7 @@ import {
   OrderDrawer,
   type OrderActionCapabilities,
 } from "@/features/queue/OrderDrawer";
+import { ApproveQuantityDialog } from "@/features/queue/ApproveQuantityDialog";
 import { RequestStockDialog } from "@/features/queue/RequestStockDialog";
 import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { useLocationScope } from "@/hooks/useLocationScope";
@@ -73,6 +74,7 @@ import {
   type OrderQueueTab,
   type OrderStatus,
   type OrderType,
+  type QuantityChangeReason,
   type ReplenishmentOrder,
   type User,
 } from "@stockflow/core";
@@ -116,8 +118,10 @@ export function QueuePage() {
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
   const [declineTarget, setDeclineTarget] = useState<ReplenishmentOrder | null>(null);
   const [declineComment, setDeclineComment] = useState("");
-  const [overrideTarget, setOverrideTarget] = useState<ReplenishmentOrder | null>(null);
-  const [overrideComment, setOverrideComment] = useState("");
+  const [approveTarget, setApproveTarget] = useState<{
+    order: ReplenishmentOrder;
+    requiresAdminOverride: boolean;
+  } | null>(null);
   const [donorModalTarget, setDonorModalTarget] = useState<{
     mode: "reroute" | "request";
     order: ReplenishmentOrder;
@@ -130,16 +134,32 @@ export function QueuePage() {
   const invalidateAll = () => invalidateOperationalQueries(queryClient);
 
   const commitMutation = useMutation({
-    mutationFn: ({ id, comment, force }: { id: string; comment?: string; force?: boolean }) =>
-      api.commitOrder(id, { ...(comment ? { comment } : {}), ...(force ? { force } : {}) }),
+    mutationFn: ({
+      id,
+      approvedQty,
+      dispositionCode,
+      comment,
+      force,
+    }: {
+      id: string;
+      approvedQty?: number;
+      dispositionCode?: QuantityChangeReason;
+      comment?: string;
+      force?: boolean;
+    }) =>
+      api.commitOrder(id, {
+        ...(approvedQty !== undefined ? { approvedQty } : {}),
+        ...(dispositionCode ? { dispositionCode } : {}),
+        ...(comment ? { comment } : {}),
+        ...(force ? { force } : {}),
+      }),
     onSuccess: async (updated) => {
       toast.success(
         updated.type === "TRANSFER" && updated.sourceBranchId
           ? `Sent ${formatNumber(updated.quantity)} units for ${updated.sku}`
           : `Approved ${actionLabel(updated.type).toLowerCase()} for ${updated.sku}`,
       );
-      setOverrideTarget(null);
-      setOverrideComment("");
+      setApproveTarget(null);
       await invalidateAll();
     },
     onError: (err: Error) => toast.error(err.message || "Unable to approve order"),
@@ -267,12 +287,19 @@ export function QueuePage() {
   const totalWorth = useMemo(
     () =>
       ordersQuery.data?.totalNetBenefit ??
-      serverRows.reduce((sum, row) => sum + row.engineSnapshot.netBenefitBhd, 0),
+      serverRows.reduce(
+        (sum, row) => sum + (row.approvedNetBenefitBhd ?? row.engineSnapshot.netBenefitBhd),
+        0,
+      ),
     [ordersQuery.data?.totalNetBenefit, serverRows],
   );
   const headerCount = ordersQuery.data?.total ?? serverRows.length;
   const filteredWorth = useMemo(
-    () => filteredRows.reduce((sum, row) => sum + row.engineSnapshot.netBenefitBhd, 0),
+    () =>
+      filteredRows.reduce(
+        (sum, row) => sum + (row.approvedNetBenefitBhd ?? row.engineSnapshot.netBenefitBhd),
+        0,
+      ),
     [filteredRows],
   );
 
@@ -308,16 +335,12 @@ export function QueuePage() {
   }
 
   function handleCommitAction(order: ReplenishmentOrder) {
-    if (
+    const requiresAdminOverride = Boolean(
       user?.role === "admin" &&
-      order.type === "TRANSFER" &&
-      (order.status === "AWAITING_DONOR" || order.status === "OPEN_REQUEST")
-    ) {
-      setOverrideTarget(order);
-      setOverrideComment("");
-      return;
-    }
-    commitMutation.mutate({ id: order.id });
+        order.type === "TRANSFER" &&
+        (order.status === "AWAITING_DONOR" || order.status === "OPEN_REQUEST"),
+    );
+    setApproveTarget({ order, requiresAdminOverride });
   }
 
   function handleRequestTransferAction(order: ReplenishmentOrder) {
@@ -701,7 +724,9 @@ export function QueuePage() {
                         </>
                       ) : (
                         <TableCell className="px-3 text-right font-semibold text-foreground tabular-nums">
-                          {formatMoneyFull(order.engineSnapshot.netBenefitBhd)}
+                          {formatMoneyFull(
+                            order.approvedNetBenefitBhd ?? order.engineSnapshot.netBenefitBhd,
+                          )}
                         </TableCell>
                       )}
 
@@ -979,66 +1004,25 @@ export function QueuePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Admin Force-Approve Comment Dialog */}
-      <Dialog
-        open={overrideTarget !== null}
+      {/* Approve / Send Stock Quantity Dialog (with optional Admin Override) */}
+      <ApproveQuantityDialog
+        order={approveTarget?.order ?? null}
+        open={approveTarget !== null}
+        isSubmitting={commitMutation.isPending}
+        requiresAdminOverride={approveTarget?.requiresAdminOverride ?? false}
         onOpenChange={(open) => {
           if (!open) {
-            setOverrideTarget(null);
-            setOverrideComment("");
+            setApproveTarget(null);
           }
         }}
-      >
-        <DialogContent className="max-w-md rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>Admin override approval</DialogTitle>
-            <DialogDescription>
-              Approving a request that is waiting for a sending branch or open requires a brief override comment.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <label htmlFor="override-comment" className="text-xs font-medium text-foreground">
-              Override comment (required)
-            </label>
-            <Input
-              id="override-comment"
-              placeholder="e.g., Urgent weekend allocation approved by ops"
-              value={overrideComment}
-              onChange={(e) => setOverrideComment(e.target.value)}
-              maxLength={500}
-              required
-            />
-          </div>
-          <DialogFooter>
-            <Button
-              variant="secondary"
-              disabled={commitMutation.isPending}
-              onClick={() => {
-                setOverrideTarget(null);
-                setOverrideComment("");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              loading={commitMutation.isPending}
-              disabled={!overrideComment.trim()}
-              onClick={() => {
-                if (overrideTarget && overrideComment.trim()) {
-                  commitMutation.mutate({
-                    id: overrideTarget.id,
-                    comment: overrideComment.trim(),
-                    force: true,
-                  });
-                }
-              }}
-            >
-              Confirm override approval
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        onConfirm={(payload) => {
+          if (!approveTarget) return;
+          commitMutation.mutate({
+            id: approveTarget.order.id,
+            ...payload,
+          });
+        }}
+      />
 
       {/* Reroute / Select Sending Branch Dialog */}
       <Dialog

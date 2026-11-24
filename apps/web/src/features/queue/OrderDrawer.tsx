@@ -23,7 +23,11 @@ import {
   orderOriginLabel,
   orderStatusLabel,
 } from "@/lib/format";
-import { ORDER_ACTION_LABELS, getOrderEventDisplayLabel } from "@/lib/labels";
+import {
+  ORDER_ACTION_LABELS,
+  getOrderEventDisplayLabel,
+  quantityReasonLabel,
+} from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { formatProductDisplayName, type ReplenishmentOrder } from "@stockflow/core";
 
@@ -116,11 +120,19 @@ export function OrderDrawer({
                   <p className="mt-1 text-xl font-semibold text-foreground tabular-nums">
                     {formatNumber(order.quantity)} units
                   </p>
+                  {order.engineSnapshot.qty !== undefined &&
+                  order.engineSnapshot.qty !== order.quantity ? (
+                    <p className="mt-0.5 text-[11px] text-muted-foreground tabular-nums">
+                      Engine suggested: {formatNumber(order.engineSnapshot.qty)} units
+                    </p>
+                  ) : null}
                 </div>
                 <div className="rounded-xl border border-border bg-card p-3.5 shadow-xs">
                   <p className="text-xs text-muted-foreground">Estimated gain</p>
                   <p className="mt-1 text-xl font-semibold text-foreground tabular-nums">
-                    {formatMoneyFull(order.engineSnapshot.netBenefitBhd)}
+                    {formatMoneyFull(
+                      order.approvedNetBenefitBhd ?? order.engineSnapshot.netBenefitBhd,
+                    )}
                   </p>
                 </div>
               </div>
@@ -142,8 +154,12 @@ export function OrderDrawer({
                     <div>
                       <dt className="text-muted-foreground">Freight cost</dt>
                       <dd className="font-medium text-foreground">
-                        {order.engineSnapshot.freightCostBhd !== undefined
-                          ? formatMoneyPrecise(order.engineSnapshot.freightCostBhd)
+                        {(order.approvedFreightCostBhd ?? order.engineSnapshot.freightCostBhd) !==
+                        undefined
+                          ? formatMoneyPrecise(
+                              (order.approvedFreightCostBhd ??
+                                order.engineSnapshot.freightCostBhd)!,
+                            )
                           : "—"}
                       </dd>
                     </div>
@@ -217,6 +233,17 @@ export function OrderDrawer({
                               </span>
                             </span>
                             {ev.isAdminOverride ? <Badge tone="over">Override</Badge> : null}
+                            {ev.engineQty !== undefined &&
+                            ev.approvedQty !== undefined &&
+                            ev.engineQty !== ev.approvedQty ? (
+                              <Badge variant="outline" className="text-[10px] tabular-nums">
+                                {`Engine: ${formatNumber(ev.engineQty)} -> Approved: ${formatNumber(ev.approvedQty)}${
+                                  ev.dispositionCode
+                                    ? ` (${quantityReasonLabel(ev.dispositionCode)})`
+                                    : ""
+                                }`}
+                              </Badge>
+                            ) : null}
                           </div>
                           <span className="text-muted-foreground tabular-nums">
                             {formatDateTime(ev.at)}

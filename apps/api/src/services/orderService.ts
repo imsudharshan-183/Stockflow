@@ -4,9 +4,11 @@ import {
   DEFAULT_POLICY,
   OrderEventSchema,
   OrderListResponseSchema,
+  QuantityChangeReasonSchema,
   ReplenishmentOrderSchema,
   can,
   canTransition,
+  computeActionBenefitForQuantity,
   coverDaysOf,
   haversineDistanceKm,
   rankDonorCandidates,
@@ -397,6 +399,10 @@ export class OrderService {
     const tc = resolveBranchCoords(targetBranch);
     const dc = resolveBranchCoords(donorBranch);
     const distanceKm = tc && dc ? round2(haversineDistanceKm(dc, tc)) : null;
+    const product = this.runtime.data.products.find((p) => p.sku === rec.sku);
+    const donorPos = rec.donorBranchId
+      ? findRawPosition(this.runtime.data, this.runtime.analysis, rec.sku, rec.donorBranchId)
+      : undefined;
     const baseTs = `${this.runtime.data.asOf}T00:00:00.000Z`;
 
     return ReplenishmentOrderSchema.parse({
@@ -412,15 +418,20 @@ export class OrderService {
       sourceBranchId: rec.donorBranchId,
       sourceBranchName: rec.donorBranchName,
       quantity: rec.quantity,
+      qty: rec.quantity,
       requestedBy: null,
       linkedAlertId: null,
       engineSnapshot: {
         recommendationId: rec.id,
+        qty: rec.quantity,
         netBenefitBhd: rec.netBenefit,
         reasonCodes: [...rec.reasonCodes],
         reason: rec.reason,
         distanceKm,
         freightCostBhd: rec.metrics.transferCost,
+        unitPrice: product?.price,
+        unitCost: product?.cost,
+        donorVelocity: donorPos?.velocity,
         metrics: rec.metrics,
       },
       createdAt: baseTs,
@@ -708,7 +719,9 @@ export class OrderService {
         return true;
       })
       .sort((a, b) => {
-        const benDiff = b.engineSnapshot.netBenefitBhd - a.engineSnapshot.netBenefitBhd;
+        const benDiff =
+          (b.approvedNetBenefitBhd ?? b.engineSnapshot.netBenefitBhd) -
+          (a.approvedNetBenefitBhd ?? a.engineSnapshot.netBenefitBhd);
         if (benDiff !== 0) return benDiff;
         return b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id);
       });
@@ -736,7 +749,10 @@ export class OrderService {
     }
 
     const totalNetBenefit = round2(
-      lifecycleOrders.reduce((sum, item) => sum + item.engineSnapshot.netBenefitBhd, 0),
+      lifecycleOrders.reduce(
+        (sum, item) => sum + (item.approvedNetBenefitBhd ?? item.engineSnapshot.netBenefitBhd),
+        0,
+      ),
     );
 
     return LifecycleOrderListResponseSchema.parse({
@@ -853,6 +869,7 @@ export class OrderService {
       sourceBranchId: sourceBranch?.id ?? null,
       sourceBranchName: sourceBranch?.name ?? null,
       quantity: input.quantity,
+      qty: input.quantity,
       requestedBy: actor,
       linkedAlertId: input.linkedAlertId ?? null,
       engineSnapshot,
@@ -932,6 +949,7 @@ export class OrderService {
       sourceBranchId: sourceBranch.id,
       sourceBranchName: sourceBranch.name,
       quantity,
+      qty: quantity,
       requestedBy: actor,
       engineSnapshot,
       createdAt: expectedStatus === null ? nowIso : order.createdAt,
@@ -982,6 +1000,47 @@ export class OrderService {
       force: body.force,
     });
 
+    const engineQty = order.engineSnapshot.qty ?? order.quantity;
+    const approvedQty = body.approvedQty === undefined ? order.quantity : body.approvedQty;
+    if (!Number.isFinite(approvedQty) || !Number.isInteger(approvedQty)) {
+      throw new OrderValidationError("Approved quantity must be a whole integer");
+    }
+
+    if (order.type === "TRANSFER") {
+      if (approvedQty < DEFAULT_POLICY.minTransferQty || approvedQty > engineQty) {
+        throw new OrderValidationError(
+          `Transfer approved quantity must be between ${DEFAULT_POLICY.minTransferQty} and ${engineQty}`,
+        );
+      }
+    } else if (order.type === "REORDER") {
+      const maxReorder = engineQty * 2;
+      if (approvedQty < 1 || approvedQty > maxReorder) {
+        throw new OrderValidationError(
+          `Reorder approved quantity must be between 1 and ${maxReorder}`,
+        );
+      }
+      if (approvedQty > engineQty && !comment) {
+        throw new OrderValidationError(
+          "A comment is required when approving more than the engine suggested reorder quantity",
+        );
+      }
+    } else if (approvedQty < 1 || approvedQty > engineQty) {
+      throw new OrderValidationError(
+        `Markdown approved quantity must be between 1 and ${engineQty}`,
+      );
+    }
+
+    let quantityChangeReason: string | undefined;
+    if (approvedQty !== engineQty) {
+      const parsedReason = QuantityChangeReasonSchema.safeParse(body.dispositionCode);
+      if (!parsedReason.success) {
+        throw new OrderValidationError(
+          "A valid quantity change reason (CASE_PACK, TRUCK_CAPACITY, PROMO_HOLD, OTHER) is required when changing quantity",
+        );
+      }
+      quantityChangeReason = parsedReason.data;
+    }
+
     if (this.runtime.inflightOrderIds.has(order.id)) {
       throw new OrderConflictError("Order transition already in progress");
     }
@@ -989,12 +1048,59 @@ export class OrderService {
     this.runtime.inflightOrderIds.add(order.id);
     let staged: Array<{ sku: string; branchId: string; reserved: number; inTransit: number }> = [];
     try {
-      staged = this.stageOrderCommitDelta(order);
+      const orderForCommit = { ...order, quantity: approvedQty, qty: approvedQty };
+      staged = this.stageOrderCommitDelta(orderForCommit);
       this.inflightStagedByOrderId.set(order.id, staged);
+
+      let approvedNetBenefitBhd = order.engineSnapshot.netBenefitBhd;
+      let approvedFreightCostBhd = order.engineSnapshot.freightCostBhd;
+      if (approvedQty !== engineQty) {
+        const product = this.runtime.data.products.find((p) => p.sku === order.sku);
+        const unitPrice = order.engineSnapshot.unitPrice ?? product?.price;
+        const unitCost = order.engineSnapshot.unitCost ?? product?.cost;
+        if (unitPrice !== undefined && unitCost !== undefined) {
+          const donorRaw = order.sourceBranchId
+            ? findRawPosition(this.runtime.data, this.runtime.analysis, order.sku, order.sourceBranchId)
+            : undefined;
+          const targetRaw = findRawPosition(
+            this.runtime.data,
+            this.runtime.analysis,
+            order.sku,
+            order.targetBranchId,
+          );
+          const benefit = computeActionBenefitForQuantity({
+            type: order.type,
+            quantity: approvedQty,
+            unitPrice,
+            unitCost,
+            distanceKm: order.engineSnapshot.distanceKm ?? 0,
+            targetLostUnits: order.engineSnapshot.metrics?.lostUnits ?? targetRaw?.lostUnits ?? 0,
+            targetCoverDays: order.engineSnapshot.metrics?.coverDays ?? targetRaw?.coverDays ?? null,
+            targetVelocity: order.engineSnapshot.metrics?.velocity ?? targetRaw?.velocity ?? 0,
+            donorCoverDays:
+              order.engineSnapshot.metrics?.donorCoverDays ?? donorRaw?.coverDays ?? null,
+            donorVelocity: order.engineSnapshot.donorVelocity ?? donorRaw?.velocity ?? 0,
+          });
+          approvedNetBenefitBhd = benefit.netBenefitBhd;
+          approvedFreightCostBhd =
+            order.type === "TRANSFER" ? benefit.freightCostBhd : order.engineSnapshot.freightCostBhd;
+        }
+      }
+
+      const engineSnapshot =
+        order.engineSnapshot.qty !== undefined
+          ? order.engineSnapshot
+          : { ...order.engineSnapshot, qty: engineQty };
+
       const nowIso = new Date(this.runtime.now()).toISOString();
       const actor = actorRefOf(user);
       const updatedOrder = ReplenishmentOrderSchema.parse({
         ...order,
+        quantity: approvedQty,
+        qty: approvedQty,
+        approvedNetBenefitBhd,
+        approvedFreightCostBhd,
+        engineSnapshot,
         status: nextStatus,
         requestedBy: order.requestedBy ?? actor,
         createdAt: expectedStatus === null ? nowIso : order.createdAt,
@@ -1010,10 +1116,12 @@ export class OrderService {
         action: "COMMIT",
         fromStatus: order.status,
         toStatus: nextStatus,
-        dispositionCode: body.dispositionCode,
+        dispositionCode: quantityChangeReason ?? body.dispositionCode,
         comment,
         sourceBranchId: order.sourceBranchId,
-        quantity: order.quantity,
+        quantity: approvedQty,
+        engineQty,
+        approvedQty,
         isAdminOverride: isAdminOverride || undefined,
       });
 
@@ -1159,6 +1267,7 @@ export class OrderService {
       sourceBranchId: nextDonor.id,
       sourceBranchName: nextDonor.name,
       quantity,
+      qty: quantity,
       requestedBy: order.requestedBy ?? actor,
       engineSnapshot,
       createdAt: expectedStatus === null ? nowIso : order.createdAt,

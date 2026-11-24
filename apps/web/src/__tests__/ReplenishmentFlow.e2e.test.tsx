@@ -343,6 +343,7 @@ describe("Stage D Happy-Path E2E: staff alert -> manager request -> donor releas
     const step3 = renderStep(<QueuePage />, "/queue?tab=incoming");
     await screen.findByText("90 units");
     await user.click(screen.getByRole("button", { name: /^Send Stock$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Confirm Send Stock$/i }));
     await waitFor(() => expect(state.orders[0]?.status).toBe("COMMITTED"));
     step3.unmount();
 

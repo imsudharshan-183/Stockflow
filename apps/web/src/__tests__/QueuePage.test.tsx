@@ -313,7 +313,10 @@ describe("QueuePage 3-tab governed workflow", () => {
     const reqBtn = screen.getByRole("button", { name: /Request Transfer/i });
 
     await user.click(approveBtn);
-    await waitFor(() => expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_intra_1", {}));
+    await user.click(await screen.findByRole("button", { name: /^Confirm Approve$/i }));
+    await waitFor(() =>
+      expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_intra_1", { approvedQty: 12 }),
+    );
 
     await user.click(reqBtn);
     await waitFor(() =>
@@ -368,9 +371,12 @@ describe("QueuePage 3-tab governed workflow", () => {
     await screen.findByText("85 units");
     expect(screen.getByText("105 days")).toBeInTheDocument();
 
-    // Send Stock calls commitOrder
+    // Send Stock opens quantity dialog -> confirming calls commitOrder
     await user.click(screen.getByRole("button", { name: /^Send Stock$/i }));
-    await waitFor(() => expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_inc_1", {}));
+    await user.click(await screen.findByRole("button", { name: /^Confirm Send Stock$/i }));
+    await waitFor(() =>
+      expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_inc_1", { approvedQty: 15 }),
+    );
 
     // Decline requires non-empty comment
     await user.click(screen.getByRole("button", { name: /^Decline$/i }));
@@ -420,6 +426,7 @@ describe("QueuePage 3-tab governed workflow", () => {
     await user.click(screen.getByRole("button", { name: /Confirm override approval/i }));
     await waitFor(() =>
       expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_inc_1", {
+        approvedQty: 15,
         comment: "Ops override",
         force: true,
       }),

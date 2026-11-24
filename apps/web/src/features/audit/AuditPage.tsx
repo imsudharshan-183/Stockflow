@@ -24,7 +24,11 @@ import {
   orderOriginLabel,
   orderStatusLabel,
 } from "@/lib/format";
-import { ORDER_STATUS_LABELS, getOrderEventDisplayLabel } from "@/lib/labels";
+import {
+  ORDER_STATUS_LABELS,
+  getOrderEventDisplayLabel,
+  quantityReasonLabel,
+} from "@/lib/labels";
 import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
@@ -283,7 +287,10 @@ export function AuditPage() {
                       {formatNumber(order.quantity)} units
                     </span>
                     <span className="text-muted-foreground">
-                      Estimated gain {formatMoneyFull(order.engineSnapshot.netBenefitBhd)}
+                      Estimated gain{" "}
+                      {formatMoneyFull(
+                        order.approvedNetBenefitBhd ?? order.engineSnapshot.netBenefitBhd,
+                      )}
                     </span>
                   </div>
                 </CardHeader>
@@ -346,6 +353,17 @@ export function AuditPage() {
                               {ev.actor.role}
                             </Badge>
                             {ev.isAdminOverride ? <Badge tone="over">Override</Badge> : null}
+                            {ev.engineQty !== undefined &&
+                            ev.approvedQty !== undefined &&
+                            ev.engineQty !== ev.approvedQty ? (
+                              <Badge variant="outline" className="text-[11px] tabular-nums">
+                                {`Engine: ${formatNumber(ev.engineQty)} -> Approved: ${formatNumber(ev.approvedQty)}${
+                                  ev.dispositionCode
+                                    ? ` (${quantityReasonLabel(ev.dispositionCode)})`
+                                    : ""
+                                }`}
+                              </Badge>
+                            ) : null}
                           </div>
                           <span className="text-muted-foreground tabular-nums">
                             {formatDateTime(ev.at)}

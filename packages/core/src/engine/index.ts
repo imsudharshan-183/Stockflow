@@ -60,3 +60,8 @@ export {
 export type { CommittedDelta, CommittedDeltaStore, ProjectedPosition } from "./projection.js";
 export { rankDonorCandidates } from "./donorRanking.js";
 export type { RankDonorCandidatesOptions } from "./donorRanking.js";
+export { computeActionBenefitForQuantity } from "./quantityBenefit.js";
+export type {
+  ActionQuantityBenefitInput,
+  ActionQuantityBenefitResult,
+} from "./quantityBenefit.js";

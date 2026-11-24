@@ -44,13 +44,25 @@ export type OrderEventAction = z.infer<typeof OrderEventActionSchema>;
 export const ActorRefSchema = ActedBySchema;
 export type ActorRef = z.infer<typeof ActorRefSchema>;
 
+export const QuantityChangeReasonSchema = z.enum([
+  "CASE_PACK",
+  "TRUCK_CAPACITY",
+  "PROMO_HOLD",
+  "OTHER",
+]);
+export type QuantityChangeReason = z.infer<typeof QuantityChangeReasonSchema>;
+
 export const OrderEngineSnapshotSchema = z.object({
   recommendationId: z.string().min(1).nullable().optional(),
+  qty: z.number().int().positive().optional(),
   netBenefitBhd: z.number(),
   reasonCodes: z.array(ReasonCodeSchema),
   reason: z.string(),
   distanceKm: z.number().nullable().optional(),
   freightCostBhd: z.number().optional(),
+  unitPrice: z.number().nonnegative().optional(),
+  unitCost: z.number().nonnegative().optional(),
+  donorVelocity: z.number().nonnegative().optional(),
   metrics: RecommendationMetricsSchema.optional(),
 });
 export type OrderEngineSnapshot = z.infer<typeof OrderEngineSnapshotSchema>;
@@ -67,6 +79,8 @@ export const OrderEventSchema = z.object({
   comment: z.string().trim().max(500).optional(),
   sourceBranchId: z.string().nullable().optional(),
   quantity: z.number().int().positive().optional(),
+  engineQty: z.number().int().positive().optional(),
+  approvedQty: z.number().int().positive().optional(),
   isAdminOverride: z.boolean().optional(),
 });
 export type OrderEvent = z.infer<typeof OrderEventSchema>;
@@ -84,6 +98,9 @@ export const ReplenishmentOrderSchema = z.object({
   sourceBranchId: z.string().nullable(),
   sourceBranchName: z.string().nullable(),
   quantity: z.number().int().positive(),
+  qty: z.number().int().positive().optional(),
+  approvedNetBenefitBhd: z.number().optional(),
+  approvedFreightCostBhd: z.number().optional(),
   requestedBy: ActorRefSchema.nullable(),
   linkedAlertId: z.string().nullable().default(null),
   engineSnapshot: OrderEngineSnapshotSchema,
@@ -137,6 +154,7 @@ export const OrderRequestTransferBodySchema = z.object({
 export type OrderRequestTransferBody = z.infer<typeof OrderRequestTransferBodySchema>;
 
 export const OrderCommitBodySchema = z.object({
+  approvedQty: z.number().optional(),
   dispositionCode: z.string().trim().min(1).max(80).optional(),
   comment: z.string().trim().max(500).optional(),
   force: z.boolean().optional(),
