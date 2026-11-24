@@ -2,7 +2,7 @@
 
 StockFlow is a morning action queue for a 15-branch Bahrain retail network. It ranks transfer, reorder, and markdown moves by net BHD benefit (`BD`, including Haversine inter-branch freight cost) and writes a plain-language reason for each one. All data is synthetic. Access is protected by JWT/cookie role-based authentication (`admin`, `manager`, `staff`).
 
-Why the math looks like this, and what it refuses to do, is in [docs/DECISIONS.md](docs/DECISIONS.md).
+Why the math looks like this, and what it refuses to do, is in [docs/DECISIONS.md](docs/DECISIONS.md); for the reviewer-focused mathematical walkthrough, worked example, constants table, and strategy seams, see [docs/ENGINE.md](docs/ENGINE.md).
 
 ## Quick start
 
@@ -89,8 +89,8 @@ packages/core/src
 apps/api/src
   config/           Env loading, validation and secret redaction
   plugins/          Fastify app, auth guards, error handler
-  routes/           auth, branches, catalog, locations, salesEntries, stock, stockAlerts, users
-  services/         KpiService, CatalogService, StockAlertService, DecisionService, AuthService
+  routes/           auth, branches, catalog, locations, orders, salesEntries, stock, stockAlerts, users
+  services/         KpiService, CatalogService, StockAlertService, OrderService, DecisionService, AuthService
   repositories/     Memory, MongoDB and the repository interface
   scripts/          seed-mongo, seed-users, resetDecisions, benchCold
   __tests__/, test/ Dual-repository API Vitest suites, test helpers, and golden __fixtures__
@@ -100,7 +100,7 @@ apps/web/src
   components/shared Empty/error/loading states, theme toggle, charts, glossaries
   features/         overview, queue, branches, products, data, audit, users, auth
   hooks/, lib/      Query keys, API client, design tokens, formatters
-docs/               ADR, DECISIONS, API, FRONTEND, TESTING, DEMO, NAMING, PROPOSAL
+docs/               ADR, ENGINE, DECISIONS, API, FRONTEND, TESTING, DEMO, NAMING, PROPOSAL
 scripts/            check-ui.mjs, smoke.mjs
 ```
 
