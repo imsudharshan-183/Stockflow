@@ -242,3 +242,9 @@ export {
   getBahrainToday,
   type BahrainToday,
 } from "./bahrainDate";
+
+import { getBahrainToday as _getBahrainToday } from "./bahrainDate";
+
+export function getBahrainTodayIso(nowMs?: number): string {
+  return _getBahrainToday(nowMs).isoDate;
+}
