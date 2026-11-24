@@ -1,7 +1,10 @@
 /**
- * One morning's actions for the whole network.
- * Inputs: dataset, policy, a Forecaster, and a Matcher. Output: transfer, reorder, and markdown drafts sorted by net benefit.
- * Formula: transfers come only from Matcher; leftover shortage is a reorder; overstock with no receiver is a markdown.
+ * Generates and ranks one morning's replenishment and clearance drafts across the whole network.
+ * Inputs: Dataset, Policy, Forecaster strategy, Matcher strategy, dayIndex, optional onHandOverride.
+ * Outputs: ActionDraft[] (TRANSFER, REORDER, MARKDOWN) sorted descending by netBenefit (BD).
+ * Formula: TRANSFER via Matcher; residual AT_RISK -> REORDER up to max(14d*v, rop); OVERSTOCK with no receivers -> 30% MARKDOWN.
+ * Units: BD (netBenefit, margin, carrying, transferCost, markdownCost), units, days, km, units/day.
+ * Where used: engine/index.ts (planActions), report/recommendations.ts, backtest.ts.
  */
 import type { Dataset } from "../seed/types.js";
 import type { Branch, Policy, ReasonCode } from "../schemas/index.js";
@@ -42,13 +45,19 @@ const BAHRAIN_COORDS_BY_ID = new Map(
   BAHRAIN_BRANCHES.filter((b) => b.coordinates).map((b) => [b.id, b.coordinates!]),
 );
 
+// DECISION: fall back to static BAHRAIN_BRANCHES coordinates if a MongoDB branch document omits coordinates, preserving deterministic freight math on pre-coordinate fixtures.
 function resolveCoordinates(branch: Branch | undefined): readonly [number, number] | undefined {
   if (!branch) return undefined;
   return branch.coordinates ?? BAHRAIN_COORDS_BY_ID.get(branch.id);
 }
 
-// DECISION: reorder and markdown stay here, not inside Matcher, so a new matcher cannot change the fallback rules.
-// The BD 9.500 materiality cutoff stays out of this function so the golden quantities do not move.
+/**
+ * Computes ranked TRANSFER, REORDER, and MARKDOWN drafts for all SKUs up to dayIndex.
+ * Formula: assesses network positions -> matches donors/receivers per SKU -> emits fallback reorders/markdowns -> sorts by (netBenefit desc, skuIndex asc, branchIndex asc, action asc).
+ * Example: 1 overstocked donor and 1 at-risk receiver -> 1 TRANSFER draft; 0 donors with 1 short receiver -> 1 REORDER draft.
+ */
+// DECISION: reorder and markdown fallback rules stay here, not inside Matcher, so swapping Matcher implementations cannot alter fallback inventory policy.
+// IMPORTANT: the BD 9.500 service materiality cutoff stays outside this function so golden quantities and backtest moves stay invariant.
 export function recommend(
   data: Dataset,
   policy: Policy,
@@ -102,10 +111,12 @@ function planSku(
   for (const receiver of matched.receivers) {
     const position = row[receiver.branchIndex];
     if (!position) continue;
+    // DECISION: reorder fallback targets max(14d cover, reorderPoint) rather than 14d alone so volatile high-safety-stock SKUs replenish past their reorder trigger on supplier delivery.
     const target = Math.max(policy.receiverCoverDays * position.velocity, position.reorderPoint);
     const quantity = Math.ceil(target - receiver.onHand);
     if (quantity <= 0) continue;
     const lostUnitsNow = Math.max(0, position.velocity * leadTimeDays - receiver.onHand);
+    // DECISION: supplier reorders credit only lead-time lostMarginAvoided (0 carrying savings, 0 freight) because incoming purchase orders add fresh inventory rather than liquidating existing excess.
     const lostMarginAvoided = round3(Math.min(quantity, lostUnitsNow) * (price - cost));
     const reasonCodes: ReasonCode[] = ["BELOW_REORDER_POINT", "REORDER_TO_TARGET"];
     if (donors.length === 0 || !received.has(receiver.branchIndex)) reasonCodes.push("NO_DONOR");
@@ -131,6 +142,7 @@ function planSku(
     );
   }
 
+  // DECISION: emit MARKDOWN only when zero network receivers exist for the SKU; otherwise prioritize transfers over discounting stock another branch still needs.
   if (receivers.length === 0) {
     for (const donor of donors) {
       if (donor.surplus < MIN_ACTION_UNITS) continue;
@@ -281,6 +293,7 @@ function draftFrom(
   };
 }
 
+// DECISION: canonical sort order (netBenefit desc -> skuIndex asc -> branchIndex asc -> action asc) keeps golden snapshots and UI ranks total-ordered even on exact BD ties.
 function compareDrafts(a: ActionDraft, b: ActionDraft): number {
   if (a.netBenefit !== b.netBenefit) return b.netBenefit - a.netBenefit;
   if (a.skuIndex !== b.skuIndex) return a.skuIndex - b.skuIndex;

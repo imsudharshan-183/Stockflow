@@ -84,6 +84,12 @@ export function isRecommendationInScope(existing: Recommendation, user?: User): 
   return isTransferInScope(user, existing.branchId, existing.donorBranchId);
 }
 
+/**
+ * Service-layer queue materiality filter suppressing sub-threshold recommendations from buyer queues.
+ * Formula: netBenefit >= BD 9.500 AND quantity >= 5 units (minTransferQty).
+ */
+// DECISION: apply BD 9.500 materiality and 5-unit transfer cutoff in the API service rather than inside recommend() so frozen core totals, KPIs, and golden snapshots stay untouched.
+// IMPORTANT: always filter after analyze()/buildRecommendations() runs; never skip below-threshold items inside KPI stockout/overstock rollups.
 export function isMaterialRecommendation(recommendation: Recommendation): boolean {
   return (
     recommendation.netBenefit >= MATERIAL_MIN_NET_BENEFIT &&

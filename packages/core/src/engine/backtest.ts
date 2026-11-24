@@ -1,3 +1,11 @@
+/**
+ * Counterfactual morning-action replay across the trailing policy.backtestDays history window.
+ * Inputs: Dataset (recorded sales, end-of-day onHand, uncensored demand) and Policy.
+ * Outputs: BacktestResult with windowDays, baselineStockoutDays, engineStockoutDays, stockoutDaysAvoided, and cashReleased (BD).
+ * Formula: baseline counts (available <= 0 && demand > 0); simulation starts at day (start - 1) onHand, credits recorded receipts + morning engine moves, then deducts daily demand.
+ * Units: days for stockout counts; units for inventory moves; BD (round3) for cashReleased (sum of moved/cleared units * product.cost, excluding reorders).
+ * Where used: report/kpis.ts, engine/index.ts, and apps/api KpiService.
+ */
 import type { Dataset } from "../seed/types.js";
 import type { BacktestResult, Policy } from "../schemas/index.js";
 import { at, round3 } from "../round.js";
@@ -6,12 +14,12 @@ import { recommend } from "./recommend.js";
 import { ewmaForecaster, isStockoutDay } from "./velocity.js";
 
 /**
- * Replay the last policy.backtestDays mornings.
- * Inputs: recorded sales, stock, and demand. Output: stockout days avoided and cash released.
- * Formula: baseline stockouts versus a path that still receives recorded receipts, then applies the morning plan. Cash is cost of units transferred or marked down, not reorders.
+ * Replays the trailing `policy.backtestDays` mornings to compare baseline stockout days against StockFlow's plan.
+ * Formula: stockoutDaysAvoided = baselineStockoutDays - engineStockoutDays; cashReleased = sum((transferredUnits + clearedUnits) * unitCost) in BD.
+ * Example: 120-day Bahrain dataset (windowDays = 45) -> compares baseline stockouts across 7,500 store-SKU slots against engine transfers/reorders/markdowns.
  */
-// ASSUMPTION: historical receipts still arrive, so the backtest is generous. Cancelling those orders would be a different study.
-// IMPORTANT: the same inputs must replay the same stock path. There is no clock and no random draw here.
+// ASSUMPTION: historical receipts implied by day-to-day stock deltas still arrive on schedule, and transfers release/cash counts exclude REORDER arrivals (new spend, not freed shelf capital); cancelling legacy POs would require order-book data.
+// IMPORTANT: purely deterministic over dataset arrays with no wall-clock or RNG calls, ensuring golden kpis.backtest stability.
 export function backtest(data: Dataset, policy: Policy): BacktestResult {
   const end = data.dates.length;
   const windowDays = Math.min(policy.backtestDays, end);

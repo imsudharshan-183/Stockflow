@@ -1,3 +1,11 @@
+/**
+ * Pure donor ranking for manual manager requests, alert escalations, and transfer rerouting.
+ * Inputs: Dataset, CommittedDeltaStore, sku, targetBranchId, requested qty, optional policy/positions/limit flags.
+ * Outputs: DonorCandidate[] ranked by eligibility -> netBenefitBhd desc -> donorCoverDaysAfter desc -> branchIndex asc.
+ * Formula: availableSurplus = floor(donorProj.onHand - (donorCoverDays * v + safetyStock)); netBenefit = lostMargin + carryingSaved - TotalTransferCost(offeredQty, D_km).
+ * Units: money in BD (round3), distance in km (round2), cover in days (round4), stock in whole units.
+ * Where used: apps/api OrderService (donorCandidates, snapshot) and engine/index.ts.
+ */
 import { at, round2, round3, round4 } from "../round.js";
 import type { Branch, DonorCandidate, DonorIneligibleReason, Policy } from "../schemas/index.js";
 import { BAHRAIN_BRANCHES, haversineDistanceKm } from "../seed/catalog.js";
@@ -61,8 +69,9 @@ function compareCandidates(a: InternalCandidate, b: InternalCandidate): number {
 }
 
 /**
- * Pure donor ranking for manual/escalated stock requests and transfer rerouting.
- * Reuses projectPosition(), Bahrain Haversine distances, and TotalTransferCost(Q, D).
+ * Ranks active candidate sending branches for a target store replenishment quantity, reflecting live committedDeltas.
+ * Formula: netBenefitBhd = round3(min(offeredQty, targetLostUnits) * margin + offeredQty * carryPerUnit - TotalTransferCost(offeredQty, D_km)).
+ * Example: BR-005 (surplus 90, 14.5 km from BR-001) offered 20 units -> freight BD 6.675, eligible = true, ranked above longer routes.
  */
 export function rankDonorCandidates(
   dataset: Dataset,

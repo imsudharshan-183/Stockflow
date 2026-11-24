@@ -1,10 +1,11 @@
 /**
- * Pairs surplus with shortage.
- * Inputs: receiver need, donor surplus, price, cost, and branch coordinates.
- * Output: ordered transfers and the receivers' stock after them.
- * Formula: net benefit = lost margin avoided + carrying cost saved - TotalTransferCost(Q, D),
- * where TotalTransferCost(Q, D) = C_fixed + (C_km * D) + (C_unit * Q).
- * Marginal quantity stops where another unit saves less holding cost than C_unit.
+ * Pairs surplus sending branches with AT_RISK receiving branches for a single SKU.
+ * Inputs: receiver PartyState[], donor PartyState[], and MatchCosts (unitPrice, unitCost, policy).
+ * Outputs: MatchResult with greedy transfer quotes (BD + units + km) and residual unmet receivers.
+ * Formula: netBenefit = round3(lostMarginAvoided + carryingCostSaved - TotalTransferCost(Q, D)),
+ *   where TotalTransferCost(Q, D) = C_fixed + (C_km * D_km) + (C_unit * Q).
+ * Units: money in BD (round3), distance in km (round2), quantities in whole units, time in days.
+ * Where used: recommend.ts (planSku), engine/index.ts.
  */
 import type { Policy } from "../schemas/index.js";
 import { round2, round3 } from "../round.js";
@@ -26,8 +27,13 @@ interface Quote {
   freightLimited: boolean;
 }
 
-// DECISION: greedy highest net benefit, tie-broken by lower branch index, instead of a solver. Optimal matching needs a new matrix each time stock moves.
-// SCALE: pairs are per SKU. 100x branches makes this loop quadratic, which is the point to switch to min-cost flow.
+/**
+ * Default greedy inter-branch transfer matcher iterating highest positive net benefit pairs per SKU.
+ * Formula: picks pair with max netBenefit (> 0) and Q >= minTransferQty, deducts moved stock, and repeats.
+ * Example: donor surplus 240, receiver need 60 (lostUnits 25), price BD 400, cost BD 200 -> transfers 60 units for BD 6,315 + carrying - freight.
+ */
+// DECISION: greedy highest net benefit, tie-broken by lower branch index, over a min-cost-flow LP solver so every quote explains its exact pair math; rejected global solver because optimal matching shifts on every partial fulfillment.
+// SCALE: O(B^2 * K) quadratic in branch count per SKU; at 100x branches (~1,500 stores), swap greedyMatcher for min-cost flow via the Matcher interface.
 export const greedyMatcher: Matcher = {
   match(receivers, donors, costs): MatchResult {
     const receiverCopies = receivers.map(cloneParty);
@@ -86,6 +92,7 @@ function bestTransfer(
       if (!receiver || receiver.role !== "receiver" || receiver.need < 1) continue;
       const quote = quoteTransfer(donor, receiver, costs);
       if (!quote) continue;
+      // DECISION: break equal-net-benefit ties deterministically (netBenefit desc -> receiverIndex asc -> donorIndex asc) instead of insertion/hash order so queue rankings never flicker across runs.
       if (
         !best ||
         quote.netBenefit > best.quote.netBenefit ||
@@ -106,17 +113,22 @@ function quoteTransfer(donor: PartyState, receiver: PartyState, costs: MatchCost
   const excessDays = holdingWindowDays(donor.coverDays, donor.velocity, costs.policy);
   const carryPerUnit =
     costs.unitCost * costs.policy.annualHoldingRate * (excessDays / costs.policy.deadStockHoldDays);
+  // DECISION: when marginal holding cost saved per unit <= BD 0.250 handling fee, cap transfer qty at floor(lostUnits) instead of qMax so buffer units beyond immediate stockout risk do not lose money on handling.
   const freightLimited = carryPerUnit - costs.policy.transferCostPerUnit <= 0;
   const quantity = freightLimited ? Math.min(qMax, Math.floor(receiver.lostUnits)) : qMax;
+  // IMPORTANT: enforce minimum transfer lot (5 units) and positive net benefit before emitting a quote; moving 1-4 units wastes fixed BD 1.500 dispatch cost.
   if (quantity < costs.policy.minTransferQty) return null;
 
+  // IMPORTANT: fall back to 0 km (fixed + per-unit freight only) if a branch lacks coordinates rather than rejecting valid stock moves.
   const distanceKm =
     donor.coordinates && receiver.coordinates
       ? round2(haversineDistanceKm(donor.coordinates, receiver.coordinates))
       : 0;
   const freight = totalTransferCostBreakdown(quantity, distanceKm, costs.policy);
   const margin = costs.price - costs.unitCost;
+  // DECISION: cap avoided lost margin at min(Q, lostUnits) * margin because units shipped above lead-time shortage build buffer stock rather than saving immediate sales.
   const lostMarginAvoided = round3(Math.min(quantity, receiver.lostUnits) * margin);
+  // DECISION: carryPerUnit uses excessDays capped at 365 days in holdingWindowDays() so holding savings stay bounded to one accounting year.
   const carryingCostSaved = round3(quantity * carryPerUnit);
   const transferCost = freight.totalCost;
   const netBenefit = round3(lostMarginAvoided + carryingCostSaved - transferCost);

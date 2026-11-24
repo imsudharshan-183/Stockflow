@@ -1,7 +1,12 @@
 /**
- * The only two extension points.
- * Forecaster estimates demand. Matcher pairs donors and receivers. recommend() takes these interfaces and does not import the default implementations.
+ * Strategy interfaces (seams) decoupling forecasting and matching from the planning pipeline.
+ * Inputs: DemandHistory/ForecastContext for Forecaster; PartyState[] and MatchCosts for Matcher.
+ * Outputs: DemandEstimate and MatchResult (transfers + leftover receivers).
+ * Formula: none directly (contract only; implementations supply EWMA/safety stock and BD net-benefit transfer math).
+ * Units: units, days, units/day, BD (in MatchCosts price/unitCost and TransferQuote money fields), km.
+ * Where used: velocity.ts, match.ts, classify.ts, recommend.ts, index.ts.
  */
+// DECISION: Forecaster and Matcher live in a separate interface module so swapping in Croston/Holt-Winters or min-cost flow never changes recommend() or report DTOs.
 import type { Policy } from "../schemas/index.js";
 
 export interface DemandHistory {

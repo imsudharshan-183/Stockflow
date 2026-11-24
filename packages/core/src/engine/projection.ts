@@ -1,3 +1,11 @@
+/**
+ * Pure post-plan stock overlay projecting human commitments and floor adjustments onto immutable engine positions.
+ * Inputs: raw Position, CommittedDelta { reserved, inTransit, adjustment }, Policy.
+ * Outputs: ProjectedPosition with updated onHand, coverDays, status, surplus, need, lostUnits, reserved, inTransit.
+ * Formula: onHand = max(0, raw.onHand - reserved + adjustment); effectiveStock = onHand + inTransit; cover = effectiveStock / v.
+ * Units: units, days, units/day (no BD currency computation).
+ * Where used: apps/api projection/KPI/order services, engine/donorRanking.ts, engine/index.ts.
+ */
 import type { Policy, PositionStatus } from "../schemas/index.js";
 import { coverDaysOf, type Position } from "./classify.js";
 import { DEFAULT_POLICY } from "./config.js";
@@ -20,10 +28,20 @@ export type CommittedDeltaStore =
 
 export const ZERO_DELTA: CommittedDelta = { reserved: 0, inTransit: 0 };
 
+/**
+ * Builds the canonical composite lookup key for a SKU at a branch.
+ * Formula: `${sku}::${branchId}`.
+ * Example: deltaKey("SKU-00012", "BR-001") === "SKU-00012::BR-001".
+ */
 export function deltaKey(sku: string, branchId: string): string {
   return `${sku}::${branchId}`;
 }
 
+/**
+ * Reads committed reservation/in-transit/adjustment deltas for a branch-SKU pair from either a Map or plain record.
+ * Formula: lookup(deltas, `${sku}::${branchId}`) ?? { reserved: 0, inTransit: 0 }.
+ * Example: getCommittedDelta(new Map(), "SKU-00012", "BR-001") -> ZERO_DELTA.
+ */
 export function getCommittedDelta(
   deltas: CommittedDeltaStore,
   sku: string,
@@ -37,9 +55,11 @@ export function getCommittedDelta(
 }
 
 /**
- * Pure projection applying committed outgoing reservations, inbound stock, and
- * physical stock adjustments on top of an immutable engine Position snapshot.
+ * Applies committed outbound reservations, inbound in-transit stock, and stock adjustments without mutating raw engine positions.
+ * Formula: onHand = max(0, raw.onHand - reserved + adjustment); effectiveStock = onHand + inTransit; surplus = floor(max(0, onHand - floor)).
+ * Example: raw.onHand = 300 (surplus 240), reserved = 40 -> onHand = 260, surplus = 200; receiver onHand = 10, inTransit = 40 -> effective = 50.
  */
+// IMPORTANT: only committed/adjusted states appear here; SUGGESTED/AWAITING_DONOR never alter committedDeltas, and overstock check intentionally excludes inTransit.
 export function projectPosition(
   rawPosition: Position,
   deltas: CommittedDelta = ZERO_DELTA,

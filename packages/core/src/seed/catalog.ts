@@ -333,6 +333,12 @@ export const BAHRAIN_BRANCHES: readonly Branch[] = [
 
 export const BRANCHES: readonly Branch[] = BAHRAIN_BRANCHES;
 
+/**
+ * Great-circle Haversine distance in km between two [lat, lng] branch coordinates.
+ * Formula: 2 * R * asin(min(1, sqrt(sin^2(dLat/2) + cos(lat1) * cos(lat2) * sin^2(dLng/2)))), R = 6371 km.
+ * Example: Manama CBD [26.2285, 50.5860] -> Muharraq Hidd [26.2450, 50.6540] ~ 7.03 km.
+ */
+// ASSUMPTION: straight-line spherical Haversine distance (R = 6371 km) approximates road freight routes across Bahrain's 2-45 km island network without external road-routing APIs; fallback distance is 0 km if coordinates are absent.
 export function haversineDistanceKm(
   a: readonly [number, number],
   b: readonly [number, number],

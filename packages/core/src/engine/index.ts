@@ -1,7 +1,10 @@
 /**
- * Binds the default forecaster and matcher so callers keep the original function signatures.
- * Inputs: dataset and policy. Output: positions or action drafts.
- * Formula: EWMA forecast, then greedy match, then reorder and markdown fallbacks.
+ * Default-strategy entry points and public barrel exports for the pure planning engine.
+ * Inputs: Dataset, Policy, optional dayIndex and onHandOverride.
+ * Outputs: Position[][] (assessPositions), ActionDraft[] (planActions), BacktestResult (backtest), plus strategy/projection helpers.
+ * Formula: binds ewmaForecaster + greedyMatcher onto assessNetwork and recommend.
+ * Units: BD for monetary outputs, units, days, km, units/day.
+ * Where used: packages/core/src/report/*, packages/core/src/index.ts, apps/api, apps/web.
  */
 import type { Dataset } from "../seed/types.js";
 import type { Policy } from "../schemas/index.js";
@@ -10,6 +13,11 @@ import { greedyMatcher } from "./match.js";
 import { recommend, type ActionDraft } from "./recommend.js";
 import { ewmaForecaster } from "./velocity.js";
 
+/**
+ * Evaluates branch-SKU inventory positions using the default 28-day EWMA forecaster.
+ * Formula: assessNetwork(data, policy, ewmaForecaster, dayIndex, onHandOverride).
+ * Example: assessPositions(dataset, DEFAULT_POLICY) -> Position[500][15] for 500 SKUs x 15 Bahrain branches.
+ */
 export function assessPositions(
   data: Dataset,
   policy: Policy,
@@ -19,6 +27,11 @@ export function assessPositions(
   return assessNetwork(data, policy, ewmaForecaster, dayIndex, onHandOverride);
 }
 
+/**
+ * Computes ranked morning action drafts using the default EWMA forecaster and greedy matcher.
+ * Formula: recommend(data, policy, ewmaForecaster, greedyMatcher, dayIndex, onHandOverride).
+ * Example: planActions(dataset, DEFAULT_POLICY) -> sorted TRANSFER / REORDER / MARKDOWN drafts.
+ */
 export function planActions(
   data: Dataset,
   policy: Policy,

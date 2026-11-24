@@ -1,3 +1,11 @@
+/**
+ * Live action-economics recomputation for manager-edited approval quantities.
+ * Inputs: action type (TRANSFER/REORDER/MARKDOWN), quantity, unitPrice/unitCost (BD), distanceKm, lostUnits, cover/velocity stats.
+ * Outputs: ActionQuantityBenefitResult { netBenefitBhd, lostMarginAvoided, carryingCostSaved, freightCostBhd, markdownCost } (all BD).
+ * Formula: exact same formulas as match.ts (TRANSFER) and recommend.ts (REORDER, MARKDOWN), using TotalTransferCost(Q, D).
+ * Units: money in BD (round3), distance in km, velocity in units/day, cover in days, quantity in whole units.
+ * Where used: apps/api OrderService (commit), apps/api orderSnapshot, apps/web ApproveQuantityDialog.
+ */
 import type { Action, Policy } from "../schemas/index.js";
 import { round3 } from "../round.js";
 import { holdingWindowDays } from "./classify.js";
@@ -26,8 +34,9 @@ export interface ActionQuantityBenefitResult {
 }
 
 /**
- * Recomputes action economics for an edited approval quantity using the exact
- * core engine margin, carrying-cost, transfer-cost, and markdown formulas.
+ * Recomputes BD net benefit and cost components for an edited approval quantity without modifying the engine plan.
+ * Formula: TRANSFER = lostMargin + carryingSaved - TotalTransferCost(Q, D); REORDER = min(Q, lostUnits) * margin; MARKDOWN = clearance delta + carryingSaved.
+ * Example: TRANSFER Q = 12, D = 10 km, price BD 22, cost BD 10 -> freight BD 6.000 + netBenefitBhd recomputed at Q = 12.
  */
 export function computeActionBenefitForQuantity(
   input: ActionQuantityBenefitInput,
