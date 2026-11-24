@@ -1,9 +1,10 @@
-import { ArrowRight, Boxes, CircleDollarSign, ListOrdered, RefreshCw, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, ListOrdered, TriangleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
+import { FreshnessBanner } from "@/components/shared/FreshnessBanner";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
@@ -74,31 +75,11 @@ export function ManagerOverview({
         lastUpdated={lastUpdatedHm}
         subtitle={`Today: ${today.displayDate} · Data through: ${formatDate(asOfDataDate)} · ${formatNumber(report.branches.length)} assigned branches (${branchNames})`}
         actions={
-          staleDataDays > 1 || onRefresh ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {staleDataDays > 1 ? (
-                <Link to="/data?tab=import">
-                  <Badge tone="risk">
-                    Data is {formatNumber(staleDataDays)}{" "}
-                    {staleDataDays === 1 ? "day" : "days"} old - import latest sales
-                  </Badge>
-                </Link>
-              ) : null}
-              {onRefresh ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  loading={isRefreshing}
-                  onClick={onRefresh}
-                  className="gap-1.5"
-                >
-                  <RefreshCw className="size-3.5" aria-hidden="true" />
-                  Refresh
-                </Button>
-              ) : null}
-            </div>
-          ) : undefined
+          <FreshnessBanner
+            staleDataDays={staleDataDays}
+            isRefreshing={isRefreshing}
+            onRefresh={onRefresh}
+          />
         }
       />
 

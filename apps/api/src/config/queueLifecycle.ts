@@ -1,9 +1,9 @@
 // DECISION: Default 3-day active/snooze windows match Bahrain retail replenishment cadences—long enough
 // for floor teams to receive approved stock or ignore unchanged rejections, short enough to resurface.
-export const DEFAULT_APPROVED_ACTIVE_DAYS = 3;
-export const DEFAULT_REJECT_SNOOZE_DAYS = 3;
+const DEFAULT_APPROVED_ACTIVE_DAYS = 3;
+const DEFAULT_REJECT_SNOOZE_DAYS = 3;
 // DECISION: Cap undo/reopen at 24 hours so historical fulfilled audits do not mutate live stock projections later.
-export const DEFAULT_REOPEN_WINDOW_HOURS = 24;
+const DEFAULT_REOPEN_WINDOW_HOURS = 24;
 
 export interface QueueLifecycleConfig {
   approvedActiveDays: number;

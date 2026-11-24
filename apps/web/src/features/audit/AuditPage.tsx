@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { OrderEventRow } from "@/components/shared/OrderEventRow";
 import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
@@ -17,18 +18,12 @@ import { api } from "@/lib/api";
 import {
   REASON_LABELS,
   actionLabel,
-  formatDateTime,
   formatMoneyFull,
   formatNumber,
   formatReasonSentence,
   orderOriginLabel,
-  orderStatusLabel,
 } from "@/lib/format";
-import {
-  ORDER_STATUS_LABELS,
-  getOrderEventDisplayLabel,
-  quantityReasonLabel,
-} from "@/lib/labels";
+import { ORDER_STATUS_LABELS } from "@/lib/labels";
 import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
@@ -328,53 +323,7 @@ export function AuditPage() {
                   {/* Chronological Event Status Chain */}
                   <ol className="space-y-2 border-l-2 border-border pl-4" aria-label="Order event history">
                     {order.events.map((ev) => (
-                      <li key={ev.id} className="space-y-1 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold text-foreground">
-                              {getOrderEventDisplayLabel(ev)}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-muted-foreground">
-                              {ev.fromStatus ? (
-                                <>
-                                  <span>{orderStatusLabel(ev.fromStatus)}</span>
-                                  <ArrowRight className="size-3" aria-hidden="true" />
-                                </>
-                              ) : null}
-                              <span className="font-medium text-foreground">
-                                {orderStatusLabel(ev.toStatus)}
-                              </span>
-                            </span>
-                            <span aria-hidden="true" className="text-muted-foreground">
-                              ·
-                            </span>
-                            <span className="text-muted-foreground">{ev.actor.name}</span>
-                            <Badge tone={ev.actor.role} className="px-1.5 py-0 text-[10px]">
-                              {ev.actor.role}
-                            </Badge>
-                            {ev.isAdminOverride ? <Badge tone="over">Override</Badge> : null}
-                            {ev.engineQty !== undefined &&
-                            ev.approvedQty !== undefined &&
-                            ev.engineQty !== ev.approvedQty ? (
-                              <Badge variant="outline" className="text-[11px] tabular-nums">
-                                {`Engine: ${formatNumber(ev.engineQty)} -> Approved: ${formatNumber(ev.approvedQty)}${
-                                  ev.dispositionCode
-                                    ? ` (${quantityReasonLabel(ev.dispositionCode)})`
-                                    : ""
-                                }`}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <span className="text-muted-foreground tabular-nums">
-                            {formatDateTime(ev.at)}
-                          </span>
-                        </div>
-                        {ev.comment ? (
-                          <blockquote className="border-l-2 border-border pl-3 text-xs italic text-foreground">
-                            {ev.comment}
-                          </blockquote>
-                        ) : null}
-                      </li>
+                      <OrderEventRow key={ev.id} event={ev} variant="timeline" />
                     ))}
                   </ol>
                 </CardContent>

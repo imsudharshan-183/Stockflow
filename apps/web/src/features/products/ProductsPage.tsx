@@ -825,6 +825,123 @@ function CatalogProductsPage() {
 // Dialog Subcomponents
 // ------------------------------------------------------------------------------------------------
 
+function ProductFormFields({
+  name,
+  onNameChange,
+  category,
+  onCategoryChange,
+  leadTimeDays,
+  onLeadTimeChange,
+  price,
+  onPriceChange,
+  cost,
+  onCostChange,
+  numPrice,
+  numCost,
+  priceInvalid,
+  isCreate = false,
+}: {
+  name: string;
+  onNameChange: (value: string) => void;
+  category: string;
+  onCategoryChange: (value: string) => void;
+  leadTimeDays: string;
+  onLeadTimeChange: (value: string) => void;
+  price: string;
+  onPriceChange: (value: string) => void;
+  cost: string;
+  onCostChange: (value: string) => void;
+  numPrice: number;
+  numCost: number;
+  priceInvalid: boolean;
+  isCreate?: boolean;
+}) {
+  return (
+    <>
+      <div className="space-y-1">
+        <label className="text-xs font-medium text-foreground">
+          Product Name{isCreate ? <> <span className="text-destructive">*</span></> : null}
+        </label>
+        <Input
+          value={name}
+          onChange={(e) => onNameChange(e.target.value.slice(0, 60))}
+          placeholder={isCreate ? "e.g. Veritas Organic Matcha Tea, 100 g" : undefined}
+          required
+        />
+        <p className="text-right text-[11px] text-muted-foreground">{name.length}/60 chars</p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">Category</label>
+          <select
+            value={category}
+            onChange={(e) => onCategoryChange(e.target.value)}
+            className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+          >
+            {CATEGORIES.filter((c) => c !== "All categories").map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">Lead Time (Days, 1–21)</label>
+          <Input
+            type="number"
+            min="1"
+            max="21"
+            step="1"
+            value={leadTimeDays}
+            onChange={(e) => onLeadTimeChange(e.target.value)}
+            required
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">
+            Selling Price (BD){isCreate ? <> <span className="text-destructive">*</span></> : null}
+          </label>
+          <Input
+            type="number"
+            min="0.005"
+            step="0.005"
+            value={price}
+            onChange={(e) => onPriceChange(e.target.value)}
+            placeholder={isCreate ? "3.250" : undefined}
+            required
+          />
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-foreground">
+            Unit Cost (BD){isCreate ? <> <span className="text-destructive">*</span></> : null}
+          </label>
+          <Input
+            type="number"
+            min="0.005"
+            step="0.005"
+            value={cost}
+            onChange={(e) => onCostChange(e.target.value)}
+            placeholder={isCreate ? "1.950" : undefined}
+            required
+          />
+        </div>
+      </div>
+
+      {priceInvalid ? (
+        <p className="text-xs text-destructive">
+          Selling price ({formatMoneyFull(numPrice)}) must be greater than unit cost ({formatMoneyFull(numCost)}).
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 interface AddProductDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -874,88 +991,22 @@ function AddProductDialog({ open, onOpenChange, onSubmit, isPending }: AddProduc
           </DialogHeader>
 
           <div className="space-y-3 py-1">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-foreground">
-                Product Name <span className="text-destructive">*</span>
-              </label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value.slice(0, 60))}
-                placeholder="e.g. Veritas Organic Matcha Tea, 100 g"
-                required
-              />
-              <p className="text-right text-[11px] text-muted-foreground">{name.length}/60 chars</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {CATEGORIES.filter((c) => c !== "All categories").map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">
-                  Lead Time (Days, 1–21)
-                </label>
-                <Input
-                  type="number"
-                  min="1"
-                  max="21"
-                  step="1"
-                  value={leadTimeDays}
-                  onChange={(e) => setLeadTimeDays(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">
-                  Selling Price (BD) <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  type="number"
-                  min="0.005"
-                  step="0.005"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  placeholder="3.250"
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">
-                  Unit Cost (BD) <span className="text-destructive">*</span>
-                </label>
-                <Input
-                  type="number"
-                  min="0.005"
-                  step="0.005"
-                  value={cost}
-                  onChange={(e) => setCost(e.target.value)}
-                  placeholder="1.950"
-                  required
-                />
-              </div>
-            </div>
-
-            {priceInvalid ? (
-              <p className="text-xs text-destructive">
-                Selling price ({formatMoneyFull(numPrice)}) must be greater than unit cost ({formatMoneyFull(numCost)}).
-              </p>
-            ) : null}
+            <ProductFormFields
+              name={name}
+              onNameChange={setName}
+              category={category}
+              onCategoryChange={setCategory}
+              leadTimeDays={leadTimeDays}
+              onLeadTimeChange={setLeadTimeDays}
+              price={price}
+              onPriceChange={setPrice}
+              cost={cost}
+              onCostChange={setCost}
+              numPrice={numPrice}
+              numCost={numCost}
+              priceInvalid={priceInvalid}
+              isCreate
+            />
           </div>
 
           <DialogFooter className="gap-2 sm:gap-0">
@@ -1034,79 +1085,21 @@ function EditProductDialog({
           </DialogHeader>
 
           <div className="space-y-3 py-1">
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-foreground">Product Name</label>
-              <Input
-                value={name}
-                onChange={(e) => setName(e.target.value.slice(0, 60))}
-                required
-              />
-              <p className="text-right text-[11px] text-muted-foreground">{name.length}/60 chars</p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Category</label>
-                <select
-                  value={category}
-                  onChange={(e) => setCategory(e.target.value)}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-xs shadow-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                >
-                  {CATEGORIES.filter((c) => c !== "All categories").map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">
-                  Lead Time (Days, 1–21)
-                </label>
-                <Input
-                  type="number"
-                  min="1"
-                  max="21"
-                  step="1"
-                  value={leadTimeDays}
-                  onChange={(e) => setLeadTimeDays(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Selling Price (BD)</label>
-                <Input
-                  type="number"
-                  min="0.005"
-                  step="0.005"
-                  value={price}
-                  onChange={(e) => setPrice(e.target.value)}
-                  required
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-foreground">Unit Cost (BD)</label>
-                <Input
-                  type="number"
-                  min="0.005"
-                  step="0.005"
-                  value={cost}
-                  onChange={(e) => setCost(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
-
-            {priceInvalid ? (
-              <p className="text-xs text-destructive">
-                Selling price ({formatMoneyFull(numPrice)}) must be greater than unit cost ({formatMoneyFull(numCost)}).
-              </p>
-            ) : null}
+            <ProductFormFields
+              name={name}
+              onNameChange={setName}
+              category={category}
+              onCategoryChange={setCategory}
+              leadTimeDays={leadTimeDays}
+              onLeadTimeChange={setLeadTimeDays}
+              price={price}
+              onPriceChange={setPrice}
+              cost={cost}
+              onCostChange={setCost}
+              numPrice={numPrice}
+              numCost={numCost}
+              priceInvalid={priceInvalid}
+            />
 
             {mathWillChange && product.status === "active" ? (
               <div className="rounded-md border border-blue-500/20 bg-blue-500/10 p-2.5 text-xs text-blue-900 dark:text-blue-200">

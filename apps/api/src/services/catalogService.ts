@@ -865,17 +865,13 @@ export class CatalogService {
     };
 
     this.runtime.data.products.push(newProduct);
-    const numBranches = this.runtime.data.branches.length;
-    const numDays = this.runtime.data.dates.length;
-    this.runtime.data.sales.push(
-      Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
+    const empty = this.createEmptyHistoryMatrices(
+      this.runtime.data.branches.length,
+      this.runtime.data.dates.length,
     );
-    this.runtime.data.onHand.push(
-      Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
-    );
-    this.runtime.data.demand.push(
-      Array.from({ length: numBranches }, () => new Array(numDays).fill(0)),
-    );
+    this.runtime.data.sales.push(empty.sales);
+    this.runtime.data.onHand.push(empty.onHand);
+    this.runtime.data.demand.push(empty.demand);
 
     await this.runtime.repo.saveProduct(newProduct);
     await this.runtime.repo.saveProductChange(changeRecord);
@@ -883,16 +879,25 @@ export class CatalogService {
     return newProduct;
   }
 
-  async updateCatalogProduct(sku: string, input: UpdateProduct, user: User): Promise<Product> {
+  private async requireManageableProduct(sku: string, user: User): Promise<Product> {
     await ensureInitialized(this.runtime);
     if (!can(user.role, "products:manage")) {
       throw new DecisionForbiddenError("Only administrators can manage products");
     }
-
     const product = this.runtime.data.products.find((p) => p.sku === sku);
     if (!product) {
       throw new ProductNotFoundError(`Product ${sku} not found`);
     }
+    return product;
+  }
+
+  private createEmptyHistoryMatrices(numBranches: number, numDays: number) {
+    const empty = () => Array.from({ length: numBranches }, () => new Array<number>(numDays).fill(0));
+    return { sales: empty(), onHand: empty(), demand: empty() };
+  }
+
+  async updateCatalogProduct(sku: string, input: UpdateProduct, user: User): Promise<Product> {
+    const product = await this.requireManageableProduct(sku, user);
 
     const effectivePrice = input.price !== undefined ? input.price : product.price;
     const effectiveCost = input.cost !== undefined ? input.cost : product.cost;
@@ -968,15 +973,7 @@ export class CatalogService {
     sku: string,
     user: User,
   ): Promise<{ product: Product; removedPendingActionsCount: number }> {
-    await ensureInitialized(this.runtime);
-    if (!can(user.role, "products:manage")) {
-      throw new DecisionForbiddenError("Only administrators can manage products");
-    }
-
-    const product = this.runtime.data.products.find((p) => p.sku === sku);
-    if (!product) {
-      throw new ProductNotFoundError(`Product ${sku} not found`);
-    }
+    const product = await this.requireManageableProduct(sku, user);
 
     if (product.status === "archived") {
       return { product: { ...product, status: "archived" }, removedPendingActionsCount: 0 };
@@ -1008,15 +1005,7 @@ export class CatalogService {
   }
 
   async restoreCatalogProduct(sku: string, user: User): Promise<Product> {
-    await ensureInitialized(this.runtime);
-    if (!can(user.role, "products:manage")) {
-      throw new DecisionForbiddenError("Only administrators can manage products");
-    }
-
-    const product = this.runtime.data.products.find((p) => p.sku === sku);
-    if (!product) {
-      throw new ProductNotFoundError(`Product ${sku} not found`);
-    }
+    const product = await this.requireManageableProduct(sku, user);
 
     if (product.status !== "archived") {
       return { ...product, status: product.status ?? "active" };
@@ -1049,15 +1038,7 @@ export class CatalogService {
   }
 
   async deleteCatalogProduct(sku: string, user: User): Promise<void> {
-    await ensureInitialized(this.runtime);
-    if (!can(user.role, "products:manage")) {
-      throw new DecisionForbiddenError("Only administrators can manage products");
-    }
-
-    const product = this.runtime.data.products.find((p) => p.sku === sku);
-    if (!product) {
-      throw new ProductNotFoundError(`Product ${sku} not found`);
-    }
+    await this.requireManageableProduct(sku, user);
 
     const { hasSales, hasAudits } = await this.runtime.repo.hasHistoryOrAudits(sku);
     if (hasAudits || hasSales) {
@@ -1084,29 +1065,16 @@ export class CatalogService {
     sku: string,
     user: User,
   ): Promise<{ salesEntriesCount: number }> {
-    await ensureInitialized(this.runtime);
-    if (!can(user.role, "products:manage")) {
-      throw new DecisionForbiddenError("Only administrators can manage products");
-    }
-
-    const product = this.runtime.data.products.find((p) => p.sku === sku);
-    if (!product) {
-      throw new ProductNotFoundError(`Product ${sku} not found`);
-    }
+    const product = await this.requireManageableProduct(sku, user);
 
     const skuIndex = this.runtime.data.products.findIndex((p) => p.sku === sku);
     const numBranches = this.runtime.data.branches.length;
     const numDays = this.runtime.data.dates.length;
     if (!this.runtime.data.sales[skuIndex]) {
-      this.runtime.data.sales[skuIndex] = Array.from({ length: numBranches }, () =>
-        new Array(numDays).fill(0),
-      );
-      this.runtime.data.onHand[skuIndex] = Array.from({ length: numBranches }, () =>
-        new Array(numDays).fill(0),
-      );
-      this.runtime.data.demand[skuIndex] = Array.from({ length: numBranches }, () =>
-        new Array(numDays).fill(0),
-      );
+      const empty = this.createEmptyHistoryMatrices(numBranches, numDays);
+      this.runtime.data.sales[skuIndex] = empty.sales;
+      this.runtime.data.onHand[skuIndex] = empty.onHand;
+      this.runtime.data.demand[skuIndex] = empty.demand;
     }
 
     let entriesCount = 0;

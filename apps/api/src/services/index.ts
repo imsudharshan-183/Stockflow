@@ -17,18 +17,7 @@ import {
 import { StockAlertService } from "./stockAlertService.js";
 
 export * from "./errors.js";
-export {
-  projectPosition,
-  projectPosition as project,
-  type CommittedDelta,
-  type ProjectedPosition,
-} from "./projection.js";
-export type { StockRuntimeState } from "./runtimeState.js";
-export type { CatalogService } from "./catalogService.js";
-export type { DecisionService } from "./decisionService.js";
-export type { KpiService } from "./kpiService.js";
-export type { OrderService } from "./orderService.js";
-export type { StockAlertService } from "./stockAlertService.js";
+export { projectPosition as project } from "./projection.js";
 
 export interface StockServices {
   readonly runtime: StockRuntimeState;

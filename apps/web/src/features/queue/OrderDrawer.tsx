@@ -1,5 +1,6 @@
-import { ArrowRight, Check, ExternalLink, PackageCheck, Repeat2, X } from "lucide-react";
+import { Check, ExternalLink, PackageCheck, Repeat2, X } from "lucide-react";
 import { Link } from "react-router-dom";
+import { OrderEventRow } from "@/components/shared/OrderEventRow";
 import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -14,20 +15,14 @@ import {
   REASON_LABELS,
   actionLabel,
   formatCover,
-  formatDateTime,
   formatDistanceKm,
   formatMoneyFull,
   formatMoneyPrecise,
   formatNumber,
   formatReasonSentence,
   orderOriginLabel,
-  orderStatusLabel,
 } from "@/lib/format";
-import {
-  ORDER_ACTION_LABELS,
-  getOrderEventDisplayLabel,
-  quantityReasonLabel,
-} from "@/lib/labels";
+import { ORDER_ACTION_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { formatProductDisplayName, type ReplenishmentOrder } from "@stockflow/core";
 
@@ -215,52 +210,7 @@ export function OrderDrawer({
                 ) : (
                   <div className="space-y-2">
                     {order.events.map((ev) => (
-                      <div key={ev.id} className="rounded-xl border border-border bg-card p-3 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-semibold text-foreground">
-                              {getOrderEventDisplayLabel(ev)}
-                            </span>
-                            <span className="inline-flex items-center gap-1 text-muted-foreground">
-                              {ev.fromStatus ? (
-                                <>
-                                  <span>{orderStatusLabel(ev.fromStatus)}</span>
-                                  <ArrowRight className="size-3" aria-hidden="true" />
-                                </>
-                              ) : null}
-                              <span className="font-medium text-foreground">
-                                {orderStatusLabel(ev.toStatus)}
-                              </span>
-                            </span>
-                            {ev.isAdminOverride ? <Badge tone="over">Override</Badge> : null}
-                            {ev.engineQty !== undefined &&
-                            ev.approvedQty !== undefined &&
-                            ev.engineQty !== ev.approvedQty ? (
-                              <Badge variant="outline" className="text-[10px] tabular-nums">
-                                {`Engine: ${formatNumber(ev.engineQty)} -> Approved: ${formatNumber(ev.approvedQty)}${
-                                  ev.dispositionCode
-                                    ? ` (${quantityReasonLabel(ev.dispositionCode)})`
-                                    : ""
-                                }`}
-                              </Badge>
-                            ) : null}
-                          </div>
-                          <span className="text-muted-foreground tabular-nums">
-                            {formatDateTime(ev.at)}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center gap-1.5 text-muted-foreground">
-                          <span>{ev.actor.name}</span>
-                          <Badge tone={ev.actor.role} className="px-1.5 py-0 text-[10px]">
-                            {ev.actor.role}
-                          </Badge>
-                        </div>
-                        {ev.comment ? (
-                          <blockquote className="mt-2 border-l-2 border-border pl-3 text-xs italic text-foreground">
-                            {ev.comment}
-                          </blockquote>
-                        ) : null}
-                      </div>
+                      <OrderEventRow key={ev.id} event={ev} variant="card" />
                     ))}
                   </div>
                 )}

@@ -1,105 +1,14 @@
-import {
-  ActionSchema,
-  ActedBySchema,
-  ReasonCodeSchema,
-  RecommendationSchema,
-  ReplenishmentOrderSchema,
-  type ReplenishmentOrder,
-} from "@stockflow/core";
-import { z } from "zod";
-import type { QueueLifecycleConfig } from "../config/queueLifecycle.js";
 import type {
   ActionMetaRecord,
   DecisionSnapshot,
-  OrderLifecycleMeta,
   QueueLifecycleView,
-} from "../repositories/types.js";
+  ReopenBadge,
+  ReplenishmentOrder,
+} from "@stockflow/core";
+import type { QueueLifecycleConfig } from "../config/queueLifecycle.js";
+import type { OrderLifecycleMeta } from "../repositories/types.js";
 
 const DAY_MS = 86_400_000;
-
-export const DecisionSnapshotSchema = z.object({
-  netBenefit: z.number(),
-  targetCoverDays: z.number().nullable(),
-});
-
-export const ActionMetaRecordSchema = z.object({
-  id: z.string().min(1),
-  recommendationId: z.string().min(1),
-  status: z.enum(["APPROVED", "REJECTED"]),
-  decidedAt: z.string().min(1),
-  reasonCode: z.string().optional(),
-  comment: z.string().optional(),
-  snapshot: DecisionSnapshotSchema.optional(),
-  rejectedUntil: z.string().optional(),
-  reopenedAt: z.string().nullable().optional(),
-});
-
-export const ApiAuditEntrySchema = z.object({
-  id: z.string().min(1),
-  at: z.string().min(1),
-  user: z.string().min(1),
-  recommendationId: z.string().min(1),
-  decision: z.enum(["APPROVED", "REJECTED", "REOPENED"]),
-  action: ActionSchema,
-  sku: z.string().min(1),
-  productName: z.string().min(1),
-  branchId: z.string().min(1),
-  branchName: z.string().min(1),
-  donorBranchId: z.string().nullable(),
-  netBenefit: z.number(),
-  reasonCodes: z.array(ReasonCodeSchema).min(1),
-  reasonCode: z.string().optional(),
-  comment: z.string().optional(),
-  actedBy: ActedBySchema.optional(),
-});
-
-export const ApiAuditListSchema = z.object({
-  entries: z.array(ApiAuditEntrySchema),
-});
-
-export const ReopenBadgeSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("snooze_expired"),
-    daysAgo: z.number().int().positive(),
-    reason: z.string(),
-    label: z.string(),
-  }),
-  z.object({
-    kind: z.literal("worsened"),
-    label: z.string(),
-  }),
-]);
-export type ReopenBadge = z.infer<typeof ReopenBadgeSchema>;
-
-export const QueueLifecycleViewSchema = z.enum(["pending", "in_progress", "decided"]);
-
-export const LifecycleFieldsSchema = z.object({
-  lifecycleState: QueueLifecycleViewSchema.optional(),
-  reopenBadge: ReopenBadgeSchema.nullable().optional(),
-  canReopen: z.boolean().optional(),
-  decidedAt: z.string().nullable().optional(),
-  rejectedUntil: z.string().nullable().optional(),
-});
-
-export const LifecycleRecommendationSchema = RecommendationSchema.merge(LifecycleFieldsSchema);
-export type LifecycleRecommendation = z.infer<typeof LifecycleRecommendationSchema>;
-
-export const LifecycleRecommendationListSchema = z.object({
-  recommendations: z.array(LifecycleRecommendationSchema),
-  total: z.number().int().nonnegative(),
-  totalNetBenefit: z.number().optional(),
-  view: QueueLifecycleViewSchema.optional(),
-});
-
-export const LifecycleOrderSchema = ReplenishmentOrderSchema.merge(LifecycleFieldsSchema);
-export type LifecycleOrder = z.infer<typeof LifecycleOrderSchema>;
-
-export const LifecycleOrderListResponseSchema = z.object({
-  orders: z.array(LifecycleOrderSchema),
-  total: z.number().int().nonnegative(),
-  totalNetBenefit: z.number().optional(),
-  view: QueueLifecycleViewSchema.optional(),
-});
 
 export interface LifecycleEvaluation {
   bucket: QueueLifecycleView;

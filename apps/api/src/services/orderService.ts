@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import {
   DEFAULT_DONOR_ESCALATION_HOURS,
   DEFAULT_POLICY,
+  LifecycleOrderListResponseSchema,
+  LifecycleOrderSchema,
   OrderEventSchema,
   OrderListResponseSchema,
   QuantityChangeReasonSchema,
@@ -18,9 +20,12 @@ import {
   type Branch,
   type CreateOrderRequest,
   type DonorCandidate,
+  type LifecycleOrder,
+  type LifecycleOrderListResponse,
   type OrderCancelBody,
   type OrderCommitBody,
   type OrderDeclineBody,
+  type OrderEvent,
   type OrderListQuery,
   type OrderListResponse,
   type OrderOrigin,
@@ -34,7 +39,6 @@ import {
   type ReplenishmentOrder,
   type User,
 } from "@stockflow/core";
-import type { z } from "zod";
 import type {
   ApiAuditEntry,
   OrderLifecycleMeta,
@@ -53,13 +57,11 @@ import {
   findRawPosition,
   getCommittedDelta,
   projectPosition,
+  rollbackDeltaEntries,
+  unwindCommittedAllocation,
+  type StagedDeltaEntry,
 } from "./projection.js";
-import {
-  LifecycleOrderListResponseSchema,
-  LifecycleOrderSchema,
-  evaluateDecisionLifecycle,
-  type LifecycleOrder,
-} from "./queueLifecycle.js";
+import { evaluateDecisionLifecycle } from "./queueLifecycle.js";
 import {
   bumpDecisionVersion,
   ensureFreshPlan,
@@ -74,7 +76,6 @@ import {
 } from "./scope.js";
 
 const DAY_MS = 86_400_000;
-type LifecycleOrderListResponse = z.infer<typeof LifecycleOrderListResponseSchema>;
 
 const SYSTEM_ACTOR: ActorRef = {
   userId: "usr_system",
@@ -603,20 +604,34 @@ export class OrderService {
     return staged;
   }
 
-  private rollbackStagedDeltas(
-    orderId: string,
-    entries: readonly { sku: string; branchId: string; reserved: number; inTransit: number }[],
-  ): void {
-    for (const e of entries) {
-      adjustCommittedDelta(
-        this.runtime.committedDeltas,
-        e.sku,
-        e.branchId,
-        -e.reserved,
-        -e.inTransit,
-      );
+  private rollbackStagedDeltas(orderId: string, entries: readonly StagedDeltaEntry[]): void {
+    rollbackDeltaEntries(
+      this.runtime.committedDeltas,
+      this.runtime.committedRecommendationIds,
+      orderId,
+      entries,
+    );
+  }
+
+  private async persistTransition(
+    updatedOrder: ReplenishmentOrder,
+    event: OrderEvent,
+    expectedStatus: OrderStatus | null,
+    nextMeta: OrderLifecycleMeta,
+  ): Promise<ReplenishmentOrder> {
+    const saved = await this.runtime.repo.saveOrderWithEvent(
+      updatedOrder,
+      event,
+      expectedStatus,
+      nextMeta,
+    );
+    if (saved.status !== "saved") {
+      await this.initializeAndMigrate(this.replayCutoff());
+      throw new OrderConflictError("Order was modified concurrently");
     }
-    this.runtime.committedRecommendationIds.delete(orderId);
+    this.runtime.orders.set(saved.order.id, saved.order);
+    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
+    return saved.order;
   }
 
   async list(
@@ -976,21 +991,14 @@ export class OrderService {
     });
 
     const prevMeta = this.runtime.orderLifecycleMeta.get(order.id) ?? {};
-    const nextMeta: OrderLifecycleMeta = { ...prevMeta, reopenedAt: null };
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       expectedStatus,
-      nextMeta,
+      { ...prevMeta, reopenedAt: null },
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
     bumpDecisionVersion(this.runtime);
-    return ReplenishmentOrderSchema.parse(this.enrichOrder(saved.order));
+    return ReplenishmentOrderSchema.parse(this.enrichOrder(savedOrder));
   }
 
   async commit(id: string, body: OrderCommitBody, user: User): Promise<ReplenishmentOrder> {
@@ -1215,24 +1223,17 @@ export class OrderService {
       quantity: order.quantity,
     });
 
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       expectedStatus,
       lifecycleMeta,
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
-
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, lifecycleMeta);
-    if (saved.order.origin === "ENGINE") {
-      this.runtime.decisions.set(saved.order.id, "REJECTED");
+    if (savedOrder.origin === "ENGINE") {
+      this.runtime.decisions.set(savedOrder.id, "REJECTED");
     }
     bumpDecisionVersion(this.runtime);
-    return ReplenishmentOrderSchema.parse(this.enrichOrder(saved.order));
+    return ReplenishmentOrderSchema.parse(this.enrichOrder(savedOrder));
   }
 
   async reroute(id: string, body: OrderRerouteBody, user: User): Promise<ReplenishmentOrder> {
@@ -1295,22 +1296,14 @@ export class OrderService {
     });
 
     const prevMeta = this.runtime.orderLifecycleMeta.get(order.id) ?? {};
-    const nextMeta: OrderLifecycleMeta = { ...prevMeta, reopenedAt: null };
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       expectedStatus,
-      nextMeta,
+      { ...prevMeta, reopenedAt: null },
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
-
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
     bumpDecisionVersion(this.runtime);
-    return ReplenishmentOrderSchema.parse(this.enrichOrder(saved.order));
+    return ReplenishmentOrderSchema.parse(this.enrichOrder(savedOrder));
   }
 
   async cancel(id: string, body: OrderCancelBody, user: User): Promise<ReplenishmentOrder> {
@@ -1344,22 +1337,14 @@ export class OrderService {
     });
 
     const prevMeta = this.runtime.orderLifecycleMeta.get(order.id) ?? {};
-    const nextMeta: OrderLifecycleMeta = { ...prevMeta, reopenedAt: null };
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       expectedStatus,
-      nextMeta,
+      { ...prevMeta, reopenedAt: null },
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
-
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
     bumpDecisionVersion(this.runtime);
-    return ReplenishmentOrderSchema.parse(this.enrichOrder(saved.order));
+    return ReplenishmentOrderSchema.parse(this.enrichOrder(savedOrder));
   }
 
   async receive(id: string, body: OrderReceiveBody, user: User): Promise<ReplenishmentOrder> {
@@ -1396,33 +1381,25 @@ export class OrderService {
     });
 
     const prevMeta = this.runtime.orderLifecycleMeta.get(order.id) ?? {};
-    const nextMeta: OrderLifecycleMeta = { ...prevMeta, reopenedAt: null };
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       "COMMITTED",
-      nextMeta,
+      { ...prevMeta, reopenedAt: null },
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
-
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
     // IMPORTANT: Clear only receiver `inTransit` on delivery; donor `reserved` remains until physical
     // donor stock updates arrive and bump `dataVersion`, preventing temporary double-release of surplus.
-    if (saved.order.type === "TRANSFER" || saved.order.type === "REORDER") {
+    if (savedOrder.type === "TRANSFER" || savedOrder.type === "REORDER") {
       adjustCommittedDelta(
         this.runtime.committedDeltas,
-        saved.order.sku,
-        saved.order.targetBranchId,
+        savedOrder.sku,
+        savedOrder.targetBranchId,
         0,
-        -saved.order.quantity,
+        -savedOrder.quantity,
       );
     }
     bumpDecisionVersion(this.runtime);
-    return ReplenishmentOrderSchema.parse(this.enrichOrder(saved.order));
+    return ReplenishmentOrderSchema.parse(this.enrichOrder(savedOrder));
   }
 
   async reopen(id: string, user: User, comment?: string): Promise<LifecycleOrder> {
@@ -1449,44 +1426,11 @@ export class OrderService {
 
     // Release any committed reservation overlay before resetting status; downstream bumpDecisionVersion
     // refreshes projections and KPIs without bumping dataVersion or recomputing plan_cache.
-    const committed = this.runtime.committedRecommendationIds.get(order.id);
-    if (committed) {
-      if (committed.action === "TRANSFER") {
-        if (committed.donorBranchId) {
-          adjustCommittedDelta(
-            this.runtime.committedDeltas,
-            committed.sku,
-            committed.donorBranchId,
-            -committed.quantity,
-            0,
-          );
-        }
-        adjustCommittedDelta(
-          this.runtime.committedDeltas,
-          committed.sku,
-          committed.branchId,
-          0,
-          -committed.quantity,
-        );
-      } else if (committed.action === "REORDER") {
-        adjustCommittedDelta(
-          this.runtime.committedDeltas,
-          committed.sku,
-          committed.branchId,
-          0,
-          -committed.quantity,
-        );
-      } else if (committed.action === "MARKDOWN") {
-        adjustCommittedDelta(
-          this.runtime.committedDeltas,
-          committed.sku,
-          committed.branchId,
-          -committed.quantity,
-          0,
-        );
-      }
-      this.runtime.committedRecommendationIds.delete(order.id);
-    }
+    unwindCommittedAllocation(
+      this.runtime.committedDeltas,
+      this.runtime.committedRecommendationIds,
+      order.id,
+    );
 
     const nowMs = this.runtime.now();
     const reopenedAt = new Date(nowMs).toISOString();
@@ -1519,16 +1463,12 @@ export class OrderService {
 
     const prevMeta = this.runtime.orderLifecycleMeta.get(order.id) ?? {};
     const nextMeta: OrderLifecycleMeta = { ...prevMeta, reopenedAt };
-    const saved = await this.runtime.repo.saveOrderWithEvent(
+    const savedOrder = await this.persistTransition(
       updatedOrder,
       event,
       expectedStatus,
       nextMeta,
     );
-    if (saved.status !== "saved") {
-      await this.initializeAndMigrate(this.replayCutoff());
-      throw new OrderConflictError("Order was modified concurrently");
-    }
 
     const auditEntry: ApiAuditEntry = {
       id: `${order.id}:REOPENED:${reopenedAt}`,
@@ -1556,14 +1496,12 @@ export class OrderService {
       await this.runtime.repo.saveAudit(auditEntry);
     }
 
-    this.runtime.orders.set(saved.order.id, saved.order);
-    this.runtime.orderLifecycleMeta.set(saved.order.id, nextMeta);
     this.runtime.decisions.delete(order.id);
     this.runtime.audit.push(auditEntry);
     bumpDecisionVersion(this.runtime);
 
     return LifecycleOrderSchema.parse({
-      ...this.enrichOrder(saved.order),
+      ...this.enrichOrder(savedOrder),
       lifecycleState: "pending",
       reopenBadge: null,
       canReopen: false,

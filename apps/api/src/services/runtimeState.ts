@@ -107,7 +107,7 @@ export function applyDecisionHistoryToState(
   }
 }
 
-export function replayApprovedTransfersIntoState(
+function replayApprovedTransfersIntoState(
   state: StockRuntimeState,
   replayCutoffAt?: string,
 ): void {
@@ -150,7 +150,7 @@ function runReplayHook(state: StockRuntimeState, replayCutoffAt?: string): void 
   }
 }
 
-export async function syncDecisionsAndAudit(
+async function syncDecisionsAndAudit(
   state: StockRuntimeState,
   replayCutoffAt?: string,
 ): Promise<void> {

@@ -585,6 +585,74 @@ function AutofillDecoyFields() {
   );
 }
 
+function UserRoleAndBranchesFields({
+  roleSelectId,
+  roleAriaLabel,
+  role,
+  allowedRoles,
+  onRoleChange,
+  branches,
+  selectedBranches,
+  onToggleBranch,
+}: {
+  roleSelectId: string;
+  roleAriaLabel?: string;
+  role: Role;
+  allowedRoles: readonly Role[];
+  onRoleChange: (nextRole: Role) => void;
+  branches: ReadonlyArray<{ id: string; name: string }>;
+  selectedBranches: readonly string[];
+  onToggleBranch: (branchId: string) => void;
+}) {
+  return (
+    <>
+      <div className="space-y-1.5">
+        <label htmlFor={roleSelectId} className="text-xs font-medium text-muted-foreground">
+          Role
+        </label>
+        <select
+          id={roleSelectId}
+          aria-label={roleAriaLabel}
+          className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+          value={role}
+          onChange={(e) => onRoleChange(e.target.value as Role)}
+        >
+          {allowedRoles.map((r) => (
+            <option key={r} value={r}>
+              {r === "manager"
+                ? "Manager (Assigned branches, can approve/reject)"
+                : "Staff (Assigned branches, floor view & alerts)"}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-muted-foreground">
+          Assigned branches ({selectedBranches.length} selected)
+        </label>
+        <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
+          {branches.map((b) => (
+            <label
+              key={b.id}
+              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-card"
+            >
+              <input
+                type="checkbox"
+                checked={selectedBranches.includes(b.id)}
+                onChange={() => onToggleBranch(b.id)}
+                className="size-3.5 rounded border-input accent-primary"
+              />
+              <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
+              <span className="truncate text-foreground">{b.name}</span>
+            </label>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
 function CreateUserForm({
   actorRole,
   branches,
@@ -759,48 +827,15 @@ function CreateUserForm({
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="sf-create-acct-role" className="text-xs font-medium text-muted-foreground">
-          Role
-        </label>
-        <select
-          id="sf-create-acct-role"
-          className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          value={role}
-          onChange={(e) => handleRoleChange(e.target.value as Role)}
-        >
-          {allowedRoles.map((r) => (
-            <option key={r} value={r}>
-              {r === "manager"
-                ? "Manager (Assigned branches, can approve/reject)"
-                : "Staff (Assigned branches, floor view & alerts)"}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">
-          Assigned branches ({selectedBranches.length} selected)
-        </label>
-        <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
-          {branches.map((b) => (
-            <label
-              key={b.id}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-card"
-            >
-              <input
-                type="checkbox"
-                checked={selectedBranches.includes(b.id)}
-                onChange={() => toggleBranch(b.id)}
-                className="size-3.5 rounded border-input accent-primary"
-              />
-              <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
-              <span className="truncate text-foreground">{b.name}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+      <UserRoleAndBranchesFields
+        roleSelectId="sf-create-acct-role"
+        role={role}
+        allowedRoles={allowedRoles}
+        onRoleChange={handleRoleChange}
+        branches={branches}
+        selectedBranches={selectedBranches}
+        onToggleBranch={toggleBranch}
+      />
 
       <DialogFooter>
         <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onCancel}>
@@ -903,49 +938,16 @@ function EditUserForm({
         />
       </div>
 
-      <div className="space-y-1.5">
-        <label htmlFor="sf-edit-acct-role" className="text-xs font-medium text-muted-foreground">
-          Role
-        </label>
-        <select
-          id="sf-edit-acct-role"
-          aria-label="Edit user role"
-          className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
-          value={role}
-          onChange={(e) => handleRoleChange(e.target.value as Role)}
-        >
-          {allowedRoles.map((r) => (
-            <option key={r} value={r}>
-              {r === "manager"
-                ? "Manager (Assigned branches, can approve/reject)"
-                : "Staff (Assigned branches, floor view & alerts)"}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">
-          Assigned branches ({selectedBranches.length} selected)
-        </label>
-        <div className="max-h-36 overflow-y-auto rounded-xl border border-border bg-secondary/30 p-2.5 text-xs">
-          {branches.map((b) => (
-            <label
-              key={b.id}
-              className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 hover:bg-card"
-            >
-              <input
-                type="checkbox"
-                checked={selectedBranches.includes(b.id)}
-                onChange={() => toggleBranch(b.id)}
-                className="size-3.5 rounded border-input accent-primary"
-              />
-              <span className="font-mono text-[11px] text-muted-foreground">{b.id}</span>
-              <span className="truncate text-foreground">{b.name}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+      <UserRoleAndBranchesFields
+        roleSelectId="sf-edit-acct-role"
+        roleAriaLabel="Edit user role"
+        role={role}
+        allowedRoles={allowedRoles}
+        onRoleChange={handleRoleChange}
+        branches={branches}
+        selectedBranches={selectedBranches}
+        onToggleBranch={toggleBranch}
+      />
 
       <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-foreground">
         <input

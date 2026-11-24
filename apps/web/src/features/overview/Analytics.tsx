@@ -29,7 +29,6 @@ import { TOKENS } from "@/lib/tokens";
 import { cn } from "@/lib/utils";
 import {
   resolveRiskChart,
-  type ResolvedRiskChart,
   type RiskChartRow,
 } from "@/features/overview/riskChart";
 import {
@@ -40,7 +39,33 @@ import {
   type Recommendation,
 } from "@stockflow/core";
 
-export { resolveRiskChart, type ResolvedRiskChart, type RiskChartRow };
+export { resolveRiskChart, type RiskChartRow };
+
+function renderBarEndLabel({
+  x,
+  y,
+  width,
+  height,
+  value,
+}: {
+  x?: number | string;
+  y?: number | string;
+  width?: number | string;
+  height?: number | string;
+  value?: number | string | boolean | null;
+}) {
+  return (
+    <text
+      x={Number(x ?? 0) + Number(width ?? 0) + 6}
+      y={Number(y ?? 0) + Number(height ?? 0) / 2}
+      dominantBaseline="central"
+      fill={TOKENS.chart.axis}
+      className="text-[11px] font-medium tabular-nums"
+    >
+      {formatMoney(Number(value))}
+    </text>
+  );
+}
 
 const ACTION_CONFIG: Record<
   Action,
@@ -368,20 +393,7 @@ export function Analytics({
                   });
                 }}
               >
-                <LabelList
-                  dataKey="revenueAtRisk"
-                  content={({ x, y, width, height, value }) => (
-                    <text
-                      x={Number(x ?? 0) + Number(width ?? 0) + 6}
-                      y={Number(y ?? 0) + Number(height ?? 0) / 2}
-                      dominantBaseline="central"
-                      fill={TOKENS.chart.axis}
-                      className="text-[11px] font-medium tabular-nums"
-                    >
-                      {formatMoney(Number(value))}
-                    </text>
-                  )}
-                />
+                <LabelList dataKey="revenueAtRisk" content={renderBarEndLabel} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
@@ -476,20 +488,7 @@ export function Analytics({
                   navigate(`/products/${item.sku}`);
                 }}
               >
-                <LabelList
-                  dataKey="netBenefit"
-                  content={({ x, y, width, height, value }) => (
-                    <text
-                      x={Number(x ?? 0) + Number(width ?? 0) + 6}
-                      y={Number(y ?? 0) + Number(height ?? 0) / 2}
-                      dominantBaseline="central"
-                      fill={TOKENS.chart.axis}
-                      className="text-[11px] font-medium tabular-nums"
-                    >
-                      {formatMoney(Number(value))}
-                    </text>
-                  )}
-                />
+                <LabelList dataKey="netBenefit" content={renderBarEndLabel} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>

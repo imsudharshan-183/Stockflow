@@ -1,5 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
+  ActionMetaRecordSchema,
+  ApiAuditEntrySchema,
   BAHRAIN_BRANCHES,
   OrderEventSchema,
   ReplenishmentOrderSchema,
@@ -33,7 +35,6 @@ import type {
 } from "../repositories/types.js";
 import type { UserRepository } from "../repositories/userTypes.js";
 import { createStockServices, type StockServices } from "../services/index.js";
-import { ActionMetaRecordSchema, ApiAuditEntrySchema } from "../services/queueLifecycle.js";
 
 export const TEST_JWT_SECRET = "test-secret-at-least-32-characters-long-key";
 

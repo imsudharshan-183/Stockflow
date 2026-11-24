@@ -1,8 +1,6 @@
 import mongoose from "mongoose";
 import { ImportLogModel, SalesEntryModel } from "./repositories/models.js";
 
-const DEFAULT_MONGO_URI = "mongodb://localhost:27017/stockflow";
-
 export interface SalesEntryRecord {
   id: string;
   branchId: string;
@@ -48,41 +46,32 @@ export interface ImportLogEntry {
   branchIds: string[];
 }
 
-let sharedConnectionPromise: Promise<typeof mongoose> | null = null;
-
-export async function connectDb(uri?: string): Promise<mongoose.mongo.Db> {
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
-    return mongoose.connection.db;
-  }
-  const targetUri = (uri ?? process.env.MONGODB_URI)?.trim() || DEFAULT_MONGO_URI;
-  if (!sharedConnectionPromise) {
-    sharedConnectionPromise = mongoose
-      .connect(targetUri, { dbName: "stockflow", serverSelectionTimeoutMS: 8000 })
-      .then(async (m) => {
-        await SalesEntryModel.createIndexes();
-        return m;
-      })
-      .catch((err: unknown) => {
-        sharedConnectionPromise = null;
-        throw err;
-      });
-  }
-  await sharedConnectionPromise;
-  if (!mongoose.connection.db) {
-    throw new Error("MongoDB connection established without db handle");
-  }
-  return mongoose.connection.db;
-}
-
-export function getDb(): mongoose.mongo.Db | null {
-  return mongoose.connection.readyState === 1 && mongoose.connection.db
-    ? mongoose.connection.db
-    : null;
-}
-
 const memorySalesEntries = new Map<string, SalesEntryRecord>();
 const memorySalesEntryAudits: SalesEntryAuditRecord[] = [];
 const memoryImportLogs: ImportLogEntry[] = [];
+
+function mapSalesEntryDoc(
+  doc: {
+    _id?: unknown;
+    branchId?: unknown;
+    sku?: unknown;
+    date?: unknown;
+    unitsSold?: unknown;
+    onHand?: unknown;
+    updatedAt?: unknown;
+  },
+  fallbackDate?: Date,
+): SalesEntryRecord {
+  return {
+    id: String(doc._id),
+    branchId: String(doc.branchId),
+    sku: String(doc.sku),
+    date: String(doc.date),
+    unitsSold: Number(doc.unitsSold),
+    onHand: Number(doc.onHand),
+    updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : (fallbackDate ?? new Date()),
+  };
+}
 
 export function clearMemorySalesEntries(): void {
   memorySalesEntries.clear();
@@ -193,15 +182,7 @@ export async function listSalesEntries(filter: {
       .toArray();
 
     return {
-      entries: docs.map((doc) => ({
-        id: String(doc._id),
-        branchId: String(doc.branchId),
-        sku: String(doc.sku),
-        date: String(doc.date),
-        unitsSold: Number(doc.unitsSold),
-        onHand: Number(doc.onHand),
-        updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : new Date(),
-      })),
+      entries: docs.map((doc) => mapSalesEntryDoc(doc)),
       total,
       page,
       limit: filter.limit,
@@ -240,15 +221,7 @@ export async function getSalesEntryById(id: string): Promise<SalesEntryRecord | 
     if (!mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await SalesEntryModel.collection.findOne({ _id: new mongoose.Types.ObjectId(id) });
     if (!doc) return null;
-    return {
-      id: String(doc._id),
-      branchId: String(doc.branchId),
-      sku: String(doc.sku),
-      date: String(doc.date),
-      unitsSold: Number(doc.unitsSold),
-      onHand: Number(doc.onHand),
-      updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : new Date(),
-    };
+    return mapSalesEntryDoc(doc);
   }
   return memorySalesEntries.get(id) ?? null;
 }
@@ -269,15 +242,7 @@ export async function updateSalesEntryById(
       { returnDocument: "after" },
     );
     if (!doc) return null;
-    return {
-      id: String(doc._id),
-      branchId: String(doc.branchId),
-      sku: String(doc.sku),
-      date: String(doc.date),
-      unitsSold: Number(doc.unitsSold),
-      onHand: Number(doc.onHand),
-      updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : now,
-    };
+    return mapSalesEntryDoc(doc, now);
   }
 
   const existing = memorySalesEntries.get(id);
@@ -299,15 +264,7 @@ export async function deleteSalesEntryById(id: string): Promise<SalesEntryRecord
       _id: new mongoose.Types.ObjectId(id),
     });
     if (!doc) return null;
-    return {
-      id: String(doc._id),
-      branchId: String(doc.branchId),
-      sku: String(doc.sku),
-      date: String(doc.date),
-      unitsSold: Number(doc.unitsSold),
-      onHand: Number(doc.onHand),
-      updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : new Date(),
-    };
+    return mapSalesEntryDoc(doc);
   }
 
   const existing = memorySalesEntries.get(id);
@@ -320,24 +277,10 @@ export function recordSalesEntryAudit(record: SalesEntryAuditRecord): void {
   memorySalesEntryAudits.push(record);
 }
 
-export function getSalesEntryAuditLog(): ReadonlyArray<SalesEntryAuditRecord> {
-  return memorySalesEntryAudits;
-}
-
 const recomputeCallLog: Array<{ branchId: string; sku: string; at: string }> = [];
-let recomputeListener: ((branchId: string, sku: string) => Promise<void>) | null = null;
-
-export function setRecomputeListener(
-  listener: ((branchId: string, sku: string) => Promise<void>) | null,
-): void {
-  recomputeListener = listener;
-}
 
 export async function recomputeForSku(branchId: string, sku: string): Promise<void> {
   recomputeCallLog.push({ branchId, sku, at: new Date().toISOString() });
-  if (recomputeListener) {
-    await recomputeListener(branchId, sku);
-  }
 }
 
 export function getRecomputeCallLog(): ReadonlyArray<{ branchId: string; sku: string; at: string }> {
@@ -406,15 +349,3 @@ export async function listImportLogs(filter: {
     .sort((a, b) => b.importedAt.localeCompare(a.importedAt))
     .slice(0, limit);
 }
-
-export function getMemoryMaxSalesEntryDate(allowedBranchIds?: readonly string[] | null): string | null {
-  const allowed = allowedBranchIds ? new Set(allowedBranchIds) : null;
-  let maxDate: string | null = null;
-  for (const entry of memorySalesEntries.values()) {
-    if (allowed && !allowed.has(entry.branchId)) continue;
-    if (!maxDate || entry.date > maxDate) maxDate = entry.date;
-  }
-  return maxDate;
-}
-
-export { ImportLogModel, SalesEntryModel };

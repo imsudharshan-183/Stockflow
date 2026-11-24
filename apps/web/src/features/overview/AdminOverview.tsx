@@ -1,4 +1,4 @@
-import { ArrowRight, Boxes, CircleDollarSign, RefreshCw, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -14,6 +14,7 @@ import {
 } from "recharts";
 import { ChartCard as SharedChartCard } from "@/components/shared/ChartCard";
 import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailPopup";
+import { FreshnessBanner } from "@/components/shared/FreshnessBanner";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
 import { Badge } from "@/components/ui/badge";
@@ -236,31 +237,11 @@ export function AdminOverview({
         lastUpdated={lastUpdatedHm}
         subtitle={`Today: ${today.displayDate} · Data through: ${formatDate(asOfDataDate)} · ${formatNumber(report.branches.length)} branches monitored`}
         actions={
-          staleDataDays > 1 || onRefresh ? (
-            <div className="flex flex-wrap items-center gap-2">
-              {staleDataDays > 1 ? (
-                <Link to="/data?tab=import">
-                  <Badge tone="risk">
-                    Data is {formatNumber(staleDataDays)}{" "}
-                    {staleDataDays === 1 ? "day" : "days"} old - import latest sales
-                  </Badge>
-                </Link>
-              ) : null}
-              {onRefresh ? (
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  loading={isRefreshing}
-                  onClick={onRefresh}
-                  className="gap-1.5"
-                >
-                  <RefreshCw className="size-3.5" aria-hidden="true" />
-                  Refresh
-                </Button>
-              ) : null}
-            </div>
-          ) : undefined
+          <FreshnessBanner
+            staleDataDays={staleDataDays}
+            isRefreshing={isRefreshing}
+            onRefresh={onRefresh}
+          />
         }
       />
 

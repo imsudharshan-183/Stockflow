@@ -12,7 +12,7 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { useAuth } from "@/features/auth/AuthContext";
 import { cn } from "@/lib/utils";
 
-export interface ChartDetailMetric {
+interface ChartDetailMetric {
   label: string;
   value: string;
 }

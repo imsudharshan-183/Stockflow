@@ -943,44 +943,16 @@ export function DataEntryPage() {
                 </TableHeader>
                 <TableBody>
                   {addRecentEntriesQuery.data.entries.slice(0, 10).map((entry) => (
-                    <TableRow key={entry.id}>
-                      <TableCell className="tabular-nums">{formatDate(entry.date)}</TableCell>
-                      <TableCell className="font-mono text-xs">{entry.branchId}</TableCell>
-                      <TableCell className="font-mono text-xs font-medium">{entry.sku}</TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatNumber(entry.unitsSold)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums">
-                        {formatNumber(entry.onHand)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="inline-flex items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Edit entry ${entry.sku} on ${entry.date}`}
-                            onClick={() => {
-                              setEditingEntry(entry);
-                              setEditUnitsSold(String(entry.unitsSold));
-                              setEditOnHand(String(entry.onHand));
-                            }}
-                          >
-                            <Pencil className="size-3.5" aria-hidden="true" />
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label={`Delete entry ${entry.sku} on ${entry.date}`}
-                            onClick={() => setDeletingEntry(entry)}
-                            className="text-risk-text hover:bg-risk-bg"
-                          >
-                            <Trash2 className="size-3.5" aria-hidden="true" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
+                    <SalesEntryRow
+                      key={entry.id}
+                      entry={entry}
+                      onEdit={(item) => {
+                        setEditingEntry(item);
+                        setEditUnitsSold(String(item.unitsSold));
+                        setEditOnHand(String(item.onHand));
+                      }}
+                      onDelete={setDeletingEntry}
+                    />
                   ))}
                 </TableBody>
               </Table>
@@ -1061,44 +1033,16 @@ export function DataEntryPage() {
                   </TableHeader>
                   <TableBody>
                     {entriesQuery.data.entries.map((entry) => (
-                      <TableRow key={entry.id}>
-                        <TableCell className="tabular-nums">{formatDate(entry.date)}</TableCell>
-                        <TableCell className="font-mono text-xs">{entry.branchId}</TableCell>
-                        <TableCell className="font-mono text-xs font-medium">{entry.sku}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatNumber(entry.unitsSold)}
-                        </TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {formatNumber(entry.onHand)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="inline-flex items-center gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Edit entry ${entry.sku} on ${entry.date}`}
-                              onClick={() => {
-                                setEditingEntry(entry);
-                                setEditUnitsSold(String(entry.unitsSold));
-                                setEditOnHand(String(entry.onHand));
-                              }}
-                            >
-                              <Pencil className="size-3.5" aria-hidden="true" />
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon-xs"
-                              aria-label={`Delete entry ${entry.sku} on ${entry.date}`}
-                              onClick={() => setDeletingEntry(entry)}
-                              className="text-risk-text hover:bg-risk-bg"
-                            >
-                              <Trash2 className="size-3.5" aria-hidden="true" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
+                      <SalesEntryRow
+                        key={entry.id}
+                        entry={entry}
+                        onEdit={(item) => {
+                          setEditingEntry(item);
+                          setEditUnitsSold(String(item.unitsSold));
+                          setEditOnHand(String(item.onHand));
+                        }}
+                        onDelete={setDeletingEntry}
+                      />
                     ))}
                   </TableBody>
                 </Table>
@@ -1449,5 +1393,57 @@ export function DataEntryPage() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+function SalesEntryRow<
+  T extends {
+    id: string;
+    date: string;
+    branchId: string;
+    sku: string;
+    unitsSold: number;
+    onHand: number;
+  },
+>({
+  entry,
+  onEdit,
+  onDelete,
+}: {
+  entry: T;
+  onEdit: (entry: T) => void;
+  onDelete: (entry: T) => void;
+}) {
+  return (
+    <TableRow>
+      <TableCell className="tabular-nums">{formatDate(entry.date)}</TableCell>
+      <TableCell className="font-mono text-xs">{entry.branchId}</TableCell>
+      <TableCell className="font-mono text-xs font-medium">{entry.sku}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatNumber(entry.unitsSold)}</TableCell>
+      <TableCell className="text-right tabular-nums">{formatNumber(entry.onHand)}</TableCell>
+      <TableCell className="text-right">
+        <div className="inline-flex items-center gap-1">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Edit entry ${entry.sku} on ${entry.date}`}
+            onClick={() => onEdit(entry)}
+          >
+            <Pencil className="size-3.5" aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Delete entry ${entry.sku} on ${entry.date}`}
+            onClick={() => onDelete(entry)}
+            className="text-risk-text hover:bg-risk-bg"
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
   );
 }

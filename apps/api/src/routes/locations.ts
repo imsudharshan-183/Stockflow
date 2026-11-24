@@ -1,5 +1,4 @@
 import {
-  ErrorBodySchema,
   LocationInventoryQuerySchema,
   LocationTrendQuerySchema,
   RecommendationSchema,
@@ -7,6 +6,7 @@ import {
 import type { FastifyInstance } from "fastify";
 import type { AuthContext } from "../plugins/auth.js";
 import type { StockServices } from "../services/index.js";
+import { cleanQuery, sendApiError } from "./helpers.js";
 
 const pathId = RecommendationSchema.pick({ id: true });
 
@@ -38,7 +38,7 @@ export function registerLocationRoutes(
       const { id } = pathId.parse(request.params);
       const summary = services.catalog.locationSummary(id, request.currentUser);
       if (!summary) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
+        return sendApiError(reply, 404, "Location not found");
       }
       return summary;
     },
@@ -54,7 +54,7 @@ export function registerLocationRoutes(
       const query = LocationInventoryQuerySchema.parse(cleanQuery(request.query));
       const inventory = services.catalog.locationInventory(id, query, request.currentUser);
       if (!inventory) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
+        return sendApiError(reply, 404, "Location not found");
       }
       return inventory;
     },
@@ -70,18 +70,9 @@ export function registerLocationRoutes(
       const query = LocationTrendQuerySchema.parse(cleanQuery(request.query));
       const trend = services.catalog.locationTrend(id, query, request.currentUser);
       if (!trend) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "Location not found" }));
+        return sendApiError(reply, 404, "Location not found");
       }
       return trend;
     },
   );
-}
-
-function cleanQuery(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object") return {};
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (value !== "" && value !== undefined && value !== null) cleaned[key] = value;
-  }
-  return cleaned;
 }

@@ -15,7 +15,7 @@ declare module "fastify" {
   }
 }
 
-export const SYNTHETIC_ADMIN: User = {
+const SYNTHETIC_ADMIN: User = {
   id: "usr_synthetic_admin",
   name: "System Admin",
   email: "admin@stockflow.dev",

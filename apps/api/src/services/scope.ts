@@ -16,7 +16,7 @@ import {
 
 export { isBranchInScope, scopeBranches };
 
-export function isIntraClusterTransfer(
+function isIntraClusterTransfer(
   user: User,
   targetBranchId: string,
   sourceBranchId: string | null | undefined,
@@ -67,7 +67,7 @@ export function buildOrderOwnership(
   };
 }
 
-export function isTransferInScope(
+function isTransferInScope(
   user: User,
   branchId: string,
   donorBranchId: string | null | undefined,

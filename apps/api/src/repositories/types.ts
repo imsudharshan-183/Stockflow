@@ -1,14 +1,16 @@
 import type {
   ActedBy,
-  ActionRecord,
+  ActionMetaRecord,
   Analysis,
-  AuditEntry,
+  ApiAuditEntry,
   Branch,
   Dataset,
+  DecisionSnapshot,
   OrderEvent,
   OrderStatus,
   Product,
   ProductChangeRecord,
+  QueueLifecycleView,
   ReplenishmentOrder,
   StockAlert,
   StockAlertResolution,
@@ -24,31 +26,13 @@ export interface CachedPlanRecord {
   plan: Analysis;
 }
 
-export interface DecisionSnapshot {
-  netBenefit: number;
-  targetCoverDays: number | null;
-}
-
-export interface ActionMetaRecord extends ActionRecord {
-  reasonCode?: string;
-  comment?: string;
-  snapshot?: DecisionSnapshot;
-  rejectedUntil?: string;
-  reopenedAt?: string | null;
-}
-
-export type ApiAuditEntry = Omit<AuditEntry, "decision"> & {
-  decision: "APPROVED" | "REJECTED" | "REOPENED";
-  comment?: string;
-};
+export type { ActionMetaRecord, ApiAuditEntry, QueueLifecycleView };
 
 export interface OrderLifecycleMeta {
   rejectionSnapshot?: DecisionSnapshot | null;
   rejectedUntil?: string | null;
   reopenedAt?: string | null;
 }
-
-export type QueueLifecycleView = "pending" | "in_progress" | "decided";
 
 export interface SaveDecisionBatchResult {
   persistedIds: Set<string>;

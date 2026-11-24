@@ -1,21 +1,24 @@
 import {
+  ApiAuditListSchema,
+  LifecycleRecommendationListSchema,
+  LifecycleRecommendationSchema,
   OrderEventSchema,
   RecommendationListSchema,
   RecommendationSchema,
   ReplenishmentOrderSchema,
   can,
+  type ActionMetaRecord,
+  type ApiAuditEntry,
+  type ApiAuditList,
   type BatchDecideItemResult,
+  type LifecycleRecommendation,
+  type LifecycleRecommendationList,
+  type QueueLifecycleView,
   type Recommendation,
   type RecommendationList,
   type RecommendationQuery,
   type User,
 } from "@stockflow/core";
-import type { z } from "zod";
-import type {
-  ActionMetaRecord,
-  ApiAuditEntry,
-  QueueLifecycleView,
-} from "../repositories/types.js";
 import { DecisionConflictError, DecisionForbiddenError } from "./errors.js";
 import {
   adjustCommittedDelta,
@@ -23,15 +26,12 @@ import {
   findRawPosition,
   getCommittedDelta,
   projectPositionFor,
+  rollbackDeltaEntries,
+  unwindCommittedAllocation,
   type ProjectedPosition,
+  type StagedDeltaEntry,
 } from "./projection.js";
-import {
-  ApiAuditListSchema,
-  LifecycleRecommendationListSchema,
-  LifecycleRecommendationSchema,
-  evaluateDecisionLifecycle,
-  type LifecycleRecommendation,
-} from "./queueLifecycle.js";
+import { evaluateDecisionLifecycle } from "./queueLifecycle.js";
 import {
   applyDecisionHistoryToState,
   bumpDecisionVersion,
@@ -48,8 +48,6 @@ import {
 } from "./scope.js";
 
 const DAY_MS = 86_400_000;
-type ApiAuditList = z.infer<typeof ApiAuditListSchema>;
-type LifecycleRecommendationList = z.infer<typeof LifecycleRecommendationListSchema>;
 
 const DEMO_USER = "Demo Buyer";
 
@@ -185,20 +183,13 @@ export class DecisionService {
   }
 
   // Reverts optimistic committedDeltas staging when DB persistence fails or loses an optimistic-lock race.
-  private rollbackStagedDeltas(
-    recId: string,
-    entries: readonly { sku: string; branchId: string; reserved: number; inTransit: number }[],
-  ): void {
-    for (const e of entries) {
-      adjustCommittedDelta(
-        this.runtime.committedDeltas,
-        e.sku,
-        e.branchId,
-        -e.reserved,
-        -e.inTransit,
-      );
-    }
-    this.runtime.committedRecommendationIds.delete(recId);
+  private rollbackStagedDeltas(recId: string, entries: readonly StagedDeltaEntry[]): void {
+    rollbackDeltaEntries(
+      this.runtime.committedDeltas,
+      this.runtime.committedRecommendationIds,
+      recId,
+      entries,
+    );
   }
 
   private matches(recommendation: Recommendation, query: RecommendationQuery): boolean {
@@ -779,44 +770,11 @@ export class DecisionService {
 
     this.runtime.inflightDecisionIds.add(id);
     try {
-      const committed = this.runtime.committedRecommendationIds.get(id);
-      if (committed) {
-        if (committed.action === "TRANSFER") {
-          if (committed.donorBranchId) {
-            adjustCommittedDelta(
-              this.runtime.committedDeltas,
-              committed.sku,
-              committed.donorBranchId,
-              -committed.quantity,
-              0,
-            );
-          }
-          adjustCommittedDelta(
-            this.runtime.committedDeltas,
-            committed.sku,
-            committed.branchId,
-            0,
-            -committed.quantity,
-          );
-        } else if (committed.action === "REORDER") {
-          adjustCommittedDelta(
-            this.runtime.committedDeltas,
-            committed.sku,
-            committed.branchId,
-            0,
-            -committed.quantity,
-          );
-        } else if (committed.action === "MARKDOWN") {
-          adjustCommittedDelta(
-            this.runtime.committedDeltas,
-            committed.sku,
-            committed.branchId,
-            -committed.quantity,
-            0,
-          );
-        }
-        this.runtime.committedRecommendationIds.delete(id);
-      }
+      unwindCommittedAllocation(
+        this.runtime.committedDeltas,
+        this.runtime.committedRecommendationIds,
+        id,
+      );
 
       const branchId = existing?.branchId ?? existingOrder?.targetBranchId ?? latestAudit?.branchId ?? "";
       const branchName = existing?.branchName ?? existingOrder?.targetBranchName ?? latestAudit?.branchName ?? "";

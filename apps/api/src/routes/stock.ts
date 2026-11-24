@@ -5,7 +5,9 @@ import {
   DbHealthSchema,
   ErrorBodySchema,
   HealthSchema,
+  LifecycleRecommendationSchema,
   ProductDetailSchema,
+  QueueLifecycleViewSchema,
   RecommendationQuerySchema,
   RecommendationSchema,
   isBranchInScope,
@@ -23,10 +25,6 @@ import {
   DecisionForbiddenError,
   type StockServices,
 } from "../services/index.js";
-import {
-  LifecycleRecommendationSchema,
-  QueueLifecycleViewSchema,
-} from "../services/queueLifecycle.js";
 
 const ExtendedRecommendationQuerySchema = RecommendationQuerySchema.merge(
   z.object({ view: QueueLifecycleViewSchema.optional() }),

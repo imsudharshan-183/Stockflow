@@ -1,4 +1,6 @@
 import {
+  ActionMetaRecordSchema,
+  ApiAuditEntrySchema,
   OrderEventSchema,
   ReplenishmentOrderSchema,
   generateDataset,
@@ -28,7 +30,6 @@ import type {
 } from "./types.js";
 import type { UserRepository } from "./userTypes.js";
 import { InMemoryUserRepository } from "./memoryUser.js";
-import { ActionMetaRecordSchema, ApiAuditEntrySchema } from "../services/queueLifecycle.js";
 
 export class InMemoryRepository implements StockRepository {
   readonly kind = "memory" as const;

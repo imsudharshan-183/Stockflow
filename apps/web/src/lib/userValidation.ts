@@ -1,4 +1,4 @@
-export const USER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+const USER_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 export const MIN_USER_PASSWORD_LENGTH = 8;
 
 export function isValidUserEmail(value: string): boolean {

@@ -1,4 +1,4 @@
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import {
   CreateUserSchema,
@@ -7,10 +7,12 @@ import {
   UserListSchema,
   UserSchema,
   canManageRole,
+  type Role,
 } from "@stockflow/core";
 import type { AuthContext } from "../plugins/auth.js";
 import { toPublicUser, type AuthService } from "../services/authService.js";
 import type { UserRepository } from "../repositories/userTypes.js";
+import { sendApiError } from "./helpers.js";
 
 const STRICT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
@@ -44,6 +46,24 @@ const RouteUpdateUserSchema = UpdateUserSchema.extend({
 const ResetPasswordSchema = z.object({
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
+
+async function loadManageableTarget(
+  userRepo: UserRepository,
+  id: string,
+  actorRole: Role,
+  reply: FastifyReply,
+) {
+  const target = await userRepo.findById(id);
+  if (!target) {
+    sendApiError(reply, 404, "User not found");
+    return null;
+  }
+  if (!canManageRole(actorRole, target.role)) {
+    sendApiError(reply, 403, "Cannot modify a user with role equal to or higher than yours");
+    return null;
+  }
+  return target;
+}
 
 export function registerUsersRoutes(
   app: FastifyInstance,
@@ -103,16 +123,8 @@ export function registerUsersRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: parsed.error.issues[0]?.message || "Invalid input" }));
       }
 
-      const target = await userRepo.findById(id);
-      if (!target) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "User not found" }));
-      }
-
-      if (!canManageRole(request.currentUser.role, target.role)) {
-        return reply.code(403).send(
-          ErrorBodySchema.parse({ error: "Cannot modify a user with role equal to or higher than yours" }),
-        );
-      }
+      const target = await loadManageableTarget(userRepo, id, request.currentUser.role, reply);
+      if (!target) return reply;
 
       const input = parsed.data;
       if (input.role && !canManageRole(request.currentUser.role, input.role)) {
@@ -169,16 +181,8 @@ export function registerUsersRoutes(
         return reply.code(400).send(ErrorBodySchema.parse({ error: parsed.error.issues[0]?.message || "Invalid input" }));
       }
 
-      const target = await userRepo.findById(id);
-      if (!target) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "User not found" }));
-      }
-
-      if (!canManageRole(request.currentUser.role, target.role)) {
-        return reply.code(403).send(
-          ErrorBodySchema.parse({ error: "Cannot modify a user with role equal to or higher than yours" }),
-        );
-      }
+      const target = await loadManageableTarget(userRepo, id, request.currentUser.role, reply);
+      if (!target) return reply;
 
       const passwordHash = await authService.hashPassword(parsed.data.password);
       await userRepo.update(id, { passwordHash });
@@ -190,16 +194,8 @@ export function registerUsersRoutes(
     // RBAC: Admin only (users:manage via adminScope hook; deactivates lower-privileged targets and revokes tokens).
     adminScope.delete("/users/:id", async (request, reply) => {
       const { id } = request.params as { id: string };
-      const target = await userRepo.findById(id);
-      if (!target) {
-        return reply.code(404).send(ErrorBodySchema.parse({ error: "User not found" }));
-      }
-
-      if (!canManageRole(request.currentUser.role, target.role)) {
-        return reply.code(403).send(
-          ErrorBodySchema.parse({ error: "Cannot modify a user with role equal to or higher than yours" }),
-        );
-      }
+      const target = await loadManageableTarget(userRepo, id, request.currentUser.role, reply);
+      if (!target) return reply;
 
       await userRepo.update(id, { isActive: false });
       await userRepo.deleteRefreshTokensForUser(id);

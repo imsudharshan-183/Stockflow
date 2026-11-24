@@ -19,7 +19,7 @@ import { getBahrainToday } from "../utils/bahrainDate.js";
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-export interface ValidatedSalesEntryInput {
+interface ValidatedSalesEntryInput {
   branchId: string;
   sku: string;
   date: string;
@@ -51,7 +51,7 @@ function parseNumericField(raw: unknown, allowNumericString: boolean): number | 
  * Validates a manual or CSV sales entry row.
  * Returns a specific error message for the first missing/invalid field, or the normalized input.
  */
-export function validateSalesEntryInput(
+function validateSalesEntryInput(
   raw: unknown,
   options: { coerceNumericStrings?: boolean; nowMs?: number } = {},
 ): { ok: true; data: ValidatedSalesEntryInput } | { ok: false; message: string } {
@@ -251,7 +251,7 @@ function extractMultipartFile(
  * RFC 4180 CSV parser with header mapping (columns: true).
  * Returns an array of { rowNumber, record } objects where rowNumber is 1-based data row index.
  */
-export function parseCsvWithHeaders(
+function parseCsvWithHeaders(
   csvText: string,
 ): Array<{ rowNumber: number; record: Record<string, string> }> {
   const cleaned = csvText.replace(/^\uFEFF/, "");

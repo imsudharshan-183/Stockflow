@@ -300,3 +300,58 @@ export type {
   ResolveStockAlertResponse,
   TransitionDecision,
 } from "./orders.js";
+export {
+  BAHRAIN_TIME_ZONE,
+  diffCalendarDays,
+  formatBahrainDate,
+  formatBahrainDateTime,
+  formatBahrainTimeHm,
+  getBahrainToday,
+} from "./bahrainDate.js";
+export type { BahrainToday } from "./bahrainDate.js";
+export {
+  BAHRAIN_BOUNDS,
+  isWithinBahrain,
+  looksSwappedBahrain,
+  round6,
+  validateCoordinates,
+} from "./coordinates.js";
+export type {
+  CoordinateValidationErrorCode,
+  CoordinateValidationResult,
+} from "./coordinates.js";
+export {
+  ActionMetaRecordSchema,
+  ApiAuditEntrySchema,
+  ApiAuditListSchema,
+  DecisionSnapshotSchema,
+  KpisWithMetaResponseSchema,
+  LifecycleFieldsSchema,
+  LifecycleOrderListResponseSchema,
+  LifecycleOrderSchema,
+  LifecycleRecommendationListSchema,
+  LifecycleRecommendationSchema,
+  LiveKpiMetricSchema,
+  LiveOverviewMetricsSchema,
+  LiveOverviewResponseSchema,
+  OverviewFreshnessMetaSchema,
+  QueueLifecycleViewSchema,
+  ReopenBadgeSchema,
+} from "./schemas/lifecycle.js";
+export type {
+  ActionMetaRecord,
+  ApiAuditEntry,
+  ApiAuditList,
+  DecisionSnapshot,
+  KpisWithMetaResponse,
+  LifecycleOrder,
+  LifecycleOrderListResponse,
+  LifecycleRecommendation,
+  LifecycleRecommendationList,
+  LiveKpiMetric,
+  LiveOverviewMetrics,
+  LiveOverviewResponse,
+  OverviewFreshnessMeta,
+  QueueLifecycleView,
+  ReopenBadge,
+} from "./schemas/lifecycle.js";

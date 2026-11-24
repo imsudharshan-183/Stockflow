@@ -1,68 +1,26 @@
 import {
   DEAD_VELOCITY_PER_DAY,
   DEFAULT_POLICY,
-  KpiSummarySchema,
+  KpisWithMetaResponseSchema,
+  LifecycleRecommendationSchema,
+  LiveOverviewResponseSchema,
   backtest,
   can,
   round2,
   round3,
   type Dataset,
+  type KpisWithMetaResponse,
   type KpiSummary,
+  type LifecycleRecommendation,
+  type LiveOverviewResponse,
   type User,
 } from "@stockflow/core";
-import { z } from "zod";
 import { diffCalendarDays, getBahrainToday } from "../utils/bahrainDate.js";
 import { BranchNotFoundError, DecisionForbiddenError } from "./errors.js";
 import { projectPositionFor } from "./projection.js";
-import {
-  LifecycleRecommendationSchema,
-  evaluateDecisionLifecycle,
-  type LifecycleRecommendation,
-} from "./queueLifecycle.js";
+import { evaluateDecisionLifecycle } from "./queueLifecycle.js";
 import { ensureInitializedSyncIfPossible, type StockRuntimeState } from "./runtimeState.js";
 import { isBranchInScope, isMaterialRecommendation, scopeBranches } from "./scope.js";
-
-export const LiveKpiMetricSchema = z.object({
-  value: z.number(),
-  computedAt: z.string().min(1),
-  dataVersion: z.number().int().nonnegative(),
-  decisionVersion: z.number().int().nonnegative(),
-});
-
-export const OverviewFreshnessMetaSchema = z.object({
-  computedAt: z.string().min(1),
-  dataVersion: z.number().int().nonnegative(),
-  decisionVersion: z.number().int().nonnegative(),
-  todayBahrain: z.string().min(1),
-  asOfDataDate: z.string().min(1),
-  staleDataDays: z.number().int().nonnegative(),
-});
-
-export const LiveOverviewMetricsSchema = z.object({
-  stockoutRate: LiveKpiMetricSchema,
-  stockoutRateDelta28d: LiveKpiMetricSchema,
-  overstockValue: LiveKpiMetricSchema,
-  deadStockValue: LiveKpiMetricSchema,
-  salesAtRisk: LiveKpiMetricSchema,
-  pendingActionsCount: LiveKpiMetricSchema,
-  pendingEstimatedGain: LiveKpiMetricSchema,
-});
-
-export const LiveOverviewResponseSchema = z.object({
-  report: KpiSummarySchema,
-  meta: OverviewFreshnessMetaSchema,
-  metrics: LiveOverviewMetricsSchema,
-  stockoutSparkline: z.array(z.number()),
-  pendingRecommendations: z.array(LifecycleRecommendationSchema),
-});
-export type LiveOverviewResponse = z.infer<typeof LiveOverviewResponseSchema>;
-
-export const KpisWithMetaResponseSchema = KpiSummarySchema.extend({
-  meta: OverviewFreshnessMetaSchema,
-  metrics: LiveOverviewMetricsSchema,
-  stockoutSparkline: z.array(z.number()),
-});
-export type KpisWithMetaResponse = z.infer<typeof KpisWithMetaResponseSchema>;
 
 export class KpiService {
   constructor(private readonly runtime: StockRuntimeState) {}
@@ -159,27 +117,7 @@ export class KpiService {
       };
     }
 
-    if (user && !can(user.role, "dashboard:financial:scoped")) {
-      throw new DecisionForbiddenError("Insufficient permission to view KPIs");
-    }
-
-    const activeBranchIds = this.runtime.data.branches
-      .filter((b) => b.status !== "archived")
-      .map((b) => b.id);
-    const activeBranchSet = new Set(activeBranchIds);
-    const allBranchIds = this.runtime.data.branches.map((b) => b.id);
-    const allowedList = (user ? scopeBranches(user, activeBranchIds) : activeBranchIds).filter((id) =>
-      activeBranchSet.has(id),
-    );
-    if (branchId) {
-      if (user && user.role !== "admin" && !isBranchInScope(user, branchId)) {
-        throw new DecisionForbiddenError("Access to branch forbidden");
-      }
-      if (!allBranchIds.includes(branchId)) {
-        throw new BranchNotFoundError(`Branch ${branchId} not found`);
-      }
-    }
-    const scopedList = branchId ? [branchId] : allowedList;
+    const scopedList = this.resolveScopedBranchIds(user, branchId);
     // IMPORTANT: Key cached rollups by sorted branch IDs + `planVersion` (physical stock/sales writes)
     // + `decisionVersion` (order overlay changes) so neither stale data nor cross-branch leaks occur.
     const cacheKey = `${[...scopedList].sort().join("|")}::v${this.runtime.planVersion}::d${this.runtime.decisionVersion}`;
@@ -334,8 +272,7 @@ export class KpiService {
     return this.runtime.data.asOf;
   }
 
-  liveOverview(user?: User, branchId?: string): LiveOverviewResponse {
-    ensureInitializedSyncIfPossible(this.runtime);
+  private resolveScopedBranchIds(user?: User, branchId?: string): string[] {
     if (user && !can(user.role, "dashboard:financial:scoped")) {
       throw new DecisionForbiddenError("Insufficient permission to view KPIs");
     }
@@ -343,9 +280,10 @@ export class KpiService {
     const activeBranchIds = this.runtime.data.branches
       .filter((b) => b.status !== "archived")
       .map((b) => b.id);
+    const activeBranchSet = new Set(activeBranchIds);
     const allBranchIds = this.runtime.data.branches.map((b) => b.id);
-    const allowedSet = new Set(
-      user ? scopeBranches(user, activeBranchIds) : activeBranchIds,
+    const allowedList = (user ? scopeBranches(user, activeBranchIds) : activeBranchIds).filter((id) =>
+      activeBranchSet.has(id),
     );
 
     if (branchId) {
@@ -355,14 +293,15 @@ export class KpiService {
       if (!allBranchIds.includes(branchId)) {
         throw new BranchNotFoundError(`Branch ${branchId} not found`);
       }
+      return [branchId];
     }
+    return allowedList;
+  }
 
+  liveOverview(user?: User, branchId?: string): LiveOverviewResponse {
+    ensureInitializedSyncIfPossible(this.runtime);
+    const scopedBranchIds = this.resolveScopedBranchIds(user, branchId);
     const report = this.kpis(user, branchId);
-    const scopedBranchIds = branchId
-      ? [branchId]
-      : user && !can(user.role, "dashboard:financial:network")
-        ? Array.from(allowedSet)
-        : activeBranchIds;
     const branchIdSet = new Set(scopedBranchIds);
     const branchIndices = this.runtime.data.branches.flatMap((b, idx) =>
       branchIdSet.has(b.id) ? [idx] : [],

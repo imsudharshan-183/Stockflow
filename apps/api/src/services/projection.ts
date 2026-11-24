@@ -6,21 +6,12 @@ import {
   type Action,
   type Analysis,
   type CommittedDelta,
-  type CommittedDeltaStore,
   type Dataset,
   type Position,
   type ProjectedPosition,
 } from "@stockflow/core";
 
-export {
-  ZERO_DELTA,
-  deltaKey,
-  getCommittedDelta,
-  projectPosition,
-  type CommittedDelta,
-  type CommittedDeltaStore,
-  type ProjectedPosition,
-};
+export { getCommittedDelta, projectPosition, type CommittedDelta, type ProjectedPosition };
 
 export interface CommittedAllocation {
   sku: string;
@@ -28,6 +19,45 @@ export interface CommittedAllocation {
   donorBranchId: string | null;
   action: Action;
   quantity: number;
+}
+
+export interface StagedDeltaEntry {
+  sku: string;
+  branchId: string;
+  reserved: number;
+  inTransit: number;
+}
+
+export function rollbackDeltaEntries(
+  committedDeltas: Map<string, CommittedDelta>,
+  committedRecommendationIds: Map<string, CommittedAllocation>,
+  allocationId: string,
+  entries: readonly StagedDeltaEntry[],
+): void {
+  for (const e of entries) {
+    adjustCommittedDelta(committedDeltas, e.sku, e.branchId, -e.reserved, -e.inTransit);
+  }
+  committedRecommendationIds.delete(allocationId);
+}
+
+export function unwindCommittedAllocation(
+  committedDeltas: Map<string, CommittedDelta>,
+  committedRecommendationIds: Map<string, CommittedAllocation>,
+  allocationId: string,
+): void {
+  const committed = committedRecommendationIds.get(allocationId);
+  if (!committed) return;
+  if (committed.action === "TRANSFER") {
+    if (committed.donorBranchId) {
+      adjustCommittedDelta(committedDeltas, committed.sku, committed.donorBranchId, -committed.quantity, 0);
+    }
+    adjustCommittedDelta(committedDeltas, committed.sku, committed.branchId, 0, -committed.quantity);
+  } else if (committed.action === "REORDER") {
+    adjustCommittedDelta(committedDeltas, committed.sku, committed.branchId, 0, -committed.quantity);
+  } else if (committed.action === "MARKDOWN") {
+    adjustCommittedDelta(committedDeltas, committed.sku, committed.branchId, -committed.quantity, 0);
+  }
+  committedRecommendationIds.delete(allocationId);
 }
 
 export function adjustCommittedDelta(

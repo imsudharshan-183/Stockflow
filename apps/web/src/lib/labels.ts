@@ -50,7 +50,7 @@ export const ORDER_ORIGIN_LABELS: Record<OrderOrigin, string> = {
   ALERT_ESCALATION: "Alert Escalation",
 };
 
-export const ORDER_EVENT_ACTION_LABELS: Record<OrderEventAction, string> = {
+const ORDER_EVENT_ACTION_LABELS: Record<OrderEventAction, string> = {
   CREATED: "Created",
   REQUEST_TRANSFER: "Requested transfer",
   COMMIT: "Approved",
@@ -69,7 +69,7 @@ export const QUANTITY_REASON_LABELS = {
   OTHER: "Other",
 } as const;
 
-export type QuantityReasonCode = keyof typeof QUANTITY_REASON_LABELS;
+type QuantityReasonCode = keyof typeof QUANTITY_REASON_LABELS;
 
 export function quantityReasonLabel(code?: string): string {
   if (!code) return "Quantity adjusted";

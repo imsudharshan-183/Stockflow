@@ -1,6 +1,5 @@
 import type {
   Action,
-  OrderEventAction,
   OrderOrigin,
   OrderStatus,
   ReasonCode,
@@ -8,7 +7,6 @@ import type {
   StockAlertResolutionAction,
 } from "@stockflow/core";
 import {
-  ORDER_EVENT_ACTION_LABELS,
   ORDER_ORIGIN_LABELS,
   ORDER_STATUS_LABELS,
   REASON_DISPLAY_LABELS,
@@ -89,8 +87,6 @@ export function formatMoney(value: number): string {
   const formatted = formatCompactMagnitude(Math.abs(value));
   return formatted === "0" ? "BD 0" : `${sign}BD ${formatted}`;
 }
-
-export const formatMoneyCompact = formatMoney;
 
 /**
  * Full-precision Bahraini Dinar (BHD) currency formatter for tables and detail panels:
@@ -209,10 +205,6 @@ export function orderOriginLabel(origin: OrderOrigin): string {
   return ORDER_ORIGIN_LABELS[origin];
 }
 
-export function orderEventActionLabel(action: OrderEventAction): string {
-  return ORDER_EVENT_ACTION_LABELS[action];
-}
-
 export function alertResolutionLabel(action: StockAlertResolutionAction): string {
   switch (action) {
     case "CONVERTED_TO_REQUEST":
@@ -234,13 +226,9 @@ export function formatCoordinates(coordinates?: readonly [number, number]): stri
 }
 
 export {
-  BAHRAIN_TIME_ZONE,
   diffCalendarDays,
-  formatBahrainDate,
   formatBahrainDateTime,
   formatBahrainTimeHm,
-  getBahrainToday,
-  type BahrainToday,
 } from "./bahrainDate";
 
 import { getBahrainToday as _getBahrainToday } from "./bahrainDate";

@@ -27,7 +27,7 @@ import {
   type ReplenishmentOrder,
 } from "@stockflow/core";
 
-export interface ApproveQuantityConfirmPayload {
+interface ApproveQuantityConfirmPayload {
   approvedQty: number;
   dispositionCode?: QuantityChangeReason;
   comment?: string;

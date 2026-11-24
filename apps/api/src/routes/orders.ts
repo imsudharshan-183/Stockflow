@@ -3,6 +3,8 @@ import {
   DonorCandidatesQuerySchema,
   DonorCandidatesResponseSchema,
   ErrorBodySchema,
+  LifecycleOrderListResponseSchema,
+  LifecycleOrderSchema,
   OrderCancelBodySchema,
   OrderCommitBodySchema,
   OrderDeclineBodySchema,
@@ -11,10 +13,12 @@ import {
   OrderReceiveBodySchema,
   OrderRequestTransferBodySchema,
   OrderRerouteBodySchema,
+  QueueLifecycleViewSchema,
   ReplenishmentOrderSchema,
+  type User,
 } from "@stockflow/core";
-import type { FastifyInstance, FastifyReply } from "fastify";
-import { z } from "zod";
+import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { z, type ZodType } from "zod";
 import type { AuthContext } from "../plugins/auth.js";
 import {
   DecisionConflictError,
@@ -24,11 +28,7 @@ import {
   OrderValidationError,
   type StockServices,
 } from "../services/index.js";
-import {
-  LifecycleOrderListResponseSchema,
-  LifecycleOrderSchema,
-  QueueLifecycleViewSchema,
-} from "../services/queueLifecycle.js";
+import { cleanQuery, sendApiError } from "./helpers.js";
 
 const PathIdSchema = z.object({ id: z.string().min(1) });
 const ExtendedOrderListQuerySchema = OrderListQuerySchema.merge(
@@ -37,17 +37,6 @@ const ExtendedOrderListQuerySchema = OrderListQuerySchema.merge(
 const OrderReopenBodySchema = z.object({
   comment: z.string().max(500).optional(),
 });
-
-function cleanQuery(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object") return {};
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (value !== "" && value !== undefined && value !== null) {
-      cleaned[key] = value;
-    }
-  }
-  return cleaned;
-}
 
 function sendOrderError(err: unknown, reply: FastifyReply): unknown {
   if (err instanceof OrderNotFoundError) {
@@ -63,6 +52,30 @@ function sendOrderError(err: unknown, reply: FastifyReply): unknown {
     return reply.code(400).send(ErrorBodySchema.parse({ error: err.message }));
   }
   throw err;
+}
+
+async function runOrderAction<TBody, TResult>(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  bodySchema: ZodType<TBody>,
+  invalidMessage: string,
+  responseSchema: ZodType<TResult>,
+  handler: (id: string, body: TBody, user: User) => Promise<unknown>,
+): Promise<unknown> {
+  const pathParsed = PathIdSchema.safeParse(request.params);
+  if (!pathParsed.success) {
+    return sendApiError(reply, 400, "Invalid order ID");
+  }
+  const bodyParsed = bodySchema.safeParse(request.body ?? {});
+  if (!bodyParsed.success) {
+    return sendApiError(reply, 400, bodyParsed.error.issues[0]?.message || invalidMessage);
+  }
+  try {
+    const updated = await handler(pathParsed.data.id, bodyParsed.data, request.currentUser);
+    return responseSchema.parse(updated);
+  } catch (err) {
+    return sendOrderError(err, reply);
+  }
 }
 
 export function registerOrderRoutes(
@@ -171,209 +184,104 @@ export function registerOrderRoutes(
   app.post(
     "/orders/:id/request",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderRequestTransferBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid transfer request input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.requestTransfer(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderRequestTransferBodySchema,
+        "Invalid transfer request input",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.requestTransfer(id, body, user),
+      ),
   );
 
   // RBAC: Admin and manager (recommendations:decide; donor branch manager sends or admin overrides with force+comment).
   app.post(
     "/orders/:id/commit",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderCommitBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid commit input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.commit(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderCommitBodySchema,
+        "Invalid commit input",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.commit(id, body, user),
+      ),
   );
 
   // RBAC: Admin and manager (recommendations:decide; donor declines incoming transfer or receiver rejects suggestion).
   app.post(
     "/orders/:id/decline",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderDeclineBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Comment is required when declining",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.decline(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderDeclineBodySchema,
+        "Comment is required when declining",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.decline(id, body, user),
+      ),
   );
 
   // RBAC: Admin and manager (recommendations:decide; receiver or admin reassigns declined transfer to another donor).
   app.post(
     "/orders/:id/reroute",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderRerouteBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid reroute input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.reroute(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderRerouteBodySchema,
+        "Invalid reroute input",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.reroute(id, body, user),
+      ),
   );
 
   // RBAC: Admin and manager (recommendations:decide; requester or admin cancels pending request before commit).
   app.post(
     "/orders/:id/cancel",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderCancelBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid cancel input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.cancel(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderCancelBodySchema,
+        "Invalid cancel input",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.cancel(id, body, user),
+      ),
   );
 
   // RBAC: Admin, manager, staff (orders:receive; receiving-branch user or admin marks order DELIVERED).
   app.post(
     "/orders/:id/receive",
     { preHandler: [authGuards.requirePermission("orders:receive")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderReceiveBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid receive input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.receive(
-          pathParsed.data.id,
-          bodyParsed.data,
-          request.currentUser,
-        );
-        return ReplenishmentOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderReceiveBodySchema,
+        "Invalid receive input",
+        ReplenishmentOrderSchema,
+        (id, body, user) => services.orders.receive(id, body, user),
+      ),
   );
 
   // RBAC: Admin and manager (recommendations:decide; reopens recent decision within 24h window and user scope).
   app.post(
     "/orders/:id/reopen",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
-    async (request, reply) => {
-      const pathParsed = PathIdSchema.safeParse(request.params);
-      if (!pathParsed.success) {
-        return reply.code(400).send(ErrorBodySchema.parse({ error: "Invalid order ID" }));
-      }
-      const bodyParsed = OrderReopenBodySchema.safeParse(request.body ?? {});
-      if (!bodyParsed.success) {
-        return reply.code(400).send(
-          ErrorBodySchema.parse({
-            error: bodyParsed.error.issues[0]?.message || "Invalid reopen input",
-          }),
-        );
-      }
-      try {
-        const updated = await services.orders.reopen(
-          pathParsed.data.id,
-          request.currentUser,
-          bodyParsed.data.comment,
-        );
-        return LifecycleOrderSchema.parse(updated);
-      } catch (err) {
-        return sendOrderError(err, reply);
-      }
-    },
+    (request, reply) =>
+      runOrderAction(
+        request,
+        reply,
+        OrderReopenBodySchema,
+        "Invalid reopen input",
+        LifecycleOrderSchema,
+        (id, body, user) => services.orders.reopen(id, user, body.comment),
+      ),
   );
 }

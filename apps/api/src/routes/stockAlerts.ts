@@ -1,6 +1,5 @@
 import {
   CreateStockAlertSchema,
-  ErrorBodySchema,
   ResolveStockAlertResponseSchema,
   ResolveStockAlertSchema,
   StockAlertListSchema,
@@ -10,25 +9,11 @@ import {
 import type { FastifyInstance, FastifyReply } from "fastify";
 import { z } from "zod";
 import type { AuthContext } from "../plugins/auth.js";
-import {
-  DecisionForbiddenError,
-  StockAlertConflictError,
-  StockAlertNotFoundError,
-  StockAlertValidationError,
-  type StockAlertService,
-  type StockServices,
-} from "../services/index.js";
+import type { StockServices } from "../services/index.js";
+import type { StockAlertService } from "../services/stockAlertService.js";
+import { cleanQuery, handleDomainRouteError } from "./helpers.js";
 
 const PathIdSchema = z.object({ id: z.string().min(1) });
-
-function cleanQuery(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== "object") return {};
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(raw)) {
-    if (value !== "" && value !== undefined && value !== null) cleaned[key] = value;
-  }
-  return cleaned;
-}
 
 export function registerStockAlertsRoutes(
   app: FastifyInstance,
@@ -47,10 +32,7 @@ export function registerStockAlertsRoutes(
         const result = await services.stockAlerts.listStockAlerts(request.currentUser, query.branchId);
         return StockAlertListSchema.parse(result);
       } catch (err) {
-        if (err instanceof DecisionForbiddenError) {
-          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        throw err;
+        return handleDomainRouteError(err, reply);
       }
     },
   );
@@ -65,13 +47,7 @@ export function registerStockAlertsRoutes(
         const alert = await services.stockAlerts.createStockAlert(body, request.currentUser);
         return reply.code(201).send(StockAlertSchema.parse(alert));
       } catch (err) {
-        if (err instanceof DecisionForbiddenError) {
-          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        if (err instanceof StockAlertValidationError) {
-          return reply.code(400).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        throw err;
+        return handleDomainRouteError(err, reply);
       }
     },
   );
@@ -87,19 +63,7 @@ export function registerStockAlertsRoutes(
         const result = await services.stockAlerts.resolveStockAlert(id, body, request.currentUser);
         return ResolveStockAlertResponseSchema.parse(result);
       } catch (err) {
-        if (err instanceof DecisionForbiddenError) {
-          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        if (err instanceof StockAlertNotFoundError) {
-          return reply.code(404).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        if (err instanceof StockAlertConflictError) {
-          return reply.code(409).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        if (err instanceof StockAlertValidationError) {
-          return reply.code(400).send(ErrorBodySchema.parse({ error: err.message }));
-        }
-        throw err;
+        return handleDomainRouteError(err, reply);
       }
     },
   );
@@ -135,15 +99,6 @@ async function decideAlert(
     const updated = await stockAlerts.decideStockAlert(id, decision, user);
     return StockAlertSchema.parse(updated);
   } catch (err) {
-    if (err instanceof DecisionForbiddenError) {
-      return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
-    }
-    if (err instanceof StockAlertNotFoundError) {
-      return reply.code(404).send(ErrorBodySchema.parse({ error: err.message }));
-    }
-    if (err instanceof StockAlertConflictError) {
-      return reply.code(409).send(ErrorBodySchema.parse({ error: err.message }));
-    }
-    throw err;
+    return handleDomainRouteError(err, reply);
   }
 }

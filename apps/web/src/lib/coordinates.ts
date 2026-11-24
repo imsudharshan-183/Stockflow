@@ -1,4 +1,6 @@
-export const BAHRAIN_BOUNDS = {
+import { isWithinBahrain, looksSwappedBahrain, round6 } from "@stockflow/core";
+
+const WEB_BAHRAIN_BOUNDS = {
   minLat: 25.5,
   maxLat: 26.4,
   minLng: 50.3,
@@ -8,7 +10,7 @@ export const BAHRAIN_BOUNDS = {
 export const CLUSTER_REGIONS = ["Capital", "Muharraq", "Northern", "Southern"] as const;
 export type ClusterRegion = (typeof CLUSTER_REGIONS)[number];
 
-export type CoordinateValidationErrorCode =
+type CoordinateValidationErrorCode =
   | "empty"
   | "unparseable"
   | "non_finite"
@@ -30,29 +32,7 @@ export type CoordinateValidationResult =
       suggestedSwap?: readonly [number, number];
     };
 
-export function round6(value: number): number {
-  return Math.round(value * 1_000_000) / 1_000_000;
-}
-
-export function isWithinBahrain(lat: number, lng: number): boolean {
-  return (
-    lat >= BAHRAIN_BOUNDS.minLat &&
-    lat <= BAHRAIN_BOUNDS.maxLat &&
-    lng >= BAHRAIN_BOUNDS.minLng &&
-    lng <= BAHRAIN_BOUNDS.maxLng
-  );
-}
-
-export function looksSwappedBahrain(lat: number, lng: number): boolean {
-  return (
-    lat >= BAHRAIN_BOUNDS.minLng &&
-    lat <= BAHRAIN_BOUNDS.maxLng &&
-    lng >= BAHRAIN_BOUNDS.minLat &&
-    lng <= BAHRAIN_BOUNDS.maxLat
-  );
-}
-
-export function validateCoordinates(lat: number, lng: number): CoordinateValidationResult {
+function validateCoordinates(lat: number, lng: number): CoordinateValidationResult {
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
     return {
       ok: false,
@@ -71,7 +51,7 @@ export function validateCoordinates(lat: number, lng: number): CoordinateValidat
   const roundedLat = round6(lat);
   const roundedLng = round6(lng);
 
-  if (looksSwappedBahrain(roundedLat, roundedLng)) {
+  if (looksSwappedBahrain(roundedLat, roundedLng, WEB_BAHRAIN_BOUNDS)) {
     return {
       ok: false,
       code: "swapped",
@@ -81,7 +61,7 @@ export function validateCoordinates(lat: number, lng: number): CoordinateValidat
     };
   }
 
-  if (!isWithinBahrain(roundedLat, roundedLng)) {
+  if (!isWithinBahrain(roundedLat, roundedLng, WEB_BAHRAIN_BOUNDS)) {
     return {
       ok: true,
       lat: roundedLat,
