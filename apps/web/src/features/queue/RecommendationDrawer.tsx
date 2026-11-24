@@ -175,11 +175,11 @@ export function RecommendationDrawer({
                         </>
                       ) : recommendation.action === "TRANSFER" ? (
                         <>
-                          Receiver cover is{" "}
+                          Receiving branch cover is{" "}
                           <span className="font-semibold tabular-nums">
                             {formatCover(recommendation.metrics.coverDays)}
                           </span>{" "}
-                          (below 14d target); donor holds{" "}
+                          (below 14d target); sending branch holds{" "}
                           <span className="font-semibold tabular-nums">
                             {formatCover(recommendation.metrics.donorCoverDays)}
                           </span>

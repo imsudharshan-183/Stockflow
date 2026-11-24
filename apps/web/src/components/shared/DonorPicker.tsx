@@ -12,6 +12,7 @@ import {
   formatMoneyPrecise,
   formatNumber,
 } from "@/lib/format";
+import { ORDER_STATUS_LABELS } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 
 export interface DonorPickerProps {
@@ -66,7 +67,7 @@ export function DonorPicker({
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-medium text-foreground">
-          Ranked donor candidates (ordered by net benefit)
+          Ranked sending branches (ordered by estimated gain)
         </span>
         {allowUnassigned ? (
           <Button
@@ -75,7 +76,7 @@ export function DonorPicker({
             size="xs"
             onClick={() => onSelectDonor(null)}
           >
-            Leave unassigned (Open Request)
+            Leave unassigned ({ORDER_STATUS_LABELS.OPEN_REQUEST})
           </Button>
         ) : null}
       </div>
@@ -87,14 +88,14 @@ export function DonorPicker({
         </div>
       ) : candidatesQuery.isError ? (
         <div className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text">
-          {candidatesQuery.error.message || "Unable to load ranked donor candidates"}
+          {candidatesQuery.error.message || "Unable to load ranked sending branches"}
         </div>
       ) : candidates.length === 0 ? (
         <div className="rounded-xl border border-border bg-secondary/40 px-3 py-2.5 text-xs text-muted-foreground">
-          No eligible donors with at least 30 days cover + safety stock for this SKU.
+          No eligible sending branches with at least 30 days cover + safety stock for this SKU.
         </div>
       ) : (
-        <div className="space-y-2" role="listbox" aria-label="Ranked donor candidates">
+        <div className="space-y-2" role="listbox" aria-label="Ranked sending branches">
           {candidates.slice(0, 3).map((candidate) => {
             const isSelected = selectedDonorId === candidate.branchId;
             return (
@@ -126,7 +127,7 @@ export function DonorPicker({
                       <Badge tone="over">Partial: {formatNumber(candidate.offeredQty)} units</Badge>
                     ) : null}
                     <span className="text-xs font-semibold text-foreground tabular-nums">
-                      {formatMoneyFull(candidate.netBenefitBhd)} net benefit
+                      {formatMoneyFull(candidate.netBenefitBhd)} estimated gain
                     </span>
                   </div>
                 </div>
@@ -134,7 +135,7 @@ export function DonorPicker({
                   <span>{formatDistanceKm(candidate.distanceKm)}</span>
                   <span>Freight: {formatMoneyPrecise(candidate.freightCostBhd)}</span>
                   <span>Surplus: {formatNumber(candidate.availableSurplusUnits)} units</span>
-                  <span>Donor cover after: {formatCover(candidate.donorCoverDaysAfter)}</span>
+                  <span>Sending branch cover after: {formatCover(candidate.donorCoverDaysAfter)}</span>
                 </div>
               </Button>
             );

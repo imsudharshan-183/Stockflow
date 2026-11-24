@@ -648,7 +648,7 @@ function Logic({
                         value: `${formatNumber(policy.receiverCoverDays)}d`,
                       },
                       {
-                        label: "Donor floor",
+                        label: "Sending branch floor",
                         value: `${formatNumber(policy.donorCoverDays)}d`,
                       },
                       {
@@ -691,7 +691,7 @@ function Logic({
                   y={policy.donorCoverDays}
                   stroke={TOKENS.chart.markdown}
                   strokeDasharray="4 4"
-                  label="30d donor floor"
+                  label="30d sending floor"
                 />
                 <ReferenceLine
                   y={policy.overstockCoverDays}

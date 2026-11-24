@@ -314,10 +314,10 @@ export function AdminOverview({
           label="Overstock value"
           value={formatMoney(overstockValue)}
           note={`Includes ${formatMoney(deadStockValue)} dead stock (<1 unit/wk)`}
-          formula="Stock above the 30-day donor floor × unit cost. Dead stock is the portion selling under one unit per week."
+          formula="Stock above the 30-day sending branch floor × unit cost. Dead stock is the portion selling under one unit per week."
           icon={Boxes}
           tone="warn"
-          footerLabel="Surplus above 30-day donor floor"
+          footerLabel="Surplus above 30-day sending branch floor"
         />
         <KpiCard
           label="Sales at risk"

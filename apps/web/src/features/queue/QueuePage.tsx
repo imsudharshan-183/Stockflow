@@ -61,6 +61,11 @@ import {
   orderOriginLabel,
 } from "@/lib/format";
 import {
+  ORDER_ACTION_LABELS,
+  ORDER_STATUS_LABELS,
+  QUEUE_TAB_LABELS,
+} from "@/lib/labels";
+import {
   canTransition,
   formatProductDisplayName,
   matchesProductQuery,
@@ -130,14 +135,14 @@ export function QueuePage() {
     onSuccess: async (updated) => {
       toast.success(
         updated.type === "TRANSFER" && updated.sourceBranchId
-          ? `Released ${formatNumber(updated.quantity)} units for ${updated.sku}`
-          : `Committed ${actionLabel(updated.type).toLowerCase()} for ${updated.sku}`,
+          ? `Sent ${formatNumber(updated.quantity)} units for ${updated.sku}`
+          : `Approved ${actionLabel(updated.type).toLowerCase()} for ${updated.sku}`,
       );
       setOverrideTarget(null);
       setOverrideComment("");
       await invalidateAll();
     },
-    onError: (err: Error) => toast.error(err.message || "Unable to commit order"),
+    onError: (err: Error) => toast.error(err.message || "Unable to approve order"),
   });
 
   const requestTransferMutation = useMutation({
@@ -163,7 +168,7 @@ export function QueuePage() {
       setDonorModalComment("");
       await invalidateAll();
     },
-    onError: (err: Error) => toast.error(err.message || "Unable to request donor transfer"),
+    onError: (err: Error) => toast.error(err.message || "Unable to request transfer from sending branch"),
   });
 
   const declineMutation = useMutation({
@@ -212,10 +217,10 @@ export function QueuePage() {
   const receiveMutation = useMutation({
     mutationFn: ({ id }: { id: string }) => api.receiveOrder(id, {}),
     onSuccess: async (updated) => {
-      toast.success(`Confirmed receipt of ${formatNumber(updated.quantity)} units (${updated.sku})`);
+      toast.success(`Marked ${formatNumber(updated.quantity)} units as received (${updated.sku})`);
       await invalidateAll();
     },
-    onError: (err: Error) => toast.error(err.message || "Unable to confirm receipt"),
+    onError: (err: Error) => toast.error(err.message || "Unable to mark order as received"),
   });
 
   const reopenMutation = useMutation({
@@ -364,7 +369,7 @@ export function QueuePage() {
         subtitle={
           ordersQuery.data
             ? `${formatNumber(headerCount)} ${filters.tab === "suggested" ? `${lifecycleViewLabel(filters.view).toLowerCase()} ` : ""}orders in view · ${formatMoney(totalWorth)} estimated gain`
-            : "Governed replenishment queue across transfers, pull requests, and store orders."
+            : "Governed replenishment queue across transfers, stock requests, and store orders."
         }
         actions={
           canDecide ? (
@@ -391,10 +396,10 @@ export function QueuePage() {
         >
           <TabsList className="h-auto min-h-9 w-full flex-wrap justify-start rounded-xl bg-secondary p-1 sm:w-fit">
             <TabsTrigger value="suggested" className="rounded-lg px-3 text-xs font-medium">
-              Suggested &amp; Intra-cluster
+              {QUEUE_TAB_LABELS.suggested}
             </TabsTrigger>
             <TabsTrigger value="incoming" className="rounded-lg px-3 text-xs font-medium">
-              <span>Incoming Pull Requests</span>
+              <span>{QUEUE_TAB_LABELS.incoming}</span>
               {incomingCount > 0 ? (
                 <Badge tone="over" className="ml-1 px-1.5 py-0 text-[10px]">
                   {formatNumber(incomingCount)}
@@ -402,7 +407,7 @@ export function QueuePage() {
               ) : null}
             </TabsTrigger>
             <TabsTrigger value="outgoing" className="rounded-lg px-3 text-xs font-medium">
-              My Outgoing Requests
+              {QUEUE_TAB_LABELS.outgoing}
             </TabsTrigger>
           </TabsList>
         </Tabs>
@@ -516,12 +521,12 @@ export function QueuePage() {
                 onChange={(status) => writeFilters({ status })}
               >
                 <option value="">All statuses</option>
-                <option value="OPEN_REQUEST">Open Request</option>
-                <option value="AWAITING_DONOR">Awaiting Donor</option>
-                <option value="COMMITTED">Committed</option>
-                <option value="RECEIVED">Received</option>
-                <option value="REJECTED">Declined</option>
-                <option value="CANCELLED">Cancelled</option>
+                <option value="OPEN_REQUEST">{ORDER_STATUS_LABELS.OPEN_REQUEST}</option>
+                <option value="AWAITING_DONOR">{ORDER_STATUS_LABELS.AWAITING_DONOR}</option>
+                <option value="COMMITTED">{ORDER_STATUS_LABELS.COMMITTED}</option>
+                <option value="RECEIVED">{ORDER_STATUS_LABELS.RECEIVED}</option>
+                <option value="REJECTED">{ORDER_STATUS_LABELS.REJECTED}</option>
+                <option value="CANCELLED">{ORDER_STATUS_LABELS.CANCELLED}</option>
               </ToolbarSelect>
             ) : null}
           </div>
@@ -558,18 +563,18 @@ export function QueuePage() {
             <EmptyBlock
               title={
                 filters.tab === "incoming"
-                  ? "No incoming pull requests"
+                  ? "No incoming stock requests to fulfil"
                   : filters.tab === "outgoing"
-                    ? "No outgoing requests"
+                    ? "No stock requests submitted"
                     : "No suggested orders"
               }
               body={
                 hasActiveFilters
                   ? "No orders match your active filters."
                   : filters.tab === "incoming"
-                    ? "Requests from other branches asking to pull surplus stock from your stores will appear here."
+                    ? "Requests from other branches asking to transfer surplus stock from your stores will appear here."
                     : filters.tab === "outgoing"
-                      ? "Use Request Stock to submit a manual replenishment request or pull from a donor branch."
+                      ? "Use Request Stock to submit a replenishment request from another sending branch or supplier."
                       : "There are no open replenishment suggestions right now."
               }
               action={
@@ -592,8 +597,8 @@ export function QueuePage() {
                   <TableHead className="w-[72px] px-3 text-right">Qty</TableHead>
                   {filters.tab === "incoming" ? (
                     <>
-                      <TableHead className="w-[125px] px-3 text-right">Available surplus</TableHead>
-                      <TableHead className="w-[130px] px-3 text-right">Cover after release</TableHead>
+                      <TableHead className="w-[125px] px-3 text-right">Sending branch surplus</TableHead>
+                      <TableHead className="w-[130px] px-3 text-right">Sending cover after</TableHead>
                     </>
                   ) : (
                     <TableHead className="w-[125px] px-3 text-right">Estimated gain</TableHead>
@@ -741,7 +746,7 @@ export function QueuePage() {
                               onClick={() => handleCommitAction(order)}
                             >
                               <Check className="size-3.5" aria-hidden="true" />
-                              Release
+                              {ORDER_ACTION_LABELS.sendStock}
                             </Button>
                           ) : null}
 
@@ -753,7 +758,7 @@ export function QueuePage() {
                               onClick={() => handleCommitAction(order)}
                             >
                               <Check className="size-3.5" aria-hidden="true" />
-                              Commit
+                              {ORDER_ACTION_LABELS.approve}
                             </Button>
                           ) : null}
 
@@ -765,7 +770,7 @@ export function QueuePage() {
                               onClick={() => handleRequestTransferAction(order)}
                             >
                               <Send className="size-3" aria-hidden="true" />
-                              Request Transfer
+                              {ORDER_ACTION_LABELS.requestTransfer}
                             </Button>
                           ) : null}
 
@@ -780,7 +785,7 @@ export function QueuePage() {
                               }}
                             >
                               <X className="size-3.5" aria-hidden="true" />
-                              Decline
+                              {ORDER_ACTION_LABELS.decline}
                             </Button>
                           ) : null}
 
@@ -792,7 +797,9 @@ export function QueuePage() {
                               onClick={() => handleOpenReroute(order)}
                             >
                               <Repeat2 className="size-3.5" aria-hidden="true" />
-                              {order.sourceBranchId ? "Reroute" : "Choose Donor"}
+                              {order.sourceBranchId
+                                ? ORDER_ACTION_LABELS.reroute
+                                : ORDER_ACTION_LABELS.chooseSender}
                             </Button>
                           ) : null}
 
@@ -803,7 +810,7 @@ export function QueuePage() {
                               disabled={isAnyMutating}
                               onClick={() => cancelMutation.mutate({ id: order.id })}
                             >
-                              Cancel
+                              {ORDER_ACTION_LABELS.cancel}
                             </Button>
                           ) : null}
 
@@ -815,7 +822,7 @@ export function QueuePage() {
                               onClick={() => receiveMutation.mutate({ id: order.id })}
                             >
                               <PackageCheck className="size-3.5" aria-hidden="true" />
-                              Confirm Receipt
+                              {ORDER_ACTION_LABELS.markReceived}
                             </Button>
                           ) : null}
 
@@ -935,7 +942,7 @@ export function QueuePage() {
             </label>
             <Input
               id="decline-comment"
-              placeholder="e.g., Shelf promotion needs surplus at donor store"
+              placeholder="e.g., Shelf promotion needs surplus at sending branch"
               value={declineComment}
               onChange={(e) => setDeclineComment(e.target.value)}
               maxLength={500}
@@ -972,7 +979,7 @@ export function QueuePage() {
         </DialogContent>
       </Dialog>
 
-      {/* Admin Force-Commit Comment Dialog */}
+      {/* Admin Force-Approve Comment Dialog */}
       <Dialog
         open={overrideTarget !== null}
         onOpenChange={(open) => {
@@ -984,9 +991,9 @@ export function QueuePage() {
       >
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
-            <DialogTitle>Admin override commit</DialogTitle>
+            <DialogTitle>Admin override approval</DialogTitle>
             <DialogDescription>
-              Committing an awaiting-donor or open transfer directly requires a brief override comment.
+              Approving a request that is waiting for a sending branch or open requires a brief override comment.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
@@ -1027,13 +1034,13 @@ export function QueuePage() {
                 }
               }}
             >
-              Confirm override release
+              Confirm override approval
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Reroute / Select Donor Dialog */}
+      {/* Reroute / Select Sending Branch Dialog */}
       <Dialog
         open={donorModalTarget !== null}
         onOpenChange={(open) => {
@@ -1048,11 +1055,11 @@ export function QueuePage() {
           <DialogHeader>
             <DialogTitle>
               {donorModalTarget?.mode === "reroute"
-                ? "Reroute to another donor branch"
-                : "Select donor branch"}
+                ? "Reroute to another sending branch"
+                : "Select sending branch"}
             </DialogTitle>
             <DialogDescription>
-              Choose an eligible donor branch for{" "}
+              Choose an eligible sending branch for{" "}
               <span className="font-medium text-foreground">
                 {donorModalTarget
                   ? `${formatNumber(donorModalTarget.order.quantity)} units of ${donorModalTarget.order.sku}`
@@ -1079,7 +1086,7 @@ export function QueuePage() {
 
               <div className="space-y-1.5">
                 <label htmlFor="donor-modal-comment" className="text-xs font-medium text-foreground">
-                  Note to donor branch (optional)
+                  Note to sending branch (optional)
                 </label>
                 <Input
                   id="donor-modal-comment"
@@ -1126,7 +1133,7 @@ export function QueuePage() {
                 }
               }}
             >
-              Send request to donor
+              Send request to sending branch
             </Button>
           </DialogFooter>
         </DialogContent>

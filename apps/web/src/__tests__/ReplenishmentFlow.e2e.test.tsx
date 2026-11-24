@@ -338,19 +338,19 @@ describe("Stage D Happy-Path E2E: staff alert -> manager request -> donor releas
     await waitFor(() => expect(state.orders[0]?.status).toBe("AWAITING_DONOR"));
     step2.unmount();
 
-    // Step 3: Hidd Donor Manager sees Incoming Pull Request & clicks Release
+    // Step 3: Hidd Sending Manager sees Requests to Fulfil & clicks Send Stock
     activeAuth.user = USERS.hidd;
     const step3 = renderStep(<QueuePage />, "/queue?tab=incoming");
     await screen.findByText("90 units");
-    await user.click(screen.getByRole("button", { name: /^Release$/i }));
+    await user.click(screen.getByRole("button", { name: /^Send Stock$/i }));
     await waitFor(() => expect(state.orders[0]?.status).toBe("COMMITTED"));
     step3.unmount();
 
-    // Step 4: Staff sees COMMITTED delivery & confirms receipt -> RECEIVED
+    // Step 4: Staff sees COMMITTED delivery & marks as received -> RECEIVED
     activeAuth.user = USERS.staff;
     const step4 = renderStep(<StaffProductStats />);
     await screen.findByText("Need 15 units from Hidd surplus");
-    await user.click(screen.getByRole("button", { name: /Confirm Receipt/i }));
+    await user.click(screen.getByRole("button", { name: /Mark as Received/i }));
     await waitFor(() => expect(state.orders[0]?.status).toBe("RECEIVED"));
     await screen.findByText("Received");
     step4.unmount();

@@ -21,10 +21,10 @@ import {
   formatMoneyFull,
   formatNumber,
   formatReasonSentence,
-  orderEventActionLabel,
   orderOriginLabel,
   orderStatusLabel,
 } from "@/lib/format";
+import { ORDER_STATUS_LABELS, getOrderEventDisplayLabel } from "@/lib/labels";
 import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
@@ -131,12 +131,12 @@ export function AuditPage() {
               className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <option value="">All statuses</option>
-              <option value="OPEN_REQUEST">Open Request</option>
-              <option value="AWAITING_DONOR">Awaiting Donor</option>
-              <option value="COMMITTED">Committed</option>
-              <option value="RECEIVED">Received</option>
-              <option value="REJECTED">Declined</option>
-              <option value="CANCELLED">Cancelled</option>
+              <option value="OPEN_REQUEST">{ORDER_STATUS_LABELS.OPEN_REQUEST}</option>
+              <option value="AWAITING_DONOR">{ORDER_STATUS_LABELS.AWAITING_DONOR}</option>
+              <option value="COMMITTED">{ORDER_STATUS_LABELS.COMMITTED}</option>
+              <option value="RECEIVED">{ORDER_STATUS_LABELS.RECEIVED}</option>
+              <option value="REJECTED">{ORDER_STATUS_LABELS.REJECTED}</option>
+              <option value="CANCELLED">{ORDER_STATUS_LABELS.CANCELLED}</option>
             </select>
           </div>
 
@@ -180,7 +180,7 @@ export function AuditPage() {
           <div className="p-4">
             <EmptyBlock
               title="No audited orders yet"
-              body="Submit, release, decline, or confirm receipt on an order in the queue to record its immutable event thread here."
+              body="Submit, send, decline, or mark an order as received in the queue to record its immutable event thread here."
               action={
                 <Link to="/queue">
                   <Button variant="secondary" size="sm">
@@ -325,9 +325,7 @@ export function AuditPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-semibold text-foreground">
-                              {ev.dispositionCode === "REOPENED"
-                                ? "Reopened"
-                                : orderEventActionLabel(ev.action)}
+                              {getOrderEventDisplayLabel(ev)}
                             </span>
                             <span className="inline-flex items-center gap-1 text-muted-foreground">
                               {ev.fromStatus ? (

@@ -324,7 +324,7 @@ export function PendingStockAlertsCard({
                       }}
                       className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground"
                     >
-                      <option value="TRANSFER">Transfer from donor</option>
+                      <option value="TRANSFER">Transfer from sending branch</option>
                       <option value="REORDER">Supplier Reorder</option>
                     </select>
                   </div>

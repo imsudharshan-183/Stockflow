@@ -173,10 +173,10 @@ export function ManagerOverview({
           label="Cluster overstock value"
           value={formatMoney(live?.metrics.overstockValue.value ?? report.cashReleasable)}
           note={`Includes ${formatMoney(live?.metrics.deadStockValue.value ?? report.deadStockValue)} dead stock in cluster (<1 unit/wk)`}
-          formula="Stock above the 30-day donor floor × unit cost across your assigned branches."
+          formula="Stock above the 30-day sending branch floor × unit cost across your assigned branches."
           icon={Boxes}
           tone="warn"
-          footerLabel="Surplus above 30-day donor floor in cluster"
+          footerLabel="Surplus above 30-day sending branch floor in cluster"
         />
       </section>
 

@@ -582,7 +582,7 @@ function classifyCoverBand(coverDays: number | null | undefined): CoverBand {
   }
   if (coverDays <= 60) {
     return {
-      label: "Elevated (31–60 days donor surplus window)",
+      label: "Elevated (31–60 days sending branch surplus window)",
       statusParam: "OVERSTOCK",
       cellClass:
         "bg-warn-bg text-warn-text font-medium ring-1 ring-inset ring-warn-ring",

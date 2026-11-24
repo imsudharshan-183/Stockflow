@@ -298,8 +298,8 @@ describe("Alert Triage, Staff Receipt, and Order-Threaded Audit", () => {
     await screen.findByText(/Escalated to Hidd branch for same-day transfer/i);
     expect(screen.getByText("Requested Replenishment")).toBeInTheDocument();
 
-    // Staff Incoming Deliveries shows Confirm Receipt
-    await user.click(screen.getByRole("button", { name: /Confirm Receipt/i }));
+    // Staff Incoming Deliveries shows Mark as Received
+    await user.click(screen.getByRole("button", { name: /Mark as Received/i }));
     await waitFor(() =>
       expect(apiMocks.receiveOrder).toHaveBeenCalledWith("ord_from_alt", {
         comment: "Confirmed received on store floor",

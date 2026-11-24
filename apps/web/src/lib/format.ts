@@ -7,6 +7,12 @@ import type {
   RecommendationStatus,
   StockAlertResolutionAction,
 } from "@stockflow/core";
+import {
+  ORDER_EVENT_ACTION_LABELS,
+  ORDER_ORIGIN_LABELS,
+  ORDER_STATUS_LABELS,
+  REASON_DISPLAY_LABELS,
+} from "./labels";
 
 const moneyBhd = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 3,
@@ -181,21 +187,7 @@ export function formatDateTime(iso: string): string {
   return stamp.format(parsed);
 }
 
-export const REASON_LABELS: Record<ReasonCode, string> = {
-  BELOW_REORDER_POINT: "On hand is below the reorder point",
-  OVERSTOCK_COVER: "Cover is above 60 days",
-  RECEIVER_BELOW_TARGET: "Receiver is under the 14-day target",
-  DONOR_SURPLUS: "Donor holds more than 30 days of cover plus safety stock",
-  NO_DONOR: "No surplus transfer covers the gap",
-  NO_RECEIVER: "No branch is short of this SKU",
-  LOST_SALES_AT_RISK: "Sales may be lost over the lead time",
-  CARRYING_COST: "Holding cost of the surplus units",
-  FREIGHT_LIMITS_QTY: "Freight cost limits how many units are worth moving",
-  ZERO_VELOCITY: "No demand on days that had stock",
-  REORDER_TO_TARGET: "Buy up to the cover target",
-  MARKDOWN_CLEARANCE: "Clear surplus that nobody else needs",
-  MIN_TRANSFER_MET: "Quantity meets the minimum transfer",
-};
+export const REASON_LABELS: Record<ReasonCode, string> = REASON_DISPLAY_LABELS;
 
 export function actionLabel(action: Action): string {
   if (action === "TRANSFER") return "Transfer";
@@ -210,56 +202,15 @@ export function statusLabel(status: RecommendationStatus): string {
 }
 
 export function orderStatusLabel(status: OrderStatus): string {
-  switch (status) {
-    case "SUGGESTED":
-      return "Suggested";
-    case "OPEN_REQUEST":
-      return "Open Request";
-    case "AWAITING_DONOR":
-      return "Awaiting Donor";
-    case "COMMITTED":
-      return "Committed";
-    case "RECEIVED":
-      return "Received";
-    case "REJECTED":
-      return "Declined";
-    case "CANCELLED":
-      return "Cancelled";
-  }
+  return ORDER_STATUS_LABELS[status];
 }
 
 export function orderOriginLabel(origin: OrderOrigin): string {
-  switch (origin) {
-    case "ENGINE":
-      return "Engine";
-    case "MANAGER_REQUEST":
-      return "Manager Request";
-    case "ALERT_ESCALATION":
-      return "Alert Escalation";
-  }
+  return ORDER_ORIGIN_LABELS[origin];
 }
 
 export function orderEventActionLabel(action: OrderEventAction): string {
-  switch (action) {
-    case "CREATED":
-      return "Created";
-    case "REQUEST_TRANSFER":
-      return "Requested transfer";
-    case "COMMIT":
-      return "Committed";
-    case "DECLINE":
-      return "Declined";
-    case "REROUTE":
-      return "Rerouted";
-    case "CANCEL":
-      return "Cancelled";
-    case "RECEIVE":
-      return "Received";
-    case "ESCALATE":
-      return "Escalated";
-    case "MIGRATED":
-      return "Migrated";
-  }
+  return ORDER_EVENT_ACTION_LABELS[action];
 }
 
 export function alertResolutionLabel(action: StockAlertResolutionAction): string {

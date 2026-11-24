@@ -308,11 +308,11 @@ describe("QueuePage 3-tab governed workflow", () => {
     await screen.findByText("SKU-INTRA");
     expect(screen.getByText("SKU-00012")).toBeInTheDocument();
 
-    // Intra-cluster transfer shows Commit, cross-cluster shows Request Transfer
-    const commitBtn = screen.getByRole("button", { name: /^Commit$/i });
+    // Intra-cluster transfer shows Approve, cross-cluster shows Request Transfer
+    const approveBtn = screen.getByRole("button", { name: /^Approve$/i });
     const reqBtn = screen.getByRole("button", { name: /Request Transfer/i });
 
-    await user.click(commitBtn);
+    await user.click(approveBtn);
     await waitFor(() => expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_intra_1", {}));
 
     await user.click(reqBtn);
@@ -323,7 +323,7 @@ describe("QueuePage 3-tab governed workflow", () => {
     );
   });
 
-  it("opens Request Stock modal with ranked donor picker showing distance, freight, cover after, and net benefit", async () => {
+  it("opens Request Stock modal with ranked sending branch picker showing distance, freight, cover after, and estimated gain", async () => {
     const user = userEvent.setup();
     renderQueue("/queue");
 
@@ -332,8 +332,8 @@ describe("QueuePage 3-tab governed workflow", () => {
 
     await screen.findByText(/14\.5 km/);
     expect(screen.getByText(/Freight: BD 6\.675/)).toBeInTheDocument();
-    expect(screen.getByText(/Donor cover after: 100 days/)).toBeInTheDocument();
-    expect(screen.getByText(/BD 25 net benefit/i)).toBeInTheDocument();
+    expect(screen.getByText(/Sending branch cover after: 100 days/)).toBeInTheDocument();
+    expect(screen.getByText(/BD 25 estimated gain/i)).toBeInTheDocument();
 
     await user.click(screen.getByRole("option", { name: /BR-005/i }));
     await user.type(screen.getByPlaceholderText(/Why this replenishment/i), "Weekend restock");
@@ -368,8 +368,8 @@ describe("QueuePage 3-tab governed workflow", () => {
     await screen.findByText("85 units");
     expect(screen.getByText("105 days")).toBeInTheDocument();
 
-    // Release calls commitOrder
-    await user.click(screen.getByRole("button", { name: /^Release$/i }));
+    // Send Stock calls commitOrder
+    await user.click(screen.getByRole("button", { name: /^Send Stock$/i }));
     await waitFor(() => expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_inc_1", {}));
 
     // Decline requires non-empty comment
@@ -387,12 +387,12 @@ describe("QueuePage 3-tab governed workflow", () => {
     );
   });
 
-  it("supports Confirm Receipt, Reroute, and Cancel on My Outgoing Requests", async () => {
+  it("supports Mark as Received, Reroute, and Cancel on My Stock Requests", async () => {
     const user = userEvent.setup();
     renderQueue("/queue?tab=outgoing");
 
-    await screen.findByRole("button", { name: /Confirm Receipt/i });
-    await user.click(screen.getByRole("button", { name: /Confirm Receipt/i }));
+    await screen.findByRole("button", { name: /Mark as Received/i });
+    await user.click(screen.getByRole("button", { name: /Mark as Received/i }));
     await waitFor(() =>
       expect(apiMocks.receiveOrder).toHaveBeenCalledWith("ord_out_committed", {}),
     );
@@ -402,7 +402,7 @@ describe("QueuePage 3-tab governed workflow", () => {
       expect(apiMocks.cancelOrder).toHaveBeenCalledWith("ord_out_awaiting", {}),
     );
 
-    // Admin sees override comment dialog on Release in Incoming tab
+    // Admin sees override comment dialog on Send Stock in Requests to Fulfil tab
     mockAuthState.user = {
       id: "usr_admin",
       name: "Network Admin",
@@ -412,12 +412,12 @@ describe("QueuePage 3-tab governed workflow", () => {
       isActive: true,
       createdAt: "2026-10-01T00:00:00.000Z",
     };
-    await user.click(screen.getByRole("tab", { name: /Incoming Pull Requests/i }));
-    await screen.findByRole("button", { name: /^Release$/i });
-    await user.click(screen.getByRole("button", { name: /^Release$/i }));
-    await screen.findByText(/Admin override commit/i);
+    await user.click(screen.getByRole("tab", { name: /Requests to Fulfil/i }));
+    await screen.findByRole("button", { name: /^Send Stock$/i });
+    await user.click(screen.getByRole("button", { name: /^Send Stock$/i }));
+    await screen.findByText(/Admin override approval/i);
     await user.type(screen.getByLabelText(/Override comment/i), "Ops override");
-    await user.click(screen.getByRole("button", { name: /Confirm override release/i }));
+    await user.click(screen.getByRole("button", { name: /Confirm override approval/i }));
     await waitFor(() =>
       expect(apiMocks.commitOrder).toHaveBeenCalledWith("ord_inc_1", {
         comment: "Ops override",

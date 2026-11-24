@@ -185,8 +185,8 @@ describe("QueuePage lifecycle switcher, badges, header totals, and Reopen", () =
     expect(screen.getByText(/2 pending orders in view · BD 60 estimated gain/i)).toBeInTheDocument();
     expect(screen.getByText("Situation worsened")).toBeInTheDocument();
     expect(screen.getByText("Rejected 4 days ago: Overstocked aisle")).toBeInTheDocument();
-    // Snoozed/worsened rows in Pending still offer Commit action
-    expect(screen.getAllByRole("button", { name: /^Commit$/i })).toHaveLength(2);
+    // Snoozed/worsened rows in Pending still offer Approve action
+    expect(screen.getAllByRole("button", { name: /^Approve$/i })).toHaveLength(2);
 
     // Switch to In progress -> header count and estimated gain update strictly to that view
     await user.click(screen.getByRole("button", { name: /^In progress$/i }));

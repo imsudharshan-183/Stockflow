@@ -1,3 +1,12 @@
+import type {
+  OrderEvent,
+  OrderEventAction,
+  OrderOrigin,
+  OrderQueueTab,
+  OrderStatus,
+  ReasonCode,
+} from "@stockflow/core";
+
 export interface LabelEntry {
   key: string;
   label: string;
@@ -6,6 +15,92 @@ export interface LabelEntry {
   formula: string;
   whatToDo: string;
 }
+
+export const QUEUE_TAB_LABELS: Record<OrderQueueTab, string> = {
+  suggested: "Suggested",
+  incoming: "Requests to Fulfil",
+  outgoing: "My Stock Requests",
+};
+
+export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
+  SUGGESTED: "Suggested",
+  OPEN_REQUEST: "Request Open",
+  AWAITING_DONOR: "Waiting for Sender",
+  COMMITTED: "Approved / On the way",
+  RECEIVED: "Received",
+  REJECTED: "Declined",
+  CANCELLED: "Cancelled",
+};
+
+export const ORDER_ACTION_LABELS = {
+  approve: "Approve",
+  sendStock: "Send Stock",
+  decline: "Decline",
+  markReceived: "Mark as Received",
+  requestTransfer: "Request Transfer",
+  reroute: "Reroute",
+  chooseSender: "Choose Sending Branch",
+  cancel: "Cancel",
+  reopen: "Reopen",
+} as const;
+
+export const ORDER_ORIGIN_LABELS: Record<OrderOrigin, string> = {
+  ENGINE: "Suggested",
+  MANAGER_REQUEST: "Store Request",
+  ALERT_ESCALATION: "Alert Escalation",
+};
+
+export const ORDER_EVENT_ACTION_LABELS: Record<OrderEventAction, string> = {
+  CREATED: "Created",
+  REQUEST_TRANSFER: "Requested transfer",
+  COMMIT: "Approved",
+  DECLINE: "Declined",
+  REROUTE: "Rerouted",
+  CANCEL: "Cancelled",
+  RECEIVE: "Marked as Received",
+  ESCALATE: "Escalated",
+  MIGRATED: "Migrated",
+};
+
+export const QUANTITY_REASON_LABELS = {
+  CASE_PACK: "Case pack",
+  TRUCK_CAPACITY: "Truck capacity",
+  PROMO_HOLD: "Promo hold",
+  OTHER: "Other",
+} as const;
+
+export type QuantityReasonCode = keyof typeof QUANTITY_REASON_LABELS;
+
+export function quantityReasonLabel(code?: string): string {
+  if (!code) return "Quantity adjusted";
+  return QUANTITY_REASON_LABELS[code as QuantityReasonCode] ?? code;
+}
+
+export function getOrderEventDisplayLabel(
+  event: Pick<OrderEvent, "action" | "fromStatus" | "dispositionCode">,
+): string {
+  if (event.dispositionCode === "REOPENED") return "Reopened";
+  if (event.action === "COMMIT" && event.fromStatus === "AWAITING_DONOR") {
+    return "Sent Stock";
+  }
+  return ORDER_EVENT_ACTION_LABELS[event.action];
+}
+
+export const REASON_DISPLAY_LABELS: Record<ReasonCode, string> = {
+  BELOW_REORDER_POINT: "On hand is below the reorder point",
+  OVERSTOCK_COVER: "Cover is above 60 days",
+  RECEIVER_BELOW_TARGET: "Receiving branch is under the 14-day target",
+  DONOR_SURPLUS: "Sending branch holds more than 30 days of cover plus safety stock",
+  NO_DONOR: "No sending branch has surplus to cover the gap",
+  NO_RECEIVER: "No receiving branch is short of this SKU",
+  LOST_SALES_AT_RISK: "Sales may be lost over the lead time",
+  CARRYING_COST: "Holding cost of the surplus units",
+  FREIGHT_LIMITS_QTY: "Freight cost limits how many units are worth moving",
+  ZERO_VELOCITY: "No demand on days that had stock",
+  REORDER_TO_TARGET: "Buy up to the cover target",
+  MARKDOWN_CLEARANCE: "Clear surplus that nobody else needs",
+  MIN_TRANSFER_MET: "Quantity meets the minimum transfer",
+};
 
 export const LABELS = {
   coverDays: {
@@ -103,7 +198,7 @@ export const LABELS = {
     label: "Dead stock value",
     shortHelp: "Excess capital in overstocked items with virtually no recent sales.",
     longHelp:
-      "Subset of overstock surplus above the 30-day donor floor with near-zero daily velocity (< 0.05 units/day) that will not clear organically without intervention.",
+      "Subset of overstock surplus above the 30-day sending branch floor with near-zero daily velocity (< 0.05 units/day) that will not clear organically without intervention.",
     formula: "Sum of (surplus units × unit cost) where status is Overstock and velocity < 0.05/day.",
     whatToDo:
       "Approve markdowns to clear shelf space and recover cash.",

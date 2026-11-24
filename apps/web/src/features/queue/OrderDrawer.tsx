@@ -20,10 +20,10 @@ import {
   formatMoneyPrecise,
   formatNumber,
   formatReasonSentence,
-  orderEventActionLabel,
   orderOriginLabel,
   orderStatusLabel,
 } from "@/lib/format";
+import { ORDER_ACTION_LABELS, getOrderEventDisplayLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { formatProductDisplayName, type ReplenishmentOrder } from "@stockflow/core";
 
@@ -125,10 +125,10 @@ export function OrderDrawer({
                 </div>
               </div>
 
-              {/* Freight & Live Donor State */}
+              {/* Freight & Live Sending Branch State */}
               {order.type === "TRANSFER" && order.sourceBranchId ? (
                 <div className="rounded-xl border border-border bg-secondary/40 p-4 text-xs">
-                  <p className="font-semibold text-foreground">Transfer &amp; donor capacity</p>
+                  <p className="font-semibold text-foreground">Transfer &amp; sending branch capacity</p>
                   <dl className="mt-2 grid grid-cols-2 gap-2 tabular-nums">
                     <div>
                       <dt className="text-muted-foreground">Distance</dt>
@@ -149,7 +149,7 @@ export function OrderDrawer({
                     </div>
                     {order.donorAvailableSurplus !== undefined ? (
                       <div>
-                        <dt className="text-muted-foreground">Donor available surplus</dt>
+                        <dt className="text-muted-foreground">Sending branch available surplus</dt>
                         <dd className="font-medium text-foreground">
                           {formatNumber(order.donorAvailableSurplus)} units
                         </dd>
@@ -157,7 +157,7 @@ export function OrderDrawer({
                     ) : null}
                     {order.donorCoverDaysAfter !== undefined ? (
                       <div>
-                        <dt className="text-muted-foreground">Donor cover after release</dt>
+                        <dt className="text-muted-foreground">Sending branch cover after sending</dt>
                         <dd className="font-medium text-foreground">
                           {formatCover(order.donorCoverDaysAfter)}
                         </dd>
@@ -203,7 +203,7 @@ export function OrderDrawer({
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-semibold text-foreground">
-                              {orderEventActionLabel(ev.action)}
+                              {getOrderEventDisplayLabel(ev)}
                             </span>
                             <span className="inline-flex items-center gap-1 text-muted-foreground">
                               {ev.fromStatus ? (
@@ -273,7 +273,7 @@ export function OrderDrawer({
                   onClick={() => onDecline(order)}
                 >
                   <X className="size-3.5" aria-hidden="true" />
-                  Decline
+                  {ORDER_ACTION_LABELS.decline}
                 </Button>
               ) : null}
               {capabilities.canReroute ? (
@@ -284,7 +284,9 @@ export function OrderDrawer({
                   onClick={() => onReroute(order)}
                 >
                   <Repeat2 className="size-3.5" aria-hidden="true" />
-                  {order.sourceBranchId ? "Reroute" : "Select donor"}
+                  {order.sourceBranchId
+                    ? ORDER_ACTION_LABELS.reroute
+                    : ORDER_ACTION_LABELS.chooseSender}
                 </Button>
               ) : null}
               {capabilities.canRequestTransfer ? (
@@ -294,7 +296,7 @@ export function OrderDrawer({
                   disabled={isBusy}
                   onClick={() => onRequestTransfer(order)}
                 >
-                  Request transfer
+                  {ORDER_ACTION_LABELS.requestTransfer}
                 </Button>
               ) : null}
               {capabilities.canRelease || capabilities.canCommit ? (
@@ -305,7 +307,9 @@ export function OrderDrawer({
                   onClick={() => onCommit(order)}
                 >
                   <Check className="size-3.5" aria-hidden="true" />
-                  {capabilities.canRelease ? "Release" : "Commit"}
+                  {capabilities.canRelease
+                    ? ORDER_ACTION_LABELS.sendStock
+                    : ORDER_ACTION_LABELS.approve}
                 </Button>
               ) : null}
               {capabilities.canReceive ? (
@@ -316,7 +320,7 @@ export function OrderDrawer({
                   onClick={() => onReceive(order)}
                 >
                   <PackageCheck className="size-3.5" aria-hidden="true" />
-                  Confirm receipt
+                  {ORDER_ACTION_LABELS.markReceived}
                 </Button>
               ) : null}
             </div>

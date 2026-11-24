@@ -44,6 +44,7 @@ import {
   formatDateTime,
   formatNumber,
 } from "@/lib/format";
+import { ORDER_ACTION_LABELS } from "@/lib/labels";
 import {
   BAHRAIN_BRANCHES,
   CATALOG_CATEGORIES,
@@ -145,10 +146,10 @@ export function StaffProductStats() {
     mutationFn: (orderId: string) =>
       api.receiveOrder(orderId, { comment: "Confirmed received on store floor" }),
     onSuccess: async (updated) => {
-      toast.success(`Confirmed receipt of ${formatNumber(updated.quantity)} units (${updated.sku})`);
+      toast.success(`Marked ${formatNumber(updated.quantity)} units as received (${updated.sku})`);
       await invalidateOperationalQueries(queryClient);
     },
-    onError: (err: Error) => toast.error(err.message || "Unable to confirm receipt"),
+    onError: (err: Error) => toast.error(err.message || "Unable to mark order as received"),
   });
 
   const incomingDeliveries = incomingDeliveriesQuery.data?.orders ?? [];
@@ -542,7 +543,7 @@ export function StaffProductStats() {
                       onClick={() => receiveMutation.mutate(order.id)}
                     >
                       <PackageCheck className="size-3.5" aria-hidden="true" />
-                      Confirm Receipt
+                      {ORDER_ACTION_LABELS.markReceived}
                     </Button>
                   </TableCell>
                 </TableRow>

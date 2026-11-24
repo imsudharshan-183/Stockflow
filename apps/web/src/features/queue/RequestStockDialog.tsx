@@ -121,7 +121,7 @@ export function RequestStockDialog({
         <DialogHeader>
           <DialogTitle>Request stock replenishment</DialogTitle>
           <DialogDescription>
-            Submit an inter-branch transfer request (with ranked donors) or supplier reorder.
+            Submit an inter-branch transfer request (with ranked sending branches) or supplier reorder.
           </DialogDescription>
         </DialogHeader>
 
