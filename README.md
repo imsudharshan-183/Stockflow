@@ -69,7 +69,7 @@ pnpm build
 pnpm bench:cold     # cold-start and warm latency of the first plan
 ```
 
-Vitest runs across all three workspaces (**54 files, 313 tests**; see [docs/TESTING.md](docs/TESTING.md)):
+Vitest runs across all three workspaces (**54 files, 313 tests**):
 
 - **`packages/core` (9 files, 38 tests)**: Engine formulas, `fast-check` property invariants, donor ranking, projection overlays, quantity-edit net-benefit math, order state-machine transitions, RBAC truth tables, and deterministic seeding.
 - **`apps/api` (34 files, 255 tests)**: Dual-repository (`InMemoryRepository` + `mongodb-memory-server`) suites covering auth security, RBAC/route matrix, sales entry auth and `import_log` scoping, governed replenishment orders and editable quantities, queue lifecycle windows, alert-to-order resolution, branch coordinates and archiving, live Bahrain freshness, `plan_cache` consistency, `committedDeltas` `409` conflicts, user validation, golden snapshots (`recommendations.json`, `kpis.json`), and secret redaction.
@@ -130,7 +130,7 @@ apps/web/src
                     coordinates parser, dailySheetCsv, userValidation
   __tests__/        Web Vitest + Testing Library component and flow suites
 AGENTS.md           Project rules, invariants, and architecture map
-docs/               ADR, ENGINE, DECISIONS, API, FRONTEND, TESTING, DEMO, NAMING, PROPOSAL
+docs/               ADR, ENGINE, DECISIONS, API, FRONTEND, DEMO, NAMING
 scripts/            check-ui.mjs, smoke.mjs
 ```
 

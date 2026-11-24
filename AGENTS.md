@@ -57,4 +57,3 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
 - [docs/DECISIONS.md](docs/DECISIONS.md) — Assumptions, known limitations, scaling path, and security summary
 - [docs/FRONTEND.md](docs/FRONTEND.md) — Design system, UI guardrails, route table, UX principles
 - [docs/API.md](docs/API.md) — HTTP endpoints and RBAC contracts
-- [docs/TESTING.md](docs/TESTING.md) — Test suites across `core`, `api`, and `web`

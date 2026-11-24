@@ -11,3 +11,7 @@ coverage
 .vercel
 *.tsbuildinfo
 temp_snapshot/
+
+# Temporarily kept local-only
+docs/PROPOSAL.md
+docs/TESTING.md
