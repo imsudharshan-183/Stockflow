@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Pencil, Plus, Search, UserX, X } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Pencil, Plus, RefreshCw, Search, UserX, X } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -30,6 +30,11 @@ import { useAuth } from "@/features/auth/AuthContext";
 import { queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import {
+  MIN_USER_PASSWORD_LENGTH,
+  generateSecurePassword,
+  isValidUserEmail,
+} from "@/lib/userValidation";
 import { canManageRole, type Role, type UpdateUser, type User } from "@stockflow/core";
 
 export function UsersPage() {
@@ -42,18 +47,62 @@ export function UsersPage() {
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
+  const [createFormKey, setCreateFormKey] = useState(0);
   const [editTarget, setEditTarget] = useState<User | null>(null);
+  const [editFormKey, setEditFormKey] = useState(0);
   const [resetTarget, setResetTarget] = useState<User | null>(null);
   const [resetPassword, setResetPassword] = useState("");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetLocalError, setResetLocalError] = useState<string | null>(null);
   const [deactivateTarget, setDeactivateTarget] = useState<User | null>(null);
 
   const branches = kpisQuery.data?.branches ?? [];
+
+  function openCreateDialog() {
+    createMutation.reset();
+    setCreateFormKey((k) => k + 1);
+    setCreateOpen(true);
+  }
+
+  function closeCreateDialog() {
+    createMutation.reset();
+    setCreateFormKey((k) => k + 1);
+    setCreateOpen(false);
+  }
+
+  function openEditDialog(target: User) {
+    updateMutation.reset();
+    setEditFormKey((k) => k + 1);
+    setEditTarget(target);
+  }
+
+  function closeEditDialog() {
+    updateMutation.reset();
+    setEditFormKey((k) => k + 1);
+    setEditTarget(null);
+  }
+
+  function openResetDialog(target: User) {
+    resetMutation.reset();
+    setResetPassword("");
+    setShowResetPassword(false);
+    setResetLocalError(null);
+    setResetTarget(target);
+  }
+
+  function closeResetDialog() {
+    resetMutation.reset();
+    setResetPassword("");
+    setShowResetPassword(false);
+    setResetLocalError(null);
+    setResetTarget(null);
+  }
 
   const createMutation = useMutation({
     mutationFn: api.createUser,
     onSuccess: async () => {
       toast.success("User created successfully");
-      setCreateOpen(false);
+      closeCreateDialog();
       await queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -63,7 +112,7 @@ export function UsersPage() {
     mutationFn: ({ id, data }: { id: string; data: UpdateUser }) => api.updateUser(id, data),
     onSuccess: async () => {
       toast.success("User updated successfully");
-      setEditTarget(null);
+      closeEditDialog();
       await queryClient.invalidateQueries({ queryKey: ["users"] });
     },
     onError: (err: Error) => toast.error(err.message),
@@ -82,8 +131,7 @@ export function UsersPage() {
     mutationFn: ({ id, pass }: { id: string; pass: string }) => api.resetPassword(id, pass),
     onSuccess: async () => {
       toast.success("Password reset successfully");
-      setResetTarget(null);
-      setResetPassword("");
+      closeResetDialog();
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -108,7 +156,7 @@ export function UsersPage() {
         title="User management"
         subtitle="Manage roles, assigned branch scopes, and account status."
         actions={
-          <Button variant="primary" onClick={() => setCreateOpen(true)}>
+          <Button variant="primary" onClick={openCreateDialog}>
             <Plus className="size-4" aria-hidden="true" />
             Add user
           </Button>
@@ -248,7 +296,7 @@ export function UsersPage() {
                             <Button
                               size="xs"
                               variant="secondary"
-                              onClick={() => setEditTarget(u)}
+                              onClick={() => openEditDialog(u)}
                             >
                               <Pencil className="size-3" aria-hidden="true" />
                               Edit
@@ -257,10 +305,7 @@ export function UsersPage() {
                               size="xs"
                               variant="ghost"
                               tooltip="Reset password"
-                              onClick={() => {
-                                setResetTarget(u);
-                                setResetPassword("");
-                              }}
+                              onClick={() => openResetDialog(u)}
                             >
                               <KeyRound className="size-3" aria-hidden="true" />
                               Password
@@ -300,7 +345,13 @@ export function UsersPage() {
       </TableCard>
 
       {/* Create User Dialog */}
-      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+      <Dialog
+        open={createOpen}
+        onOpenChange={(open) => {
+          if (open) openCreateDialog();
+          else closeCreateDialog();
+        }}
+      >
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
             <DialogTitle>Create new user</DialogTitle>
@@ -308,14 +359,17 @@ export function UsersPage() {
               Add a manager or staff member and configure their branch visibility.
             </DialogDescription>
           </DialogHeader>
-          <CreateUserForm
-            actorRole={actorRole}
-            branches={branches}
-            isSubmitting={createMutation.isPending}
-            errorMessage={createMutation.error?.message ?? null}
-            onCancel={() => setCreateOpen(false)}
-            onSubmit={(data) => createMutation.mutate(data)}
-          />
+          {createOpen ? (
+            <CreateUserForm
+              key={createFormKey}
+              actorRole={actorRole}
+              branches={branches}
+              isSubmitting={createMutation.isPending}
+              errorMessage={createMutation.error?.message ?? null}
+              onCancel={closeCreateDialog}
+              onSubmit={(data) => createMutation.mutate(data)}
+            />
+          ) : null}
         </DialogContent>
       </Dialog>
 
@@ -323,10 +377,7 @@ export function UsersPage() {
       <Dialog
         open={editTarget !== null}
         onOpenChange={(open) => {
-          if (!open) {
-            setEditTarget(null);
-            updateMutation.reset();
-          }
+          if (!open) closeEditDialog();
         }}
       >
         <DialogContent className="max-w-md rounded-2xl">
@@ -338,13 +389,13 @@ export function UsersPage() {
           </DialogHeader>
           {editTarget ? (
             <EditUserForm
-              key={editTarget.id}
+              key={`${editTarget.id}-${editFormKey}`}
               actorRole={actorRole}
               targetUser={editTarget}
               branches={branches}
               isSubmitting={updateMutation.isPending}
               errorMessage={updateMutation.error?.message ?? null}
-              onCancel={() => setEditTarget(null)}
+              onCancel={closeEditDialog}
               onSubmit={(data) => updateMutation.mutate({ id: editTarget.id, data })}
             />
           ) : null}
@@ -355,7 +406,7 @@ export function UsersPage() {
       <Dialog
         open={resetTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setResetTarget(null);
+          if (!open) closeResetDialog();
         }}
       >
         <DialogContent className="max-w-sm rounded-2xl">
@@ -366,36 +417,91 @@ export function UsersPage() {
             </DialogDescription>
           </DialogHeader>
           <form
+            autoComplete="off"
+            noValidate
             onSubmit={(e) => {
               e.preventDefault();
-              if (resetTarget && resetPassword.length >= 6) {
-                resetMutation.mutate({ id: resetTarget.id, pass: resetPassword });
+              if (!resetTarget) return;
+              if (resetPassword.length < MIN_USER_PASSWORD_LENGTH) {
+                setResetLocalError(
+                  `Password must be at least ${MIN_USER_PASSWORD_LENGTH} characters.`,
+                );
+                return;
               }
+              setResetLocalError(null);
+              resetMutation.mutate({ id: resetTarget.id, pass: resetPassword });
             }}
             className="space-y-4"
           >
-            <div className="space-y-1.5">
-              <label
-                htmlFor="reset-password-input"
-                className="text-xs font-medium text-muted-foreground"
+            <AutofillDecoyFields />
+            {resetLocalError || resetMutation.error?.message ? (
+              <div
+                role="alert"
+                className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text"
               >
-                New password (min 6 characters)
-              </label>
-              <Input
-                id="reset-password-input"
-                type="password"
-                required
-                minLength={6}
-                value={resetPassword}
-                onChange={(e) => setResetPassword(e.target.value)}
-              />
+                {resetLocalError || resetMutation.error?.message}
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label
+                  htmlFor="sf-reset-acct-secret"
+                  className="text-xs font-medium text-muted-foreground"
+                >
+                  New password (min {MIN_USER_PASSWORD_LENGTH} characters)
+                </label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="xs"
+                  onClick={() => {
+                    setResetPassword(generateSecurePassword());
+                    setShowResetPassword(true);
+                    setResetLocalError(null);
+                  }}
+                >
+                  <RefreshCw className="size-3" aria-hidden="true" />
+                  Generate password
+                </Button>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <Input
+                  id="sf-reset-acct-secret"
+                  name="resetUserPassword"
+                  type={showResetPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  required
+                  minLength={MIN_USER_PASSWORD_LENGTH}
+                  value={resetPassword}
+                  onChange={(e) => {
+                    setResetPassword(e.target.value);
+                    setResetLocalError(null);
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={showResetPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowResetPassword((prev) => !prev)}
+                >
+                  {showResetPassword ? (
+                    <EyeOff className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <Eye className="size-3.5" aria-hidden="true" />
+                  )}
+                  <span className="sr-only">
+                    {showResetPassword ? "Hide password" : "Show password"}
+                  </span>
+                </Button>
+              </div>
             </div>
             <DialogFooter>
               <Button
                 type="button"
                 variant="secondary"
                 disabled={resetMutation.isPending}
-                onClick={() => setResetTarget(null)}
+                onClick={closeResetDialog}
               >
                 Cancel
               </Button>
@@ -403,7 +509,6 @@ export function UsersPage() {
                 type="submit"
                 variant="primary"
                 loading={resetMutation.isPending}
-                disabled={resetPassword.length < 6}
               >
                 Confirm reset
               </Button>
@@ -455,6 +560,31 @@ export function UsersPage() {
   );
 }
 
+function AutofillDecoyFields() {
+  return (
+    <div aria-hidden="true" className="hidden">
+      <input
+        type="text"
+        name="decoyUsername"
+        autoComplete="username"
+        tabIndex={-1}
+        aria-hidden="true"
+        readOnly
+        value=""
+      />
+      <input
+        type="password"
+        name="decoyPassword"
+        autoComplete="current-password"
+        tabIndex={-1}
+        aria-hidden="true"
+        readOnly
+        value=""
+      />
+    </div>
+  );
+}
+
 function CreateUserForm({
   actorRole,
   branches,
@@ -482,6 +612,7 @@ function CreateUserForm({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [role, setRole] = useState<Role>(allowedRoles[0] ?? "staff");
   const [selectedBranches, setSelectedBranches] = useState<string[]>([]);
   const [localError, setLocalError] = useState<string | null>(null);
@@ -501,8 +632,20 @@ function CreateUserForm({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (selectedBranches.length === 0) {
-      setLocalError("Select at least one branch.");
+    if (!name.trim()) {
+      setLocalError("Full name is required.");
+      return;
+    }
+    if (!isValidUserEmail(email)) {
+      setLocalError("Enter a valid email address (for example, name@company.com).");
+      return;
+    }
+    if (password.length < MIN_USER_PASSWORD_LENGTH) {
+      setLocalError(`Password must be at least ${MIN_USER_PASSWORD_LENGTH} characters.`);
+      return;
+    }
+    if ((role === "manager" || role === "staff") && selectedBranches.length === 0) {
+      setLocalError("Select at least one assigned branch.");
       return;
     }
     setLocalError(null);
@@ -518,50 +661,110 @@ function CreateUserForm({
   const displayError = localError || errorMessage;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form autoComplete="off" noValidate onSubmit={handleSubmit} className="space-y-4">
+      <AutofillDecoyFields />
       {displayError ? (
-        <div className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text">
+        <div
+          role="alert"
+          className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text"
+        >
           {displayError}
         </div>
       ) : null}
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Full name</label>
+        <label htmlFor="sf-create-acct-fullname" className="text-xs font-medium text-muted-foreground">
+          Full name
+        </label>
         <Input
+          id="sf-create-acct-fullname"
+          name="newUserFullName"
+          autoComplete="off"
           required
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setLocalError(null);
+          }}
           placeholder="Jane Doe"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Email</label>
+        <label htmlFor="sf-create-acct-addr" className="text-xs font-medium text-muted-foreground">
+          Email
+        </label>
         <Input
+          id="sf-create-acct-addr"
+          name="newUserEmail"
           type="email"
+          autoComplete="off"
           required
           value={email}
-          onChange={(e) => setEmail(e.target.value)}
+          onChange={(e) => {
+            setEmail(e.target.value);
+            setLocalError(null);
+          }}
           placeholder="jane@stockflow.dev"
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">
-          Password (min 6 characters)
-        </label>
-        <Input
-          type="password"
-          required
-          minLength={6}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+        <div className="flex items-center justify-between gap-2">
+          <label htmlFor="sf-create-acct-secret" className="text-xs font-medium text-muted-foreground">
+            Password (min {MIN_USER_PASSWORD_LENGTH} characters)
+          </label>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            onClick={() => {
+              setPassword(generateSecurePassword());
+              setShowPassword(true);
+              setLocalError(null);
+            }}
+          >
+            <RefreshCw className="size-3" aria-hidden="true" />
+            Generate password
+          </Button>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Input
+            id="sf-create-acct-secret"
+            name="newUserPassword"
+            type={showPassword ? "text" : "password"}
+            autoComplete="new-password"
+            required
+            minLength={MIN_USER_PASSWORD_LENGTH}
+            value={password}
+            onChange={(e) => {
+              setPassword(e.target.value);
+              setLocalError(null);
+            }}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            aria-label={showPassword ? "Hide password" : "Show password"}
+            onClick={() => setShowPassword((prev) => !prev)}
+          >
+            {showPassword ? (
+              <EyeOff className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Eye className="size-3.5" aria-hidden="true" />
+            )}
+            <span className="sr-only">{showPassword ? "Hide password" : "Show password"}</span>
+          </Button>
+        </div>
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Role</label>
+        <label htmlFor="sf-create-acct-role" className="text-xs font-medium text-muted-foreground">
+          Role
+        </label>
         <select
+          id="sf-create-acct-role"
           className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           value={role}
           onChange={(e) => handleRoleChange(e.target.value as Role)}
@@ -652,8 +855,12 @@ function EditUserForm({
 
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
-    if (selectedBranches.length === 0) {
-      setLocalError("Select at least one branch.");
+    if (!name.trim()) {
+      setLocalError("Full name is required.");
+      return;
+    }
+    if ((role === "manager" || role === "staff") && selectedBranches.length === 0) {
+      setLocalError("Select at least one assigned branch.");
       return;
     }
     setLocalError(null);
@@ -668,25 +875,40 @@ function EditUserForm({
   const displayError = localError || errorMessage;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form autoComplete="off" noValidate onSubmit={handleSubmit} className="space-y-4">
+      <AutofillDecoyFields />
       {displayError ? (
-        <div className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text">
+        <div
+          role="alert"
+          className="rounded-xl border border-risk-ring bg-risk-bg px-3 py-2 text-xs text-risk-text"
+        >
           {displayError}
         </div>
       ) : null}
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Full name</label>
+        <label htmlFor="sf-edit-acct-fullname" className="text-xs font-medium text-muted-foreground">
+          Full name
+        </label>
         <Input
+          id="sf-edit-acct-fullname"
+          name="editUserFullName"
+          autoComplete="off"
           required
           value={name}
-          onChange={(e) => setName(e.target.value)}
+          onChange={(e) => {
+            setName(e.target.value);
+            setLocalError(null);
+          }}
         />
       </div>
 
       <div className="space-y-1.5">
-        <label className="text-xs font-medium text-muted-foreground">Role</label>
+        <label htmlFor="sf-edit-acct-role" className="text-xs font-medium text-muted-foreground">
+          Role
+        </label>
         <select
+          id="sf-edit-acct-role"
           aria-label="Edit user role"
           className="h-9 w-full rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
           value={role}

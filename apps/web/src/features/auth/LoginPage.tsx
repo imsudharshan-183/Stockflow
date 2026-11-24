@@ -107,7 +107,7 @@ export function LoginPage() {
                 id="email"
                 type="email"
                 required
-                autoComplete="email"
+                autoComplete="username"
                 placeholder="buyer@stockflow.dev"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

@@ -12,8 +12,37 @@ import type { AuthContext } from "../plugins/auth.js";
 import { toPublicUser, type AuthService } from "../services/authService.js";
 import type { UserRepository } from "../repositories/userTypes.js";
 
+const STRICT_EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
+
+const RouteCreateUserSchema = CreateUserSchema.extend({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(STRICT_EMAIL_RE, "Invalid email address"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+}).superRefine((val, ctx) => {
+  if ((val.role === "manager" || val.role === "staff") && val.branchIds.length === 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Managers and staff must have at least one assigned branch",
+      path: ["branchIds"],
+    });
+  }
+});
+
+const RouteUpdateUserSchema = UpdateUserSchema.extend({
+  email: z
+    .string()
+    .trim()
+    .toLowerCase()
+    .regex(STRICT_EMAIL_RE, "Invalid email address")
+    .optional(),
+  password: z.string().min(8, "Password must be at least 8 characters").optional(),
+});
+
 const ResetPasswordSchema = z.object({
-  password: z.string().min(6, "Password must be at least 6 characters"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
 export function registerUsersRoutes(
@@ -34,7 +63,7 @@ export function registerUsersRoutes(
     });
 
     adminScope.post("/users", async (request, reply) => {
-      const parsed = CreateUserSchema.safeParse(request.body);
+      const parsed = RouteCreateUserSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send(ErrorBodySchema.parse({ error: parsed.error.issues[0]?.message || "Invalid input" }));
       }
@@ -66,7 +95,7 @@ export function registerUsersRoutes(
 
     adminScope.patch("/users/:id", async (request, reply) => {
       const { id } = request.params as { id: string };
-      const parsed = UpdateUserSchema.safeParse(request.body);
+      const parsed = RouteUpdateUserSchema.safeParse(request.body);
       if (!parsed.success) {
         return reply.code(400).send(ErrorBodySchema.parse({ error: parsed.error.issues[0]?.message || "Invalid input" }));
       }
@@ -89,6 +118,21 @@ export function registerUsersRoutes(
         );
       }
 
+      const effectiveRole = input.role ?? target.role;
+      const effectiveBranches = input.branchIds ?? target.branchIds;
+      if ((effectiveRole === "manager" || effectiveRole === "staff") && effectiveBranches.length === 0) {
+        return reply.code(400).send(
+          ErrorBodySchema.parse({ error: "Managers and staff must have at least one assigned branch" }),
+        );
+      }
+
+      if (input.email && input.email !== target.email) {
+        const existingEmail = await userRepo.findByEmail(input.email);
+        if (existingEmail && existingEmail.id !== target.id) {
+          return reply.code(409).send(ErrorBodySchema.parse({ error: "Email already in use" }));
+        }
+      }
+
       let passwordHash: string | undefined;
       if (input.password) {
         passwordHash = await authService.hashPassword(input.password);
@@ -96,6 +140,7 @@ export function registerUsersRoutes(
 
       const updated = await userRepo.update(id, {
         ...(input.name ? { name: input.name } : {}),
+        ...(input.email ? { email: input.email } : {}),
         ...(input.role ? { role: input.role } : {}),
         ...(input.branchIds ? { branchIds: input.branchIds } : {}),
         ...(input.isActive !== undefined ? { isActive: input.isActive } : {}),

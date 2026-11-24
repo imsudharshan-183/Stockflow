@@ -468,7 +468,7 @@ describe("route matrix: /api/users writes", () => {
 
   it.each([
     [{ ...newUser, email: "not-an-email" }, "Invalid email address"],
-    [{ ...newUser, email: "a2@stockflow.dev", password: "123" }, "Password must be at least 6 characters"],
+    [{ ...newUser, email: "a2@stockflow.dev", password: "123" }, "Password must be at least 8 characters"],
     [{ ...newUser, email: "a3@stockflow.dev", role: "owner" }, undefined],
     [{ ...newUser, email: "a4@stockflow.dev", name: "" }, undefined],
   ])("POST: 400 for invalid input %#", async (payload, message) => {
