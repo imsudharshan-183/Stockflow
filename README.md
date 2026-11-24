@@ -170,7 +170,7 @@ See [docs/DECISIONS.md](docs/DECISIONS.md) and [docs/ENGINE.md](docs/ENGINE.md) 
 ## Third-party libraries and assets
 
 - **Core:** Zod, Vitest, fast-check, TypeScript
-- **API:** Fastify, `@fastify/cors`, `@fastify/cookie`, `@fastify/helmet`, `@fastify/rate-limit`, `bcryptjs`, `@fastify/jwt`, Mongoose, `mongodb-memory-server` (tests), dotenv, tsx, pino (via Fastify), Vitest
+- **API:** Fastify, `@fastify/cors`, `@fastify/cookie`, `@fastify/helmet`, `@fastify/jwt`, `@fastify/rate-limit`, `bcryptjs`, Mongoose, `mongodb-memory-server` (tests), dotenv, tsx, pino (via Fastify), Vitest
 - **Web:** React, Vite, Tailwind CSS, Base UI (`@base-ui/react`), class-variance-authority, clsx, tailwind-merge, TanStack Query, Recharts, React Router, Lucide, Sonner, Zod, `@fontsource/inter` (Inter, SIL Open Font License), Vitest, Testing Library, jsdom
 - **Tooling:** ESLint, typescript-eslint, Prettier
 - No third-party images, datasets or brand assets are used. All data is synthetic.
