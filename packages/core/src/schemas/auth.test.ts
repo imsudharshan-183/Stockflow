@@ -23,6 +23,7 @@ describe("auth helpers and schemas", () => {
     expect(can("admin", "dashboard:financial:scoped")).toBe(true);
     expect(can("admin", "dashboard:operational:scoped")).toBe(true);
     expect(can("admin", "catalog:view")).toBe(true);
+    expect(can("admin", "orders:receive")).toBe(true);
     expect(can("admin", "stock:flag")).toBe(false);
     expect(can("admin", "stock:flag:decide")).toBe(true);
 
@@ -38,6 +39,7 @@ describe("auth helpers and schemas", () => {
     expect(can("manager", "dashboard:financial:scoped")).toBe(true);
     expect(can("manager", "dashboard:operational:scoped")).toBe(true);
     expect(can("manager", "catalog:view")).toBe(true);
+    expect(can("manager", "orders:receive")).toBe(true);
     expect(can("manager", "stock:flag")).toBe(false);
     expect(can("manager", "stock:flag:decide")).toBe(true);
 
@@ -53,6 +55,7 @@ describe("auth helpers and schemas", () => {
     expect(can("staff", "dashboard:financial:scoped")).toBe(false);
     expect(can("staff", "dashboard:operational:scoped")).toBe(false);
     expect(can("staff", "catalog:view")).toBe(true);
+    expect(can("staff", "orders:receive")).toBe(true);
     expect(can("staff", "stock:flag")).toBe(true);
     expect(can("staff", "stock:flag:decide")).toBe(false);
   });

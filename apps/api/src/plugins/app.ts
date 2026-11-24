@@ -10,6 +10,7 @@ import { registerAuthRoutes } from "../routes/auth.js";
 import { registerBranchRoutes } from "../routes/branches.js";
 import { registerCatalogRoutes } from "../routes/catalog.js";
 import { registerLocationRoutes } from "../routes/locations.js";
+import { registerOrderRoutes } from "../routes/orders.js";
 import { registerSalesEntriesRoutes } from "../routes/salesEntries.js";
 import { registerStockRoutes } from "../routes/stock.js";
 import { registerStockAlertsRoutes } from "../routes/stockAlerts.js";
@@ -54,6 +55,8 @@ export async function buildApp(
       REFRESH_TOKEN_TTL: "7d",
       ADMIN_PASSWORD: "Admin@12345",
       WEB_ORIGIN: "",
+      APPROVED_ACTIVE_DAYS: 3,
+      REJECT_SNOOZE_DAYS: 3,
     };
   }
   if (envOverrides) {
@@ -110,6 +113,7 @@ export async function buildApp(
       registerCatalogRoutes(scope, services, authGuards);
       registerSalesEntriesRoutes(scope, services, authGuards);
       registerStockAlertsRoutes(scope, services, authGuards);
+      registerOrderRoutes(scope, services, authGuards);
     },
     { prefix: "/api" },
   );

@@ -1,6 +1,8 @@
 import {
   CreateStockAlertSchema,
   ErrorBodySchema,
+  ResolveStockAlertResponseSchema,
+  ResolveStockAlertSchema,
   StockAlertListSchema,
   StockAlertQuerySchema,
   StockAlertSchema,
@@ -63,6 +65,33 @@ export function registerStockAlertsRoutes(
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
           return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof StockAlertValidationError) {
+          return reply.code(400).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post(
+    "/stock-alerts/:id/resolve",
+    { preHandler: [authGuards.requirePermission("stock:flag:decide")] },
+    async (request, reply) => {
+      const { id } = PathIdSchema.parse(request.params);
+      const body = ResolveStockAlertSchema.parse(request.body);
+      try {
+        const result = await services.stockAlerts.resolveStockAlert(id, body, request.currentUser);
+        return ResolveStockAlertResponseSchema.parse(result);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof StockAlertNotFoundError) {
+          return reply.code(404).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof StockAlertConflictError) {
+          return reply.code(409).send(ErrorBodySchema.parse({ error: err.message }));
         }
         if (err instanceof StockAlertValidationError) {
           return reply.code(400).send(ErrorBodySchema.parse({ error: err.message }));

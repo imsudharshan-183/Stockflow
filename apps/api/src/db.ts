@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { SalesEntryModel } from "./repositories/models.js";
+import { ImportLogModel, SalesEntryModel } from "./repositories/models.js";
 
 const DEFAULT_MONGO_URI = "mongodb://localhost:27017/stockflow";
 
@@ -29,6 +29,23 @@ export interface SalesEntryAuditRecord {
   actedBy: { userId: string; name: string; role: string };
   before: { unitsSold: number; onHand: number } | null;
   after: { unitsSold: number; onHand: number } | null;
+}
+
+export interface ImportLogEntry {
+  id: string;
+  importedAt: string;
+  fileName: string;
+  user: {
+    userId: string;
+    name: string;
+    role: "admin" | "manager" | "staff";
+  };
+  inserted: number;
+  updated: number;
+  errorCount: number;
+  minDate: string | null;
+  maxDate: string | null;
+  branchIds: string[];
 }
 
 let sharedConnectionPromise: Promise<typeof mongoose> | null = null;
@@ -65,10 +82,12 @@ export function getDb(): mongoose.mongo.Db | null {
 
 const memorySalesEntries = new Map<string, SalesEntryRecord>();
 const memorySalesEntryAudits: SalesEntryAuditRecord[] = [];
+const memoryImportLogs: ImportLogEntry[] = [];
 
 export function clearMemorySalesEntries(): void {
   memorySalesEntries.clear();
   memorySalesEntryAudits.length = 0;
+  memoryImportLogs.length = 0;
 }
 
 function makeEntryKey(branchId: string, sku: string, date: string): string {
@@ -329,4 +348,73 @@ export function clearRecomputeCallLog(): void {
   recomputeCallLog.length = 0;
 }
 
-export { SalesEntryModel };
+export async function recordImportLog(entry: ImportLogEntry): Promise<ImportLogEntry> {
+  const normalized: ImportLogEntry = {
+    id: entry.id,
+    importedAt: entry.importedAt,
+    fileName: entry.fileName,
+    user: { ...entry.user },
+    inserted: entry.inserted,
+    updated: entry.updated,
+    errorCount: entry.errorCount,
+    minDate: entry.minDate,
+    maxDate: entry.maxDate,
+    branchIds: [...new Set(entry.branchIds)].sort(),
+  };
+
+  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+    await ImportLogModel.create(normalized);
+    return normalized;
+  }
+
+  memoryImportLogs.push(normalized);
+  return normalized;
+}
+
+export async function listImportLogs(filter: {
+  userId?: string;
+  limit?: number;
+} = {}): Promise<ImportLogEntry[]> {
+  const limit = Math.min(50, Math.max(1, filter.limit ?? 10));
+
+  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+    const query = filter.userId ? { "user.userId": filter.userId } : {};
+    const rows = await ImportLogModel.find(query)
+      .sort({ importedAt: -1 })
+      .limit(limit)
+      .lean();
+    return rows.map((row) => ({
+      id: String(row.id),
+      importedAt: String(row.importedAt),
+      fileName: String(row.fileName),
+      user: {
+        userId: String(row.user?.userId ?? ""),
+        name: String(row.user?.name ?? ""),
+        role: (row.user?.role ?? "staff") as "admin" | "manager" | "staff",
+      },
+      inserted: Number(row.inserted ?? 0),
+      updated: Number(row.updated ?? 0),
+      errorCount: Number(row.errorCount ?? 0),
+      minDate: row.minDate ? String(row.minDate) : null,
+      maxDate: row.maxDate ? String(row.maxDate) : null,
+      branchIds: Array.isArray(row.branchIds) ? row.branchIds.map(String) : [],
+    }));
+  }
+
+  return [...memoryImportLogs]
+    .filter((item) => (!filter.userId ? true : item.user.userId === filter.userId))
+    .sort((a, b) => b.importedAt.localeCompare(a.importedAt))
+    .slice(0, limit);
+}
+
+export function getMemoryMaxSalesEntryDate(allowedBranchIds?: readonly string[] | null): string | null {
+  const allowed = allowedBranchIds ? new Set(allowedBranchIds) : null;
+  let maxDate: string | null = null;
+  for (const entry of memorySalesEntries.values()) {
+    if (allowed && !allowed.has(entry.branchId)) continue;
+    if (!maxDate || entry.date > maxDate) maxDate = entry.date;
+  }
+  return maxDate;
+}
+
+export { ImportLogModel, SalesEntryModel };

@@ -1,17 +1,68 @@
 import {
   DEAD_VELOCITY_PER_DAY,
   DEFAULT_POLICY,
+  KpiSummarySchema,
   backtest,
   can,
+  round2,
   round3,
   type Dataset,
   type KpiSummary,
   type User,
 } from "@stockflow/core";
-import { DecisionForbiddenError } from "./errors.js";
+import { z } from "zod";
+import { diffCalendarDays, getBahrainToday } from "../utils/bahrainDate.js";
+import { BranchNotFoundError, DecisionForbiddenError } from "./errors.js";
 import { projectPositionFor } from "./projection.js";
+import {
+  LifecycleRecommendationSchema,
+  evaluateDecisionLifecycle,
+  type LifecycleRecommendation,
+} from "./queueLifecycle.js";
 import { ensureInitializedSyncIfPossible, type StockRuntimeState } from "./runtimeState.js";
 import { isBranchInScope, isMaterialRecommendation, scopeBranches } from "./scope.js";
+
+export const LiveKpiMetricSchema = z.object({
+  value: z.number(),
+  computedAt: z.string().min(1),
+  dataVersion: z.number().int().nonnegative(),
+  decisionVersion: z.number().int().nonnegative(),
+});
+
+export const OverviewFreshnessMetaSchema = z.object({
+  computedAt: z.string().min(1),
+  dataVersion: z.number().int().nonnegative(),
+  decisionVersion: z.number().int().nonnegative(),
+  todayBahrain: z.string().min(1),
+  asOfDataDate: z.string().min(1),
+  staleDataDays: z.number().int().nonnegative(),
+});
+
+export const LiveOverviewMetricsSchema = z.object({
+  stockoutRate: LiveKpiMetricSchema,
+  stockoutRateDelta28d: LiveKpiMetricSchema,
+  overstockValue: LiveKpiMetricSchema,
+  deadStockValue: LiveKpiMetricSchema,
+  salesAtRisk: LiveKpiMetricSchema,
+  pendingActionsCount: LiveKpiMetricSchema,
+  pendingEstimatedGain: LiveKpiMetricSchema,
+});
+
+export const LiveOverviewResponseSchema = z.object({
+  report: KpiSummarySchema,
+  meta: OverviewFreshnessMetaSchema,
+  metrics: LiveOverviewMetricsSchema,
+  stockoutSparkline: z.array(z.number()),
+  pendingRecommendations: z.array(LifecycleRecommendationSchema),
+});
+export type LiveOverviewResponse = z.infer<typeof LiveOverviewResponseSchema>;
+
+export const KpisWithMetaResponseSchema = KpiSummarySchema.extend({
+  meta: OverviewFreshnessMetaSchema,
+  metrics: LiveOverviewMetricsSchema,
+  stockoutSparkline: z.array(z.number()),
+});
+export type KpisWithMetaResponse = z.infer<typeof KpisWithMetaResponseSchema>;
 
 export class KpiService {
   constructor(private readonly runtime: StockRuntimeState) {}
@@ -110,30 +161,37 @@ export class KpiService {
       throw new DecisionForbiddenError("Insufficient permission to view KPIs");
     }
 
+    const activeBranchIds = this.runtime.data.branches
+      .filter((b) => b.status !== "archived")
+      .map((b) => b.id);
+    const activeBranchSet = new Set(activeBranchIds);
     const allBranchIds = this.runtime.data.branches.map((b) => b.id);
-    const allowedList = user ? scopeBranches(user, allBranchIds) : allBranchIds;
+    const allowedList = (user ? scopeBranches(user, activeBranchIds) : activeBranchIds).filter((id) =>
+      activeBranchSet.has(id),
+    );
     if (branchId) {
       if (user && user.role !== "admin" && !isBranchInScope(user, branchId)) {
         throw new DecisionForbiddenError("Access to branch forbidden");
       }
       if (!allBranchIds.includes(branchId)) {
-        throw new DecisionForbiddenError("Branch not found in scope");
+        throw new BranchNotFoundError(`Branch ${branchId} not found`);
       }
     }
     const scopedList = branchId ? [branchId] : allowedList;
-    const cacheKey = [...scopedList].sort().join("|");
+    const cacheKey = `${[...scopedList].sort().join("|")}::v${this.runtime.planVersion}::d${this.runtime.decisionVersion}`;
     const cached = this.runtime.scopedKpiCache.get(cacheKey);
     if (cached) return cached;
 
     const userBranches = new Set(scopedList);
     const branches = this.runtime.analysis.kpis.branches.filter((b) => userBranches.has(b.id));
+    const branchIdSet = new Set(branches.map((b) => b.id));
     const coverGrid = this.runtime.analysis.kpis.coverGrid.filter((b) =>
       userBranches.has(b.branchId),
     );
     const branchIndices: number[] = [];
     for (let bIdx = 0; bIdx < this.runtime.data.branches.length; bIdx += 1) {
       const branch = this.runtime.data.branches[bIdx];
-      if (branch && userBranches.has(branch.id)) branchIndices.push(bIdx);
+      if (branch && branchIdSet.has(branch.id)) branchIndices.push(bIdx);
     }
 
     const {
@@ -250,5 +308,168 @@ export class KpiService {
     };
     this.runtime.scopedKpiCache.set(cacheKey, result);
     return result;
+  }
+
+  private computeAsOfDataDate(branchIndices: readonly number[]): string {
+    const dates = this.runtime.data.dates;
+    for (let day = dates.length - 1; day >= 0; day -= 1) {
+      for (let sku = 0; sku < this.runtime.data.products.length; sku += 1) {
+        const salesByBranch = this.runtime.data.sales[sku];
+        const stockByBranch = this.runtime.data.onHand[sku];
+        const demandByBranch = this.runtime.data.demand[sku];
+        for (const bIdx of branchIndices) {
+          const sold = salesByBranch?.[bIdx]?.[day] ?? 0;
+          const onHand = stockByBranch?.[bIdx]?.[day] ?? 0;
+          const demand = demandByBranch?.[bIdx]?.[day] ?? 0;
+          if (sold > 0 || onHand > 0 || demand > 0) {
+            return dates[day] ?? this.runtime.data.asOf;
+          }
+        }
+      }
+    }
+    return this.runtime.data.asOf;
+  }
+
+  liveOverview(user?: User, branchId?: string): LiveOverviewResponse {
+    ensureInitializedSyncIfPossible(this.runtime);
+    if (user && !can(user.role, "dashboard:financial:scoped")) {
+      throw new DecisionForbiddenError("Insufficient permission to view KPIs");
+    }
+
+    const activeBranchIds = this.runtime.data.branches
+      .filter((b) => b.status !== "archived")
+      .map((b) => b.id);
+    const allBranchIds = this.runtime.data.branches.map((b) => b.id);
+    const allowedSet = new Set(
+      user ? scopeBranches(user, activeBranchIds) : activeBranchIds,
+    );
+
+    if (branchId) {
+      if (user && user.role !== "admin" && !isBranchInScope(user, branchId)) {
+        throw new DecisionForbiddenError("Access to branch forbidden");
+      }
+      if (!allBranchIds.includes(branchId)) {
+        throw new BranchNotFoundError(`Branch ${branchId} not found`);
+      }
+    }
+
+    const report = this.kpis(user, branchId);
+    const scopedBranchIds = branchId
+      ? [branchId]
+      : user && !can(user.role, "dashboard:financial:network")
+        ? Array.from(allowedSet)
+        : activeBranchIds;
+    const branchIdSet = new Set(scopedBranchIds);
+    const branchIndices = this.runtime.data.branches.flatMap((b, idx) =>
+      branchIdSet.has(b.id) ? [idx] : [],
+    );
+
+    const nowMs = this.runtime.now();
+    const computedAt = new Date(nowMs).toISOString();
+    const todayBahrain = getBahrainToday(nowMs).isoDate;
+    const asOfDataDate = this.computeAsOfDataDate(branchIndices);
+    const staleDataDays = Math.max(0, diffCalendarDays(todayBahrain, asOfDataDate));
+    const dataVersion = Math.max(1, this.runtime.planVersion);
+    const decisionVersion = Math.max(1, this.runtime.decisionVersion);
+
+    const eligibleTrend = report.trend.filter((point) => point.date <= asOfDataDate);
+    const latest28 = eligibleTrend.slice(-28);
+    const prior28 = eligibleTrend.length > 28 ? eligibleTrend.slice(-56, -28) : [];
+    const avgOf = (rows: typeof latest28): number =>
+      rows.length === 0 ? 0 : rows.reduce((sum, r) => sum + r.stockoutRate, 0) / rows.length;
+    const latestAvg = avgOf(latest28);
+    const priorAvg = prior28.length > 0 ? avgOf(prior28) : latestAvg;
+    const delta28d = Math.round((latestAvg - priorAvg) * 10_000) / 10_000;
+    const stockoutSparkline = latest28.map((p) => p.stockoutRate);
+
+    const config = this.runtime.lifecycleConfig;
+    const pendingRecommendations: LifecycleRecommendation[] = [];
+    for (const rec of this.runtime.analysis.recommendations) {
+      if (!isMaterialRecommendation(rec)) continue;
+      const inScope =
+        branchIdSet.has(rec.branchId) ||
+        (rec.donorBranchId ? branchIdSet.has(rec.donorBranchId) : false);
+      if (!inScope) continue;
+
+      const evalResult = evaluateDecisionLifecycle({
+        recExists: true,
+        currentNetBenefit: rec.netBenefit,
+        currentCoverDays: rec.metrics.coverDays ?? null,
+        actionMeta: this.runtime.actionMeta.get(rec.id),
+        order: this.runtime.orders.get(rec.id),
+        orderMeta: this.runtime.orderLifecycleMeta.get(rec.id),
+        nowMs,
+        config,
+      });
+
+      if (evalResult.bucket !== "pending") continue;
+      pendingRecommendations.push(
+        LifecycleRecommendationSchema.parse({
+          ...rec,
+          status: evalResult.effectiveStatus,
+          lifecycleState: evalResult.bucket,
+          reopenBadge: evalResult.reopenBadge,
+          canReopen: evalResult.canReopen,
+          decidedAt: evalResult.decidedAt,
+          rejectedUntil: evalResult.rejectedUntil,
+        }),
+      );
+    }
+
+    const pendingEstimatedGain = round2(
+      pendingRecommendations.reduce((sum, r) => sum + r.netBenefit, 0),
+    );
+    const pendingActionsCount = pendingRecommendations.length;
+
+    const wrap = (value: number) => ({
+      value,
+      computedAt,
+      dataVersion,
+      decisionVersion,
+    });
+
+    const syncedReport: KpiSummary = {
+      ...report,
+      operational: {
+        pendingApprovalsCount: pendingActionsCount,
+        backlogValue: pendingEstimatedGain,
+        atRiskBranchCount:
+          report.operational?.atRiskBranchCount ??
+          report.branchRisk.filter((r) => r.stockoutRate > 0.05 || r.revenueAtRisk > 0).length,
+      },
+    };
+
+    return LiveOverviewResponseSchema.parse({
+      report: syncedReport,
+      meta: {
+        computedAt,
+        dataVersion,
+        decisionVersion,
+        todayBahrain,
+        asOfDataDate,
+        staleDataDays,
+      },
+      metrics: {
+        stockoutRate: wrap(syncedReport.stockoutRate),
+        stockoutRateDelta28d: wrap(delta28d),
+        overstockValue: wrap(syncedReport.cashReleasable),
+        deadStockValue: wrap(syncedReport.deadStockValue),
+        salesAtRisk: wrap(syncedReport.lostSalesAtRisk),
+        pendingActionsCount: wrap(pendingActionsCount),
+        pendingEstimatedGain: wrap(pendingEstimatedGain),
+      },
+      stockoutSparkline,
+      pendingRecommendations,
+    });
+  }
+
+  kpisWithMeta(user?: User, branchId?: string): KpisWithMetaResponse {
+    const live = this.liveOverview(user, branchId);
+    return KpisWithMetaResponseSchema.parse({
+      ...live.report,
+      meta: live.meta,
+      metrics: live.metrics,
+      stockoutSparkline: live.stockoutSparkline,
+    });
   }
 }

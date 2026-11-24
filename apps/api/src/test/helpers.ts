@@ -1,24 +1,39 @@
 import type { FastifyInstance } from "fastify";
 import {
   BAHRAIN_BRANCHES,
+  OrderEventSchema,
+  ReplenishmentOrderSchema,
   type ActedBy,
-  type ActionRecord,
   type Analysis,
-  type AuditEntry,
   type Branch,
   type Dataset,
+  type OrderEvent,
+  type OrderStatus,
   type Product,
   type ProductChangeRecord,
+  type ReplenishmentOrder,
   type Role,
   type StockAlert,
+  type StockAlertResolution,
 } from "@stockflow/core";
 import { buildApp } from "../plugins/app.js";
 import { InMemoryRepository } from "../repositories/memory.js";
 import { MemoryStockAlertStore } from "../repositories/memoryAlerts.js";
 import { InMemoryUserRepository } from "../repositories/memoryUser.js";
-import type { CachedPlanRecord, SaveDecisionBatchResult, StockRepository } from "../repositories/types.js";
+import type {
+  ActionMetaRecord,
+  ApiAuditEntry,
+  CachedPlanRecord,
+  OrderLifecycleMeta,
+  ResolveStockAlertOrderPayload,
+  ResolveStockAlertResult,
+  SaveDecisionBatchResult,
+  SaveOrderWithEventResult,
+  StockRepository,
+} from "../repositories/types.js";
 import type { UserRepository } from "../repositories/userTypes.js";
 import { createStockServices, type StockServices } from "../services/index.js";
+import { ActionMetaRecordSchema, ApiAuditEntrySchema } from "../services/queueLifecycle.js";
 
 export const TEST_JWT_SECRET = "test-secret-at-least-32-characters-long-key";
 
@@ -122,8 +137,11 @@ export function buildMultipartPayload(
 export class FixedDatasetRepository implements StockRepository {
   readonly kind = "memory" as const;
   readonly users: UserRepository = new InMemoryUserRepository();
-  private readonly actions: ActionRecord[] = [];
-  private readonly audit: AuditEntry[] = [];
+  private readonly actions: ActionMetaRecord[] = [];
+  private readonly audit: ApiAuditEntry[] = [];
+  private readonly orders = new Map<string, ReplenishmentOrder>();
+  private readonly orderEvents: OrderEvent[] = [];
+  private readonly orderLifecycleMeta = new Map<string, OrderLifecycleMeta>();
   private readonly alertStore = new MemoryStockAlertStore();
   private dataVersion = 1;
   private cachedPlan: CachedPlanRecord | null = null;
@@ -142,10 +160,10 @@ export class FixedDatasetRepository implements StockRepository {
   saveCachedPlanSync(dataVersion: number, plan: Analysis): void {
     this.cachedPlan = { dataVersion, computedAt: new Date().toISOString(), plan };
   }
-  peekActionsSync(): ActionRecord[] {
+  peekActionsSync(): ActionMetaRecord[] {
     return [...this.actions];
   }
-  peekAuditSync(): AuditEntry[] {
+  peekAuditSync(): ApiAuditEntry[] {
     return [...this.audit];
   }
 
@@ -172,57 +190,85 @@ export class FixedDatasetRepository implements StockRepository {
     this.cachedPlan = { dataVersion, computedAt: new Date().toISOString(), plan };
     return Promise.resolve();
   }
-  listActions(): Promise<ActionRecord[]> {
-    return Promise.resolve([...this.actions]);
+  listActions(): Promise<ActionMetaRecord[]> {
+    return Promise.resolve(this.actions.map((a) => ActionMetaRecordSchema.parse(a)));
   }
-  saveAction(record: ActionRecord): Promise<void> {
-    this.actions.push(record);
+  saveAction(record: ActionMetaRecord): Promise<void> {
+    this.actions.push(ActionMetaRecordSchema.parse(record));
     return Promise.resolve();
   }
-  saveActions(records: ActionRecord[]): Promise<void> {
-    this.actions.push(...records);
+  saveActions(records: ActionMetaRecord[]): Promise<void> {
+    for (const r of records) this.actions.push(ActionMetaRecordSchema.parse(r));
     return Promise.resolve();
   }
-  listAudit(): Promise<AuditEntry[]> {
-    return Promise.resolve([...this.audit]);
+  listAudit(): Promise<ApiAuditEntry[]> {
+    return Promise.resolve(this.audit.map((e) => ApiAuditEntrySchema.parse(e)));
   }
-  saveAudit(entry: AuditEntry): Promise<void> {
-    this.audit.push(entry);
+  saveAudit(entry: ApiAuditEntry): Promise<void> {
+    this.audit.push(ApiAuditEntrySchema.parse(entry));
     return Promise.resolve();
   }
-  saveAudits(entries: AuditEntry[]): Promise<void> {
-    this.audit.push(...entries);
+  saveAudits(entries: ApiAuditEntry[]): Promise<void> {
+    for (const e of entries) this.audit.push(ApiAuditEntrySchema.parse(e));
     return Promise.resolve();
   }
-  async saveDecisionBatch(records: ActionRecord[], entries: AuditEntry[]): Promise<SaveDecisionBatchResult> {
+  async saveDecisionBatch(
+    records: ActionMetaRecord[],
+    entries: ApiAuditEntry[],
+    options?: { allowOverwriteIds?: ReadonlySet<string> },
+  ): Promise<SaveDecisionBatchResult> {
     const persistedIds = new Set<string>();
     const duplicateIds = new Set<string>();
-    const existing = new Set(this.actions.map((a) => a.recommendationId));
+    const allowOverwrite = options?.allowOverwriteIds;
+    const existingByRec = new Map(this.actions.map((a, idx) => [a.recommendationId, idx]));
     const entryByRecId = new Map(entries.map((e) => [e.recommendationId, e]));
-    const toActions: ActionRecord[] = [];
-    const toAudits: AuditEntry[] = [];
-    for (const r of records) {
-      if (existing.has(r.recommendationId) || persistedIds.has(r.recommendationId)) {
+    const toActions: ActionMetaRecord[] = [];
+    const toAudits: ApiAuditEntry[] = [];
+    for (const raw of records) {
+      const r = ActionMetaRecordSchema.parse(raw);
+      const existsAlready = existingByRec.has(r.recommendationId);
+      if ((existsAlready && !allowOverwrite?.has(r.recommendationId)) || persistedIds.has(r.recommendationId)) {
         duplicateIds.add(r.recommendationId);
         continue;
       }
       const entry = entryByRecId.get(r.recommendationId);
       if (!entry) throw new Error(`Missing audit entry for ${r.recommendationId}`);
       toActions.push(r);
-      toAudits.push(entry);
+      toAudits.push(ApiAuditEntrySchema.parse(entry));
       persistedIds.add(r.recommendationId);
     }
     if (toActions.length > 0) {
       await this.saveAudits(toAudits);
-      await this.saveActions(toActions);
+      for (const r of toActions) {
+        const idx = existingByRec.get(r.recommendationId);
+        if (idx !== undefined) {
+          this.actions[idx] = r;
+        } else {
+          this.actions.push(r);
+        }
+      }
     }
     return { persistedIds, duplicateIds };
+  }
+  reopenAction(
+    recommendationId: string,
+    reopenedAt: string,
+    auditEntry: ApiAuditEntry,
+  ): Promise<boolean> {
+    const target = this.actions.find((a) => a.recommendationId === recommendationId);
+    if (!target) return Promise.resolve(false);
+    target.reopenedAt = reopenedAt;
+    this.audit.push(ApiAuditEntrySchema.parse(auditEntry));
+    return Promise.resolve(true);
   }
   clearDecisions(): Promise<{ actionsRemoved: number; auditsRemoved: number }> {
     const actionsRemoved = this.actions.length;
     const auditsRemoved = this.audit.length;
     this.actions.length = 0;
     this.audit.length = 0;
+    this.orders.clear();
+    this.orderEvents.length = 0;
+    this.orderLifecycleMeta.clear();
     return Promise.resolve({ actionsRemoved, auditsRemoved });
   }
   saveProduct(product: Product): Promise<void> {
@@ -282,6 +328,91 @@ export class FixedDatasetRepository implements StockRepository {
     | { status: "already_decided"; alert: StockAlert }
   > {
     return Promise.resolve(this.alertStore.decide(id, decision, decidedBy, decidedAt));
+  }
+  resolveStockAlert(
+    id: string,
+    resolution: StockAlertResolution,
+    linkedOrder?: ResolveStockAlertOrderPayload,
+  ): Promise<ResolveStockAlertResult> {
+    const previous = this.alertStore.get(id);
+    if (!previous) return Promise.resolve({ status: "not_found" });
+    if (previous.status !== "PENDING") {
+      return Promise.resolve({ status: "already_decided", alert: previous });
+    }
+    const res = this.alertStore.resolve(id, resolution);
+    if (res.status !== "resolved") return Promise.resolve(res);
+    if (linkedOrder) {
+      const parsedOrder = ReplenishmentOrderSchema.parse({ ...linkedOrder.order, events: [] });
+      const parsedEvent = OrderEventSchema.parse(linkedOrder.event);
+      this.orders.set(parsedOrder.id, parsedOrder);
+      this.orderEvents.push(parsedEvent);
+      return Promise.resolve({
+        status: "resolved",
+        alert: res.alert,
+        order: ReplenishmentOrderSchema.parse({
+          ...parsedOrder,
+          events: this.orderEvents.filter((e) => e.orderId === parsedOrder.id),
+        }),
+      });
+    }
+    return Promise.resolve({ status: "resolved", alert: res.alert, order: null });
+  }
+  listOrders(): Promise<ReplenishmentOrder[]> {
+    return Promise.resolve(
+      Array.from(this.orders.values(), (o) =>
+        ReplenishmentOrderSchema.parse({
+          ...o,
+          events: this.orderEvents.filter((e) => e.orderId === o.id),
+        }),
+      ),
+    );
+  }
+  getOrder(id: string): Promise<ReplenishmentOrder | null> {
+    const found = this.orders.get(id);
+    if (!found) return Promise.resolve(null);
+    return Promise.resolve(
+      ReplenishmentOrderSchema.parse({
+        ...found,
+        events: this.orderEvents.filter((e) => e.orderId === id),
+      }),
+    );
+  }
+  listOrderEvents(orderId?: string): Promise<OrderEvent[]> {
+    const rows = orderId ? this.orderEvents.filter((e) => e.orderId === orderId) : this.orderEvents;
+    return Promise.resolve([...rows].sort((a, b) => a.at.localeCompare(b.at)));
+  }
+  listOrderLifecycleMeta(): Promise<Map<string, OrderLifecycleMeta>> {
+    return Promise.resolve(new Map(this.orderLifecycleMeta));
+  }
+  saveOrderWithEvent(
+    order: ReplenishmentOrder,
+    event: OrderEvent,
+    expectedStatus: OrderStatus | null,
+    lifecycleMeta?: OrderLifecycleMeta,
+  ): Promise<SaveOrderWithEventResult> {
+    const parsedOrder = ReplenishmentOrderSchema.parse({ ...order, events: [] });
+    const parsedEvent = OrderEventSchema.parse(event);
+    const existing = this.orders.get(parsedOrder.id);
+    if (expectedStatus === null) {
+      if (existing) return Promise.resolve({ status: "conflict" });
+    } else if (!existing || existing.status !== expectedStatus) {
+      return Promise.resolve({ status: "conflict" });
+    }
+    this.orders.set(parsedOrder.id, parsedOrder);
+    if (lifecycleMeta) {
+      this.orderLifecycleMeta.set(parsedOrder.id, {
+        ...this.orderLifecycleMeta.get(parsedOrder.id),
+        ...lifecycleMeta,
+      });
+    }
+    this.orderEvents.push(parsedEvent);
+    return Promise.resolve({
+      status: "saved",
+      order: ReplenishmentOrderSchema.parse({
+        ...parsedOrder,
+        events: this.orderEvents.filter((e) => e.orderId === parsedOrder.id),
+      }),
+    });
   }
   close(): Promise<void> {
     return Promise.resolve();

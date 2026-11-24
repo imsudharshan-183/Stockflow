@@ -22,6 +22,8 @@ const EnvSchema = z.object({
   REFRESH_TOKEN_TTL: z.string().default("7d"),
   ADMIN_PASSWORD: z.string().default("Admin@12345"),
   WEB_ORIGIN: z.string().default(""),
+  APPROVED_ACTIVE_DAYS: z.coerce.number().positive().default(3),
+  REJECT_SNOOZE_DAYS: z.coerce.number().positive().default(3),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

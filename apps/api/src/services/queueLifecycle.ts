@@ -1,0 +1,368 @@
+import {
+  ActionSchema,
+  ActedBySchema,
+  ReasonCodeSchema,
+  RecommendationSchema,
+  ReplenishmentOrderSchema,
+  type ReplenishmentOrder,
+} from "@stockflow/core";
+import { z } from "zod";
+import type { QueueLifecycleConfig } from "../config/queueLifecycle.js";
+import type {
+  ActionMetaRecord,
+  DecisionSnapshot,
+  OrderLifecycleMeta,
+  QueueLifecycleView,
+} from "../repositories/types.js";
+
+const DAY_MS = 86_400_000;
+
+export const DecisionSnapshotSchema = z.object({
+  netBenefit: z.number(),
+  targetCoverDays: z.number().nullable(),
+});
+
+export const ActionMetaRecordSchema = z.object({
+  id: z.string().min(1),
+  recommendationId: z.string().min(1),
+  status: z.enum(["APPROVED", "REJECTED"]),
+  decidedAt: z.string().min(1),
+  reasonCode: z.string().optional(),
+  comment: z.string().optional(),
+  snapshot: DecisionSnapshotSchema.optional(),
+  rejectedUntil: z.string().optional(),
+  reopenedAt: z.string().nullable().optional(),
+});
+
+export const ApiAuditEntrySchema = z.object({
+  id: z.string().min(1),
+  at: z.string().min(1),
+  user: z.string().min(1),
+  recommendationId: z.string().min(1),
+  decision: z.enum(["APPROVED", "REJECTED", "REOPENED"]),
+  action: ActionSchema,
+  sku: z.string().min(1),
+  productName: z.string().min(1),
+  branchId: z.string().min(1),
+  branchName: z.string().min(1),
+  donorBranchId: z.string().nullable(),
+  netBenefit: z.number(),
+  reasonCodes: z.array(ReasonCodeSchema).min(1),
+  reasonCode: z.string().optional(),
+  comment: z.string().optional(),
+  actedBy: ActedBySchema.optional(),
+});
+
+export const ApiAuditListSchema = z.object({
+  entries: z.array(ApiAuditEntrySchema),
+});
+
+export const ReopenBadgeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("snooze_expired"),
+    daysAgo: z.number().int().positive(),
+    reason: z.string(),
+    label: z.string(),
+  }),
+  z.object({
+    kind: z.literal("worsened"),
+    label: z.string(),
+  }),
+]);
+export type ReopenBadge = z.infer<typeof ReopenBadgeSchema>;
+
+export const QueueLifecycleViewSchema = z.enum(["pending", "in_progress", "decided"]);
+
+export const LifecycleFieldsSchema = z.object({
+  lifecycleState: QueueLifecycleViewSchema.optional(),
+  reopenBadge: ReopenBadgeSchema.nullable().optional(),
+  canReopen: z.boolean().optional(),
+  decidedAt: z.string().nullable().optional(),
+  rejectedUntil: z.string().nullable().optional(),
+});
+
+export const LifecycleRecommendationSchema = RecommendationSchema.merge(LifecycleFieldsSchema);
+export type LifecycleRecommendation = z.infer<typeof LifecycleRecommendationSchema>;
+
+export const LifecycleRecommendationListSchema = z.object({
+  recommendations: z.array(LifecycleRecommendationSchema),
+  total: z.number().int().nonnegative(),
+  totalNetBenefit: z.number().optional(),
+  view: QueueLifecycleViewSchema.optional(),
+});
+
+export const LifecycleOrderSchema = ReplenishmentOrderSchema.merge(LifecycleFieldsSchema);
+export type LifecycleOrder = z.infer<typeof LifecycleOrderSchema>;
+
+export const LifecycleOrderListResponseSchema = z.object({
+  orders: z.array(LifecycleOrderSchema),
+  total: z.number().int().nonnegative(),
+  totalNetBenefit: z.number().optional(),
+  view: QueueLifecycleViewSchema.optional(),
+});
+
+export interface LifecycleEvaluation {
+  bucket: QueueLifecycleView;
+  reopenBadge: ReopenBadge | null;
+  canReopen: boolean;
+  decidedAt: string | null;
+  rejectedUntil: string | null;
+  effectiveStatus: "PENDING" | "APPROVED" | "REJECTED";
+}
+
+function isWorsened(
+  currentNetBenefit: number,
+  currentCoverDays: number | null,
+  snapshot?: DecisionSnapshot | null,
+): boolean {
+  if (!snapshot) return false;
+  if (snapshot.netBenefit > 0 && currentNetBenefit >= snapshot.netBenefit * 1.5) {
+    return true;
+  }
+  if (
+    snapshot.targetCoverDays !== null &&
+    snapshot.targetCoverDays > 0 &&
+    currentCoverDays !== null &&
+    currentCoverDays <= snapshot.targetCoverDays * 0.5
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function evaluateDecisionLifecycle(params: {
+  recExists: boolean;
+  currentNetBenefit: number;
+  currentCoverDays: number | null;
+  actionMeta?: ActionMetaRecord;
+  order?: ReplenishmentOrder;
+  orderMeta?: OrderLifecycleMeta;
+  latestReasonText?: string;
+  nowMs: number;
+  config: QueueLifecycleConfig;
+}): LifecycleEvaluation {
+  const {
+    recExists,
+    currentNetBenefit,
+    currentCoverDays,
+    actionMeta,
+    order,
+    orderMeta,
+    latestReasonText,
+    nowMs,
+    config,
+  } = params;
+
+  const reopenWindowMs = config.reopenWindowHours * 3_600_000;
+
+  // 1. Persisted ReplenishmentOrder takes precedence when not reopened.
+  if (order && !order.isVirtual) {
+    const orderReopenedAt = orderMeta?.reopenedAt ?? actionMeta?.reopenedAt ?? null;
+    if (orderReopenedAt && orderReopenedAt >= order.updatedAt) {
+      return {
+        bucket: "pending",
+        reopenBadge: null,
+        canReopen: false,
+        decidedAt: null,
+        rejectedUntil: null,
+        effectiveStatus: "PENDING",
+      };
+    }
+
+    if (order.status === "OPEN_REQUEST" || order.status === "SUGGESTED") {
+      return {
+        bucket: "pending",
+        reopenBadge: null,
+        canReopen: false,
+        decidedAt: null,
+        rejectedUntil: null,
+        effectiveStatus: "PENDING",
+      };
+    }
+
+    // Active workflow orders remain In Progress until RECEIVED.
+    // Migrated legacy approvals (single MIGRATED event) still follow APPROVED_ACTIVE_DAYS.
+    if (order.status === "AWAITING_DONOR" || order.status === "COMMITTED") {
+      const refIso = order.committedAt ?? order.awaitingDonorSince ?? order.updatedAt;
+      const refMs = Date.parse(refIso);
+      const isMigratedLegacyOnly =
+        order.origin === "ENGINE" &&
+        order.events.length === 1 &&
+        order.events[0]?.action === "MIGRATED";
+      const bucket: QueueLifecycleView =
+        isMigratedLegacyOnly &&
+        Number.isFinite(refMs) &&
+        nowMs - refMs >= config.approvedActiveDays * DAY_MS
+          ? "decided"
+          : "in_progress";
+      const canReopen = Number.isFinite(refMs) ? nowMs - refMs <= reopenWindowMs : false;
+      return {
+        bucket,
+        reopenBadge: null,
+        canReopen,
+        decidedAt: refIso,
+        rejectedUntil: null,
+        effectiveStatus: "APPROVED",
+      };
+    }
+
+    if (order.status === "RECEIVED" || order.status === "CANCELLED") {
+      const refIso = order.receivedAt ?? order.updatedAt;
+      const refMs = Date.parse(refIso);
+      const canReopen =
+        order.status === "CANCELLED" && Number.isFinite(refMs)
+          ? nowMs - refMs <= reopenWindowMs
+          : false;
+      return {
+        bucket: "decided",
+        reopenBadge: null,
+        canReopen,
+        decidedAt: refIso,
+        rejectedUntil: null,
+        effectiveStatus: order.status === "RECEIVED" ? "APPROVED" : "REJECTED",
+      };
+    }
+
+    if (order.status === "REJECTED") {
+      const decidedIso = order.updatedAt;
+      const decidedMs = Date.parse(decidedIso);
+      const snapshot = orderMeta?.rejectionSnapshot ?? actionMeta?.snapshot ?? null;
+      const rejectedUntilIso =
+        orderMeta?.rejectedUntil ??
+        actionMeta?.rejectedUntil ??
+        (Number.isFinite(decidedMs)
+          ? new Date(decidedMs + config.rejectSnoozeDays * DAY_MS).toISOString()
+          : null);
+      const rejectedUntilMs = rejectedUntilIso ? Date.parse(rejectedUntilIso) : NaN;
+      const lastComment = [...order.events].reverse().find((e) => e.comment?.trim())?.comment;
+      const reason =
+        lastComment ??
+        latestReasonText ??
+        actionMeta?.comment ??
+        actionMeta?.reasonCode ??
+        "Declined";
+
+      if (recExists && isWorsened(currentNetBenefit, currentCoverDays, snapshot)) {
+        return {
+          bucket: "pending",
+          reopenBadge: { kind: "worsened", label: "Situation worsened" },
+          canReopen: false,
+          decidedAt: decidedIso,
+          rejectedUntil: rejectedUntilIso,
+          effectiveStatus: "PENDING",
+        };
+      }
+
+      if (recExists && Number.isFinite(rejectedUntilMs) && nowMs >= rejectedUntilMs) {
+        const daysAgo = Number.isFinite(decidedMs)
+          ? Math.max(1, Math.floor((nowMs - decidedMs) / DAY_MS))
+          : Math.round(config.rejectSnoozeDays);
+        return {
+          bucket: "pending",
+          reopenBadge: {
+            kind: "snooze_expired",
+            daysAgo,
+            reason,
+            label: `Rejected ${daysAgo} ${daysAgo === 1 ? "day" : "days"} ago: ${reason}`,
+          },
+          canReopen: false,
+          decidedAt: decidedIso,
+          rejectedUntil: rejectedUntilIso,
+          effectiveStatus: "PENDING",
+        };
+      }
+
+      const canReopen = Number.isFinite(decidedMs) ? nowMs - decidedMs <= reopenWindowMs : false;
+      return {
+        bucket: "decided",
+        reopenBadge: null,
+        canReopen,
+        decidedAt: decidedIso,
+        rejectedUntil: rejectedUntilIso,
+        effectiveStatus: "REJECTED",
+      };
+    }
+  }
+
+  // 2. Legacy ActionRecord lifecycle (when not reopened or no active persisted order).
+  if (actionMeta && (!actionMeta.reopenedAt || actionMeta.reopenedAt < actionMeta.decidedAt)) {
+    const decidedMs = Date.parse(actionMeta.decidedAt);
+    const canReopen = Number.isFinite(decidedMs) ? nowMs - decidedMs <= reopenWindowMs : false;
+
+    if (actionMeta.status === "APPROVED") {
+      const activeMs = config.approvedActiveDays * DAY_MS;
+      const isActive = Number.isFinite(decidedMs) && nowMs - decidedMs < activeMs;
+      return {
+        bucket: isActive ? "in_progress" : "decided",
+        reopenBadge: null,
+        canReopen,
+        decidedAt: actionMeta.decidedAt,
+        rejectedUntil: null,
+        effectiveStatus: "APPROVED",
+      };
+    }
+
+    if (actionMeta.status === "REJECTED") {
+      const rejectedUntilIso =
+        actionMeta.rejectedUntil ??
+        (Number.isFinite(decidedMs)
+          ? new Date(decidedMs + config.rejectSnoozeDays * DAY_MS).toISOString()
+          : null);
+      const rejectedUntilMs = rejectedUntilIso ? Date.parse(rejectedUntilIso) : NaN;
+      const reason =
+        actionMeta.comment?.trim() ||
+        actionMeta.reasonCode?.trim() ||
+        latestReasonText ||
+        "Rejected";
+
+      if (recExists && isWorsened(currentNetBenefit, currentCoverDays, actionMeta.snapshot)) {
+        return {
+          bucket: "pending",
+          reopenBadge: { kind: "worsened", label: "Situation worsened" },
+          canReopen: false,
+          decidedAt: actionMeta.decidedAt,
+          rejectedUntil: rejectedUntilIso,
+          effectiveStatus: "PENDING",
+        };
+      }
+
+      if (recExists && Number.isFinite(rejectedUntilMs) && nowMs >= rejectedUntilMs) {
+        const daysAgo = Number.isFinite(decidedMs)
+          ? Math.max(1, Math.floor((nowMs - decidedMs) / DAY_MS))
+          : Math.round(config.rejectSnoozeDays);
+        return {
+          bucket: "pending",
+          reopenBadge: {
+            kind: "snooze_expired",
+            daysAgo,
+            reason,
+            label: `Rejected ${daysAgo} ${daysAgo === 1 ? "day" : "days"} ago: ${reason}`,
+          },
+          canReopen: false,
+          decidedAt: actionMeta.decidedAt,
+          rejectedUntil: rejectedUntilIso,
+          effectiveStatus: "PENDING",
+        };
+      }
+
+      return {
+        bucket: "decided",
+        reopenBadge: null,
+        canReopen,
+        decidedAt: actionMeta.decidedAt,
+        rejectedUntil: rejectedUntilIso,
+        effectiveStatus: "REJECTED",
+      };
+    }
+  }
+
+  // 3. Undecided or reopened -> Pending
+  return {
+    bucket: "pending",
+    reopenBadge: null,
+    canReopen: false,
+    decidedAt: null,
+    rejectedUntil: null,
+    effectiveStatus: "PENDING",
+  };
+}

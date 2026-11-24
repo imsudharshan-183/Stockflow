@@ -46,6 +46,8 @@ export function StockAlertCategoryBadge({ category }: { category: StockAlertCate
 /** Renders the review status pill for a store staff stock alert. */
 export function StockAlertStatusBadge({ status }: { status: StockAlertStatus }) {
   switch (status) {
+    case "RESOLVED":
+      return <Badge tone="ok">Resolved</Badge>;
     case "APPROVED":
       return <Badge tone="approved">Approved</Badge>;
     case "REJECTED":

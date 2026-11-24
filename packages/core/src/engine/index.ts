@@ -50,3 +50,13 @@ export { ewma, isStockoutDay, sampleStdev, wasInStock } from "./velocity.js";
 export { recommend } from "./recommend.js";
 export { ewmaForecaster } from "./velocity.js";
 export { greedyMatcher } from "./match.js";
+export {
+  ZERO_DELTA,
+  deltaKey,
+  getCommittedDelta,
+  project,
+  projectPosition,
+} from "./projection.js";
+export type { CommittedDelta, CommittedDeltaStore, ProjectedPosition } from "./projection.js";
+export { rankDonorCandidates } from "./donorRanking.js";
+export type { RankDonorCandidatesOptions } from "./donorRanking.js";

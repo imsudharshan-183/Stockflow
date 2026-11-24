@@ -103,20 +103,43 @@ export class CatalogService {
     date: string,
     unitsSold: number,
     onHand: number,
-  ): void {
+  ): { dateAdded: boolean } {
     ensureInitializedSyncIfPossible(this.runtime);
     const sIdx = this.runtime.data.products.findIndex((p) => p.sku === sku);
     const bIdx = this.runtime.data.branches.findIndex((b) => b.id === branchId);
-    if (sIdx < 0 || bIdx < 0) return;
+    if (sIdx < 0 || bIdx < 0) return { dateAdded: false };
 
     const product = this.runtime.data.products[sIdx]!;
-    if (product.status === "archived") return;
+    if (product.status === "archived") return { dateAdded: false };
 
+    let dateAdded = false;
     let dIdx = this.runtime.data.dates.indexOf(date);
     if (dIdx < 0) {
-      dIdx = this.runtime.data.dates.length - 1;
+      let insertAt = this.runtime.data.dates.findIndex((d) => d > date);
+      if (insertAt < 0) insertAt = this.runtime.data.dates.length;
+      this.runtime.data.dates.splice(insertAt, 0, date);
+      for (let p = 0; p < this.runtime.data.products.length; p += 1) {
+        const salesByBranch = this.runtime.data.sales[p];
+        const stockByBranch = this.runtime.data.onHand[p];
+        const demandByBranch = this.runtime.data.demand[p];
+        if (!salesByBranch || !stockByBranch || !demandByBranch) continue;
+        for (let b = 0; b < this.runtime.data.branches.length; b += 1) {
+          const prevStock =
+            insertAt > 0
+              ? (stockByBranch[b]?.[insertAt - 1] ?? 0)
+              : (stockByBranch[b]?.[0] ?? 0);
+          salesByBranch[b]?.splice(insertAt, 0, 0);
+          stockByBranch[b]?.splice(insertAt, 0, prevStock);
+          demandByBranch[b]?.splice(insertAt, 0, 0);
+        }
+      }
+      const latest = this.runtime.data.dates[this.runtime.data.dates.length - 1];
+      if (latest) {
+        this.runtime.data.asOf = latest;
+      }
+      dIdx = insertAt;
+      dateAdded = true;
     }
-    if (dIdx < 0) return;
 
     const salesRow = this.runtime.data.sales[sIdx]?.[bIdx];
     const onHandRow = this.runtime.data.onHand[sIdx]?.[bIdx];
@@ -126,9 +149,13 @@ export class CatalogService {
       onHandRow[dIdx] = onHand;
       demandRow[dIdx] = unitsSold;
     }
+    return { dateAdded };
   }
 
-  async recomputeSingleSku(sku: string, options: { bumpVersion?: boolean } = {}): Promise<void> {
+  async recomputeSingleSku(
+    sku: string,
+    options: { bumpVersion?: boolean; fullPlanRecompute?: boolean } = {},
+  ): Promise<void> {
     await ensureInitialized(this.runtime);
     const sIdx = this.runtime.data.products.findIndex((p) => p.sku === sku);
     if (sIdx < 0) return;
@@ -140,26 +167,33 @@ export class CatalogService {
       this.runtime.committedRecommendationIds,
       sku,
     );
-    const singleDataset = {
-      ...this.runtime.data,
-      products: [product],
-      sales: [this.runtime.data.sales[sIdx] ?? []],
-      onHand: [this.runtime.data.onHand[sIdx] ?? []],
-      demand: [this.runtime.data.demand[sIdx] ?? []],
-    };
-    const singleAnalysis = analyze(singleDataset, DEFAULT_POLICY);
-    if (singleAnalysis.positions[0]) {
-      this.runtime.analysis.positions[sIdx] = singleAnalysis.positions[0];
+    for (const [alertId, adj] of this.runtime.alertAdjustments.entries()) {
+      if (adj.sku === sku) this.runtime.alertAdjustments.delete(alertId);
     }
-    const otherRecs = this.runtime.analysis.recommendations.filter((r) => r.sku !== sku);
-    const merged = [...otherRecs, ...singleAnalysis.recommendations].sort(
-      (a, b) =>
-        b.netBenefit - a.netBenefit ||
-        a.sku.localeCompare(b.sku) ||
-        a.branchId.localeCompare(b.branchId) ||
-        a.action.localeCompare(b.action),
-    );
-    this.runtime.analysis.recommendations = merged.map((r, idx) => ({ ...r, rank: idx + 1 }));
+    if (options.fullPlanRecompute) {
+      this.runtime.analysis = computeActivePlan(this.runtime.data);
+    } else {
+      const singleDataset = {
+        ...this.runtime.data,
+        products: [product],
+        sales: [this.runtime.data.sales[sIdx] ?? []],
+        onHand: [this.runtime.data.onHand[sIdx] ?? []],
+        demand: [this.runtime.data.demand[sIdx] ?? []],
+      };
+      const singleAnalysis = analyze(singleDataset, DEFAULT_POLICY);
+      if (singleAnalysis.positions[0]) {
+        this.runtime.analysis.positions[sIdx] = singleAnalysis.positions[0];
+      }
+      const otherRecs = this.runtime.analysis.recommendations.filter((r) => r.sku !== sku);
+      const merged = [...otherRecs, ...singleAnalysis.recommendations].sort(
+        (a, b) =>
+          b.netBenefit - a.netBenefit ||
+          a.sku.localeCompare(b.sku) ||
+          a.branchId.localeCompare(b.branchId) ||
+          a.action.localeCompare(b.action),
+      );
+      this.runtime.analysis.recommendations = merged.map((r, idx) => ({ ...r, rank: idx + 1 }));
+    }
     this.runtime.scopedKpiCache.clear();
     if (options.bumpVersion !== false) {
       await commitPlanVersion(this.runtime);
@@ -1163,11 +1197,16 @@ export class CatalogService {
     }
 
     const normalizedName = input.name.trim();
+    const normalizedCity = input.city.trim();
     const conflict = this.runtime.data.branches.find(
-      (b) => b.name.trim().toLowerCase() === normalizedName.toLowerCase(),
+      (b) =>
+        b.name.trim().toLowerCase() === normalizedName.toLowerCase() &&
+        b.city.trim().toLowerCase() === normalizedCity.toLowerCase(),
     );
     if (conflict) {
-      throw new BranchConflictError(`Branch name "${normalizedName}" already exists`);
+      throw new BranchConflictError(
+        `Branch "${normalizedName}" in "${normalizedCity}" already exists`,
+      );
     }
 
     const numericIds = this.runtime.data.branches.map((b) => {
@@ -1213,12 +1252,20 @@ export class CatalogService {
       throw new BranchNotFoundError(`Branch ${id} not found`);
     }
 
-    if (input.name !== undefined && input.name.trim().toLowerCase() !== branch.name.trim().toLowerCase()) {
+    const nextName = (input.name ?? branch.name).trim();
+    const nextCity = (input.city ?? branch.city).trim();
+    if (
+      nextName.toLowerCase() !== branch.name.trim().toLowerCase() ||
+      nextCity.toLowerCase() !== branch.city.trim().toLowerCase()
+    ) {
       const conflict = this.runtime.data.branches.find(
-        (b) => b.id !== id && b.name.trim().toLowerCase() === input.name!.trim().toLowerCase(),
+        (b) =>
+          b.id !== id &&
+          b.name.trim().toLowerCase() === nextName.toLowerCase() &&
+          b.city.trim().toLowerCase() === nextCity.toLowerCase(),
       );
       if (conflict) {
-        throw new BranchConflictError(`Branch name "${input.name.trim()}" already exists`);
+        throw new BranchConflictError(`Branch "${nextName}" in "${nextCity}" already exists`);
       }
     }
 
@@ -1267,11 +1314,15 @@ export class CatalogService {
         this.runtime.committedRecommendationIds,
         sku,
       );
+      for (const [alertId, adj] of this.runtime.alertAdjustments.entries()) {
+        if (adj.sku === sku) this.runtime.alertAdjustments.delete(alertId);
+      }
     } else {
       clearAllCommittedDeltas(
         this.runtime.committedDeltas,
         this.runtime.committedRecommendationIds,
       );
+      this.runtime.alertAdjustments.clear();
     }
     this.runtime.analysis = computeActivePlan(this.runtime.data);
     this.runtime.scopedKpiCache.clear();

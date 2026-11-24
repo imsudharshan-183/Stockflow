@@ -13,14 +13,31 @@ import {
   type User,
 } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { getMissingRequiredEnvVars, type Env } from "../config/env.js";
 import { redactSecrets } from "../config/redact.js";
 import type { AuthContext } from "../plugins/auth.js";
 import {
+  BranchNotFoundError,
   DecisionConflictError,
   DecisionForbiddenError,
   type StockServices,
 } from "../services/index.js";
+import {
+  LifecycleRecommendationSchema,
+  QueueLifecycleViewSchema,
+} from "../services/queueLifecycle.js";
+
+const ExtendedRecommendationQuerySchema = RecommendationQuerySchema.merge(
+  z.object({ view: QueueLifecycleViewSchema.optional() }),
+);
+const RejectBodySchema = z.object({
+  reasonCode: z.string().min(1).max(120).optional(),
+  comment: z.string().max(500).optional(),
+});
+const ReopenBodySchema = z.object({
+  comment: z.string().max(500).optional(),
+});
 
 const HEALTH_DB_CACHE_TTL_MS = 30_000;
 
@@ -96,13 +113,39 @@ export function registerStockRoutes(
     "/kpis",
     { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
     async (request, reply) => {
-      await services.ensureFreshPlan({ syncDecisions: false });
-      const q = cleanQuery(request.query) as { branch?: string };
+      const q = cleanQuery(request.query) as { branch?: string; meta?: string };
+      await services.ensureFreshPlan({ syncDecisions: q.meta === "1" });
       try {
+        if (q.meta === "1") {
+          return services.kpi.kpisWithMeta(request.currentUser, q.branch);
+        }
         return services.kpi.kpis(request.currentUser, q.branch);
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
           return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof BranchNotFoundError) {
+          return reply.code(404).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.get(
+    "/kpis/live",
+    { preHandler: [authGuards.requirePermission("dashboard:financial:scoped")] },
+    async (request, reply) => {
+      await services.ensureFreshPlan();
+      const q = cleanQuery(request.query) as { branch?: string };
+      try {
+        return services.kpi.liveOverview(request.currentUser, q.branch);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof BranchNotFoundError) {
+          return reply.code(404).send(ErrorBodySchema.parse({ error: err.message }));
         }
         throw err;
       }
@@ -128,10 +171,10 @@ export function registerStockRoutes(
 
   app.get(
     "/recommendations",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("recommendations:read")] },
     async (request) => {
       await services.ensureFreshPlan();
-      const query = RecommendationQuerySchema.parse(cleanQuery(request.query));
+      const query = ExtendedRecommendationQuerySchema.parse(cleanQuery(request.query));
       return services.decisions.list(query, request.currentUser);
     },
   );
@@ -155,7 +198,7 @@ export function registerStockRoutes(
 
   app.get(
     "/products/:sku",
-    { preHandler: [authGuards.authenticate] },
+    { preHandler: [authGuards.requirePermission("catalog:view")] },
     async (request, reply) => {
       await services.ensureFreshPlan();
       const { sku } = pathSku.parse(request.params);
@@ -177,7 +220,33 @@ export function registerStockRoutes(
     "/recommendations/:id/reject",
     { preHandler: [authGuards.requirePermission("recommendations:decide")] },
     async (request, reply) => {
-      return decide(services, request.params, "REJECTED", request.currentUser, reply);
+      const body = RejectBodySchema.parse(request.body ?? {});
+      return decide(services, request.params, "REJECTED", request.currentUser, reply, body);
+    },
+  );
+
+  app.post(
+    "/recommendations/:id/reopen",
+    { preHandler: [authGuards.requirePermission("recommendations:decide")] },
+    async (request, reply) => {
+      await services.ensureFreshPlan({ syncDecisions: false });
+      const { id } = pathId.parse(request.params);
+      const body = ReopenBodySchema.parse(request.body ?? {});
+      try {
+        const reopened = await services.decisions.reopen(id, request.currentUser, body.comment);
+        if (!reopened) {
+          return reply.code(404).send(ErrorBodySchema.parse({ error: "Recommendation not found" }));
+        }
+        return LifecycleRecommendationSchema.parse(reopened);
+      } catch (err) {
+        if (err instanceof DecisionForbiddenError) {
+          return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        if (err instanceof DecisionConflictError) {
+          return reply.code(409).send(ErrorBodySchema.parse({ error: err.message }));
+        }
+        throw err;
+      }
     },
   );
 
@@ -204,11 +273,12 @@ async function decide(
   status: "APPROVED" | "REJECTED",
   user: User,
   reply: { code: (statusCode: number) => { send: (body: unknown) => unknown } },
+  opts?: { reasonCode?: string; comment?: string },
 ): Promise<unknown> {
   await services.ensureFreshPlan({ syncDecisions: false });
   const { id } = pathId.parse(params);
   try {
-    const updated = await services.decisions.decide(id, status, user);
+    const updated = await services.decisions.decide(id, status, user, opts);
     if (!updated) {
       return reply.code(404).send(ErrorBodySchema.parse({ error: "Recommendation not found" }));
     }
@@ -232,6 +302,8 @@ function cleanQuery(query: unknown): Record<string, string | undefined> {
     category: text(source.category),
     action: text(source.action),
     status: text(source.status),
+    view: text(source.view),
+    meta: text(source.meta),
   };
 }
 

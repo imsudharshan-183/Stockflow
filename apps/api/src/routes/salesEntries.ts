@@ -1,16 +1,20 @@
+import { randomUUID } from "node:crypto";
 import { isBranchInScope, scopeBranches } from "@stockflow/core";
 import type { FastifyInstance } from "fastify";
 import {
   deleteSalesEntryById,
   getSalesEntryById,
+  listImportLogs,
   listSalesEntries,
   recomputeForSku,
+  recordImportLog,
   recordSalesEntryAudit,
   updateSalesEntryById,
   upsertSalesEntry,
 } from "../db.js";
 import type { AuthContext } from "../plugins/auth.js";
 import type { StockServices } from "../services/index.js";
+import { getBahrainToday } from "../utils/bahrainDate.js";
 
 const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
 const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -49,7 +53,7 @@ function parseNumericField(raw: unknown, allowNumericString: boolean): number | 
  */
 export function validateSalesEntryInput(
   raw: unknown,
-  options: { coerceNumericStrings?: boolean } = {},
+  options: { coerceNumericStrings?: boolean; nowMs?: number } = {},
 ): { ok: true; data: ValidatedSalesEntryInput } | { ok: false; message: string } {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return { ok: false, message: "Request body must be a JSON object" };
@@ -84,7 +88,7 @@ export function validateSalesEntryInput(
       message: "Field 'date' must be a valid date string in YYYY-MM-DD format",
     };
   }
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getBahrainToday(options.nowMs).isoDate;
   if (record.date.trim() > todayIso) {
     return {
       ok: false,
@@ -357,12 +361,30 @@ export function registerSalesEntriesRoutes(
     "/sales-entries/template.csv",
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (_request, reply) => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = getBahrainToday(services.runtime.now()).isoDate;
       const csv = `branchId,sku,date,unitsSold,onHand\nBR-001,SKU-00001,${today},5,20\n`;
       return reply
         .header("Content-Type", "text/csv; charset=utf-8")
         .header("Content-Disposition", 'attachment; filename="sales-entries-template.csv"')
         .send(csv);
+    },
+  );
+
+  /**
+   * GET /api/sales/imports
+   * Recent CSV import history (admin sees all, manager/staff see only their own).
+   */
+  app.get(
+    "/sales/imports",
+    { preHandler: [authGuards.authenticate] },
+    async (request) => {
+      await services.ensureInitialized();
+      const q = (request.query ?? {}) as Record<string, unknown>;
+      const limit = Math.min(50, Math.max(1, Number(q.limit ?? 10) || 10));
+      const userId =
+        request.currentUser.role === "admin" ? undefined : request.currentUser.id;
+      const imports = await listImportLogs({ userId, limit });
+      return { imports };
     },
   );
 
@@ -413,7 +435,10 @@ export function registerSalesEntriesRoutes(
     { preHandler: [authGuards.requirePermission("sales:enter")] },
     async (request, reply) => {
       await services.ensureInitialized();
-      const validation = validateSalesEntryInput(request.body, { coerceNumericStrings: false });
+      const validation = validateSalesEntryInput(request.body, {
+        coerceNumericStrings: false,
+        nowMs: services.runtime.now(),
+      });
       if (!validation.ok) {
         return reply.code(400).send({ error: validation.message });
       }
@@ -428,7 +453,7 @@ export function registerSalesEntriesRoutes(
       }
 
       const { entry, created } = await upsertSalesEntry(validation.data);
-      services.catalog.applySalesEntryToDataset(
+      const { dateAdded } = services.catalog.applySalesEntryToDataset(
         entry.branchId,
         entry.sku,
         entry.date,
@@ -436,7 +461,7 @@ export function registerSalesEntriesRoutes(
         entry.onHand,
       );
       await recomputeForSku(entry.branchId, entry.sku);
-      await services.catalog.recomputeSingleSku(entry.sku);
+      await services.catalog.recomputeSingleSku(entry.sku, { fullPlanRecompute: dateAdded });
 
       recordSalesEntryAudit({
         id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -608,6 +633,7 @@ export function registerSalesEntriesRoutes(
       for (const item of parsedRows) {
         const validation = validateSalesEntryInput(item.record, {
           coerceNumericStrings: true,
+          nowMs: services.runtime.now(),
         });
         if (!validation.ok) {
           validatedRows.push({ ok: false, rowNumber: item.rowNumber, message: validation.message });
@@ -634,6 +660,10 @@ export function registerSalesEntriesRoutes(
       const errors: Array<{ row: number; message: string }> = [];
       const touchedPairs = new Map<string, { branchId: string; sku: string }>();
       const touchedSkus = new Set<string>();
+      const touchedBranches = new Set<string>();
+      let minDate: string | null = null;
+      let maxDate: string | null = null;
+      let anyDateAdded = false;
 
       for (const item of validatedRows) {
         if (!item.ok) {
@@ -648,13 +678,18 @@ export function registerSalesEntriesRoutes(
           updated += 1;
         }
 
-        services.catalog.applySalesEntryToDataset(
+        const applied = services.catalog.applySalesEntryToDataset(
           result.entry.branchId,
           result.entry.sku,
           result.entry.date,
           result.entry.unitsSold,
           result.entry.onHand,
         );
+        if (applied.dateAdded) anyDateAdded = true;
+
+        touchedBranches.add(result.entry.branchId);
+        if (!minDate || result.entry.date < minDate) minDate = result.entry.date;
+        if (!maxDate || result.entry.date > maxDate) maxDate = result.entry.date;
 
         const pairKey = `${result.entry.branchId}::${result.entry.sku}`;
         touchedPairs.set(pairKey, {
@@ -668,12 +703,39 @@ export function registerSalesEntriesRoutes(
       for (const pair of touchedPairs.values()) {
         await recomputeForSku(pair.branchId, pair.sku);
       }
-      for (const sku of touchedSkus) {
-        await services.catalog.recomputeSingleSku(sku, { bumpVersion: false });
+      if (anyDateAdded && touchedSkus.size > 0) {
+        const firstSku = touchedSkus.values().next().value;
+        if (firstSku) {
+          await services.catalog.recomputeSingleSku(firstSku, {
+            bumpVersion: false,
+            fullPlanRecompute: true,
+          });
+        }
+      } else {
+        for (const sku of touchedSkus) {
+          await services.catalog.recomputeSingleSku(sku, { bumpVersion: false });
+        }
       }
       if (touchedSkus.size > 0) {
         await services.commitPlanVersion();
       }
+
+      await recordImportLog({
+        id: `imp_${randomUUID()}`,
+        importedAt: new Date(services.runtime.now()).toISOString(),
+        fileName: extracted.filename || "upload.csv",
+        user: {
+          userId: request.currentUser.id,
+          name: request.currentUser.name,
+          role: request.currentUser.role,
+        },
+        inserted,
+        updated,
+        errorCount: errors.length,
+        minDate,
+        maxDate,
+        branchIds: Array.from(touchedBranches),
+      });
 
       return reply.code(200).send({
         inserted,

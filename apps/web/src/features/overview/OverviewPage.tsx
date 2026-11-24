@@ -25,27 +25,25 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
   const { selectedLocation } = useLocationScope();
   const branchParam = selectedLocation ?? undefined;
 
-  const kpis = useQuery({
-    queryKey: queryKeys.kpis(branchParam),
-    queryFn: () => api.kpis(branchParam),
-  });
-  const queue = useQuery({
-    queryKey: queryKeys.recommendations({ branch: branchParam }),
-    queryFn: () => api.recommendations({ branch: branchParam }),
+  const liveQuery = useQuery({
+    queryKey: queryKeys.kpisLive(branchParam),
+    queryFn: () => api.kpisLive(branchParam),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
   });
 
-  if (kpis.isPending) return <LoadingBlock />;
-  if (kpis.isError) {
-    return <ErrorBlock message={kpis.error.message} onRetry={() => void kpis.refetch()} />;
+  if (liveQuery.isPending) return <LoadingBlock />;
+  if (liveQuery.isError) {
+    return <ErrorBlock message={liveQuery.error.message} onRetry={() => void liveQuery.refetch()} />;
   }
 
-  const report = kpis.data;
-  const recommendations = queue.data?.recommendations ?? [];
-  const totalActions = queue.data?.total ?? 0;
-  const recommendationsLoading = queue.isPending;
-  const recommendationsError = queue.isError ? queue.error.message : null;
-  const onRetryRecommendations = () => {
-    void queue.refetch();
+  const live = liveQuery.data;
+  const report = live.report;
+  const recommendations = live.pendingRecommendations;
+  const totalActions = live.metrics.pendingActionsCount.value;
+  const onRefresh = () => {
+    void liveQuery.refetch();
   };
 
   if (isManager) {
@@ -55,9 +53,10 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
         recommendations={recommendations}
         selectedLocation={selectedLocation}
         totalActions={totalActions}
-        recommendationsLoading={recommendationsLoading}
-        recommendationsError={recommendationsError}
-        onRetryRecommendations={onRetryRecommendations}
+        live={live}
+        isRefreshing={liveQuery.isFetching}
+        onRefresh={onRefresh}
+        onRetryRecommendations={onRefresh}
       />
     );
   }
@@ -68,9 +67,10 @@ function OverviewDashboard({ isManager }: { isManager: boolean }) {
       recommendations={recommendations}
       selectedLocation={selectedLocation}
       totalActions={totalActions}
-      recommendationsLoading={recommendationsLoading}
-      recommendationsError={recommendationsError}
-      onRetryRecommendations={onRetryRecommendations}
+      live={live}
+      isRefreshing={liveQuery.isFetching}
+      onRefresh={onRefresh}
+      onRetryRecommendations={onRefresh}
     />
   );
 }

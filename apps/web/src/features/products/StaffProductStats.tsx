@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ChevronLeft, ChevronRight, Package, Search, X } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, Package, PackageCheck, Search, X } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { toast } from "sonner";
+import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import {
   STOCK_ALERT_CATEGORIES,
@@ -33,10 +34,16 @@ import {
   TableToolbar,
 } from "@/components/ui/table";
 import { useAuth } from "@/features/auth/AuthContext";
-import { queryKeys } from "@/hooks/queryKeys";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { resolveStaffActiveBranch, useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
-import { formatCover, formatDateTime, formatNumber } from "@/lib/format";
+import {
+  actionLabel,
+  alertResolutionLabel,
+  formatCover,
+  formatDateTime,
+  formatNumber,
+} from "@/lib/format";
 import {
   BAHRAIN_BRANCHES,
   CATALOG_CATEGORIES,
@@ -72,6 +79,7 @@ export function StaffProductStats() {
   const [page, setPage] = useState(1);
   const [flagTarget, setFlagTarget] = useState<Product | null>(null);
   const [flagCategory, setFlagCategory] = useState<StockAlertCategory>("CRITICAL_LOW");
+  const [flagReportedQty, setFlagReportedQty] = useState("");
   const [flagNote, setFlagNote] = useState("");
   const limit = 25;
 
@@ -113,16 +121,37 @@ export function StaffProductStats() {
   });
 
   const flagMutation = useMutation({
-    mutationFn: api.createStockAlert,
+    mutationFn: (payload: Parameters<typeof api.createStockAlert>[0]) =>
+      api.createStockAlert(payload),
     onSuccess: async (created) => {
       toast.success(`Submitted stock alert for ${created.sku}`);
       setFlagTarget(null);
       setFlagCategory("CRITICAL_LOW");
+      setFlagReportedQty("");
       setFlagNote("");
       await queryClient.invalidateQueries({ queryKey: queryKeys.stockAlerts() });
     },
     onError: (err: Error) => toast.error(err.message),
   });
+
+  const incomingDeliveriesQuery = useQuery({
+    queryKey: queryKeys.orders({ queue: "outgoing", status: "COMMITTED", branch: staffBranchId }),
+    queryFn: () =>
+      api.listOrders({ queue: "outgoing", status: "COMMITTED", branch: staffBranchId }),
+    enabled: Boolean(staffBranchId),
+  });
+
+  const receiveMutation = useMutation({
+    mutationFn: (orderId: string) =>
+      api.receiveOrder(orderId, { comment: "Confirmed received on store floor" }),
+    onSuccess: async (updated) => {
+      toast.success(`Confirmed receipt of ${formatNumber(updated.quantity)} units (${updated.sku})`);
+      await invalidateOperationalQueries(queryClient);
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to confirm receipt"),
+  });
+
+  const incomingDeliveries = incomingDeliveriesQuery.data?.orders ?? [];
 
   const branchAlerts = useMemo(
     () => (alertsQuery.data?.alerts ?? []).filter((alert) => alert.branchId === staffBranchId),
@@ -167,10 +196,16 @@ export function StaffProductStats() {
   const handleFlagSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!flagTarget || !flagNote.trim()) return;
+    const rawQty = flagReportedQty.trim();
+    const parsedReported =
+      rawQty !== "" && Number.isFinite(Number(rawQty))
+        ? Math.max(0, Math.floor(Number(rawQty)))
+        : undefined;
     flagMutation.mutate({
       branchId: staffBranchId,
       sku: flagTarget.sku,
       category: flagCategory,
+      ...(parsedReported !== undefined ? { reportedQty: parsedReported } : {}),
       note: flagNote.trim(),
     });
   };
@@ -391,6 +426,7 @@ export function StaffProductStats() {
                             setFlagCategory(
                               p.stats?.status === "AT_RISK" ? "CRITICAL_LOW" : "COUNT_MISMATCH",
                             );
+                            setFlagReportedQty("");
                             setFlagNote("");
                           }}
                         >
@@ -441,9 +477,87 @@ export function StaffProductStats() {
       <TableCard>
         <TableToolbar>
           <div>
+            <h2 className="text-sm font-semibold text-foreground">Incoming Deliveries</h2>
+            <p className="text-xs text-muted-foreground">
+              Committed shipments in transit to {staffBranchId} awaiting floor receipt confirmation
+            </p>
+          </div>
+          <Badge tone={incomingDeliveries.length > 0 ? "approved" : "ok"}>
+            {formatNumber(incomingDeliveries.length)} awaiting receipt
+          </Badge>
+        </TableToolbar>
+
+        {incomingDeliveriesQuery.isPending ? (
+          <TableSkeleton rows={2} />
+        ) : incomingDeliveriesQuery.isError ? (
+          <div className="p-6">
+            <ErrorBlock
+              message={incomingDeliveriesQuery.error.message || "Failed to load incoming deliveries"}
+              onRetry={() => void incomingDeliveriesQuery.refetch()}
+            />
+          </div>
+        ) : incomingDeliveries.length === 0 ? (
+          <div className="p-6">
+            <EmptyBlock
+              title="No incoming shipments awaiting receipt"
+              body={`Committed transfers or supplier reorders bound for ${staffBranchId} will appear here once dispatched.`}
+            />
+          </div>
+        ) : (
+          <Table className="min-w-[700px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>Product</TableHead>
+                <TableHead>Source / Type</TableHead>
+                <TableHead className="text-right">Quantity</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {incomingDeliveries.map((order) => (
+                <TableRow key={order.id}>
+                  <TableCell>
+                    <p className="font-medium text-foreground">
+                      {formatProductDisplayName(order.productName, order.sku)}
+                    </p>
+                    <p className="font-mono text-xs text-muted-foreground">{order.sku}</p>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {order.sourceBranchName
+                      ? `${order.sourceBranchName} (${actionLabel(order.type)})`
+                      : `${actionLabel(order.type)} · Supplier`}
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums text-foreground">
+                    {formatNumber(order.quantity)} units
+                  </TableCell>
+                  <TableCell>
+                    <OrderStatusBadge status={order.status} />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      disabled={receiveMutation.isPending}
+                      onClick={() => receiveMutation.mutate(order.id)}
+                    >
+                      <PackageCheck className="size-3.5" aria-hidden="true" />
+                      Confirm Receipt
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </TableCard>
+
+      <TableCard>
+        <TableToolbar>
+          <div>
             <h2 className="text-sm font-semibold text-foreground">Recent Branch Stock Alerts</h2>
             <p className="text-xs text-muted-foreground">
-              Alerts submitted at {staffBranchId} and manager review outcomes
+              Alerts submitted at {staffBranchId} and manager resolution outcomes
             </p>
           </div>
           <Badge variant="secondary">
@@ -468,14 +582,14 @@ export function StaffProductStats() {
             />
           </div>
         ) : (
-          <Table className="min-w-[720px]">
+          <Table className="min-w-[760px]">
             <TableHeader>
               <TableRow>
                 <TableHead>SKU</TableHead>
                 <TableHead>Category</TableHead>
-                <TableHead>Note</TableHead>
+                <TableHead>Note &amp; shelf count</TableHead>
                 <TableHead>Submitted</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>Status &amp; resolution</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -492,17 +606,39 @@ export function StaffProductStats() {
                   <TableCell>
                     <StockAlertCategoryBadge category={item.category} />
                   </TableCell>
-                  <TableCell className="max-w-xs truncate text-foreground">{item.note}</TableCell>
+                  <TableCell className="max-w-xs">
+                    <p className="truncate text-foreground">{item.note}</p>
+                    {item.reportedQty !== undefined ? (
+                      <p className="text-xs text-muted-foreground tabular-nums">
+                        Reported shelf count: {formatNumber(item.reportedQty)} units
+                      </p>
+                    ) : null}
+                  </TableCell>
                   <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
                     {formatDateTime(item.flaggedAt)}
                   </TableCell>
                   <TableCell>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <StockAlertStatusBadge status={item.status} />
-                      {item.status !== "PENDING" && item.decidedBy ? (
-                        <span className="text-xs text-muted-foreground">
-                          by {item.decidedBy.name}
-                        </span>
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <StockAlertStatusBadge status={item.status} />
+                        {item.resolution ? (
+                          <span className="text-xs font-medium text-foreground">
+                            {alertResolutionLabel(item.resolution.action)}
+                          </span>
+                        ) : null}
+                        {item.linkedOrderStatus ? (
+                          <OrderStatusBadge status={item.linkedOrderStatus} />
+                        ) : null}
+                        {item.status !== "PENDING" && item.decidedBy ? (
+                          <span className="text-xs text-muted-foreground">
+                            by {item.decidedBy.name}
+                          </span>
+                        ) : null}
+                      </div>
+                      {item.resolution?.comment ? (
+                        <blockquote className="border-l-2 border-border pl-2 text-xs italic text-muted-foreground">
+                          {item.resolution.comment}
+                        </blockquote>
                       ) : null}
                     </div>
                   </TableCell>
@@ -519,6 +655,7 @@ export function StaffProductStats() {
           if (!open) {
             setFlagTarget(null);
             setFlagCategory("CRITICAL_LOW");
+            setFlagReportedQty("");
             setFlagNote("");
           }
         }}
@@ -560,6 +697,21 @@ export function StaffProductStats() {
             </div>
 
             <div className="space-y-1.5">
+              <label htmlFor="critical-stock-reported-qty" className="text-xs font-medium text-foreground">
+                Physical shelf count (optional)
+              </label>
+              <Input
+                id="critical-stock-reported-qty"
+                type="number"
+                min={0}
+                step={1}
+                placeholder="Observed units on shelf"
+                value={flagReportedQty}
+                onChange={(e) => setFlagReportedQty(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-1.5">
               <label htmlFor="critical-stock-note" className="text-xs font-medium text-foreground">
                 Floor observation note
               </label>
@@ -580,6 +732,7 @@ export function StaffProductStats() {
                 onClick={() => {
                   setFlagTarget(null);
                   setFlagCategory("CRITICAL_LOW");
+                  setFlagReportedQty("");
                   setFlagNote("");
                 }}
               >

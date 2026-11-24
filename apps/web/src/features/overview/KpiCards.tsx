@@ -46,6 +46,7 @@ export function KpiCard({
   icon: Icon,
   tone,
   series,
+  deltaOverride,
   money = false,
   invertDelta = false,
   footerLabel,
@@ -57,13 +58,14 @@ export function KpiCard({
   icon: LucideIcon;
   tone: KpiTone;
   series?: number[];
+  deltaOverride?: number;
   money?: boolean;
   invertDelta?: boolean;
   footerLabel?: string;
 }) {
   const palette = TONE_STYLES[tone];
   const hasTrend = Array.isArray(series) && series.length >= 2;
-  const delta = hasTrend ? windowDelta(series) : 0;
+  const delta = deltaOverride !== undefined ? deltaOverride : hasTrend ? windowDelta(series) : 0;
   const rising = delta >= 0;
   const isFavorable = invertDelta ? !rising : rising;
 

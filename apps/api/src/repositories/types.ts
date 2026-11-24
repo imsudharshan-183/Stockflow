@@ -5,9 +5,13 @@ import type {
   AuditEntry,
   Branch,
   Dataset,
+  OrderEvent,
+  OrderStatus,
   Product,
   ProductChangeRecord,
+  ReplenishmentOrder,
   StockAlert,
+  StockAlertResolution,
 } from "@stockflow/core";
 import type { UserRepository } from "./userTypes.js";
 
@@ -20,10 +24,50 @@ export interface CachedPlanRecord {
   plan: Analysis;
 }
 
+export interface DecisionSnapshot {
+  netBenefit: number;
+  targetCoverDays: number | null;
+}
+
+export interface ActionMetaRecord extends ActionRecord {
+  reasonCode?: string;
+  comment?: string;
+  snapshot?: DecisionSnapshot;
+  rejectedUntil?: string;
+  reopenedAt?: string | null;
+}
+
+export type ApiAuditEntry = Omit<AuditEntry, "decision"> & {
+  decision: "APPROVED" | "REJECTED" | "REOPENED";
+  comment?: string;
+};
+
+export interface OrderLifecycleMeta {
+  rejectionSnapshot?: DecisionSnapshot | null;
+  rejectedUntil?: string | null;
+  reopenedAt?: string | null;
+}
+
+export type QueueLifecycleView = "pending" | "in_progress" | "decided";
+
 export interface SaveDecisionBatchResult {
   persistedIds: Set<string>;
   duplicateIds: Set<string>;
 }
+
+export type SaveOrderWithEventResult =
+  | { status: "saved"; order: ReplenishmentOrder }
+  | { status: "conflict" };
+
+export interface ResolveStockAlertOrderPayload {
+  order: ReplenishmentOrder;
+  event: OrderEvent;
+}
+
+export type ResolveStockAlertResult =
+  | { status: "resolved"; alert: StockAlert; order: ReplenishmentOrder | null }
+  | { status: "not_found" }
+  | { status: "already_decided"; alert: StockAlert };
 
 export interface StockRepository {
   readonly kind: "memory" | "mongo";
@@ -35,13 +79,22 @@ export interface StockRepository {
   bumpDataVersion(): Promise<number>;
   loadCachedPlan(dataVersion: number): Promise<CachedPlanRecord | null>;
   saveCachedPlan(dataVersion: number, plan: Analysis): Promise<void>;
-  listActions(): Promise<ActionRecord[]>;
-  saveAction(record: ActionRecord): Promise<void>;
-  saveActions(records: ActionRecord[]): Promise<void>;
-  listAudit(): Promise<AuditEntry[]>;
-  saveAudit(entry: AuditEntry): Promise<void>;
-  saveAudits(entries: AuditEntry[]): Promise<void>;
-  saveDecisionBatch(records: ActionRecord[], entries: AuditEntry[]): Promise<SaveDecisionBatchResult>;
+  listActions(): Promise<ActionMetaRecord[]>;
+  saveAction(record: ActionMetaRecord): Promise<void>;
+  saveActions(records: ActionMetaRecord[]): Promise<void>;
+  listAudit(): Promise<ApiAuditEntry[]>;
+  saveAudit(entry: ApiAuditEntry): Promise<void>;
+  saveAudits(entries: ApiAuditEntry[]): Promise<void>;
+  saveDecisionBatch(
+    records: ActionMetaRecord[],
+    entries: ApiAuditEntry[],
+    options?: { allowOverwriteIds?: ReadonlySet<string> },
+  ): Promise<SaveDecisionBatchResult>;
+  reopenAction(
+    recommendationId: string,
+    reopenedAt: string,
+    auditEntry: ApiAuditEntry,
+  ): Promise<boolean>;
   clearDecisions(): Promise<{ actionsRemoved: number; auditsRemoved: number }>;
   saveProduct(product: Product): Promise<void>;
   saveBranch(branch: Branch): Promise<void>;
@@ -62,6 +115,21 @@ export interface StockRepository {
     | { status: "not_found" }
     | { status: "already_decided"; alert: StockAlert }
   >;
+  resolveStockAlert(
+    id: string,
+    resolution: StockAlertResolution,
+    linkedOrder?: ResolveStockAlertOrderPayload,
+  ): Promise<ResolveStockAlertResult>;
+  listOrders(): Promise<ReplenishmentOrder[]>;
+  getOrder(id: string): Promise<ReplenishmentOrder | null>;
+  listOrderEvents(orderId?: string): Promise<OrderEvent[]>;
+  listOrderLifecycleMeta?(): Promise<Map<string, OrderLifecycleMeta>>;
+  saveOrderWithEvent(
+    order: ReplenishmentOrder,
+    event: OrderEvent,
+    expectedStatus: OrderStatus | null,
+    lifecycleMeta?: OrderLifecycleMeta,
+  ): Promise<SaveOrderWithEventResult>;
   ping?(): Promise<void>;
   close(): Promise<void>;
 }

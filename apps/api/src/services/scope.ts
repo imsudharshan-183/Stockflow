@@ -6,13 +6,66 @@ import {
   scopeBranches,
   type Analysis,
   type Dataset,
+  type OrderOwnership,
   type Product,
   type Recommendation,
   type RecommendationStatus,
+  type ReplenishmentOrder,
   type User,
 } from "@stockflow/core";
 
 export { isBranchInScope, scopeBranches };
+
+export function isIntraClusterTransfer(
+  user: User,
+  targetBranchId: string,
+  sourceBranchId: string | null | undefined,
+): boolean {
+  if (!sourceBranchId) return false;
+  if (user.role === "admin") return true;
+  if (user.role !== "manager") return false;
+  return isBranchInScope(user, targetBranchId) && isBranchInScope(user, sourceBranchId);
+}
+
+export function isOrderInScope(
+  order: Pick<ReplenishmentOrder, "type" | "targetBranchId" | "sourceBranchId">,
+  user?: User,
+): boolean {
+  if (!user || user.role === "admin") return true;
+  if (user.role === "staff") {
+    return isBranchInScope(user, order.targetBranchId);
+  }
+  return (
+    isBranchInScope(user, order.targetBranchId) ||
+    (order.type === "TRANSFER" && order.sourceBranchId
+      ? isBranchInScope(user, order.sourceBranchId)
+      : false)
+  );
+}
+
+export function buildOrderOwnership(
+  order: Pick<ReplenishmentOrder, "targetBranchId" | "sourceBranchId" | "requestedBy">,
+  user: User,
+  opts?: {
+    hasComment?: boolean;
+    force?: boolean;
+    targetDonorBranchId?: string | null;
+  },
+): OrderOwnership {
+  const ownsTarget = isBranchInScope(user, order.targetBranchId);
+  const ownsSource = order.sourceBranchId ? isBranchInScope(user, order.sourceBranchId) : false;
+  const intraCluster = isIntraClusterTransfer(user, order.targetBranchId, order.sourceBranchId);
+  const isRequester = order.requestedBy?.userId === user.id;
+  return {
+    ownsTarget,
+    ownsSource,
+    intraCluster,
+    isRequester,
+    hasComment: opts?.hasComment,
+    force: opts?.force,
+    targetDonorBranchId: opts?.targetDonorBranchId,
+  };
+}
 
 export function isTransferInScope(
   user: User,

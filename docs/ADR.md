@@ -20,6 +20,8 @@ This document records the numbered architectural decisions (`ADR-001`+), trade-o
 | [ADR-012](#adr-012-critical-stock-escalations-stock_alerts-with-staff-flagging-and-immutable-manager-review) | Critical Stock Escalations (`stock_alerts`) | Split `stock:flag` (staff create) and `stock:flag:decide` (scoped manager/admin immutable approval). |
 | [ADR-013](#adr-013-non-mutating-committeddeltas-approval-ledger-pure-project-and-409-over-allocation-conflict-guard) | Non-Mutating `committedDeltas` Ledger & `409` Guard | Project live `reserved`/`inTransit` overlays via pure `project()`, guard donor over-allocation (`409`), and replay on boot. |
 | [ADR-014](#adr-014-modular-domain-services-with-shared-stockruntimestate-composition-root) | Split Domain Services & Composition Root | Replace monolithic `StockService` with `KpiService`, `CatalogService`, `StockAlertService`, and `DecisionService` sharing `StockRuntimeState`. |
+| [ADR-015](#adr-015-structured-stock-alert-resolution-atomic-order-escalation-and-live-adjustment-overlay) | Alert Resolution & Live Adjustment Overlay | Replace binary alert decisions with 4 structured resolutions, atomic `ALERT_ESCALATION` order creation, and non-mutating `LOGGED_ADJUSTMENT` overlays. |
+| [ADR-016](#adr-016-unified-replenishmentorder-pipeline-two-party-cross-cluster-handshake-and-lazy-materialization) | Unified Order Pipeline & Two-Party Handshake | Replace disconnected decision/request/alert queues with `ReplenishmentOrder`, immutable `OrderEvent`s, lazy materialization, and `RECEIVED` `inTransit` clearing. |
 
 ---
 
@@ -296,3 +298,54 @@ Over successive iterations (`ADR-002`, `ADR-007`, `ADR-012`, `ADR-013`), `apps/a
 3. **Bi-Directional Cache & Ledger Invalidation**:
    - `DecisionService` (`decide()`, `decideBatch()`) clears `runtime.scopedKpiCache` on persisted decisions so `GET /api/kpis` reflects changes immediately.
    - `CatalogService` (`recomputeSingleSku()`, `recomputeAnalysisForProduct()`) updates `runtime.analysis` and clears SKU `committedDeltas`, `committedRecommendationIds`, and `runtime.scopedKpiCache`, verified continuously by [cacheInvalidation.test.ts](../apps/api/src/__tests__/cacheInvalidation.test.ts).
+
+---
+
+## ADR-015: Structured Stock Alert Resolution, Atomic Order Escalation, and Live Adjustment Overlay
+
+### Context
+Prior to Stage C (`ADR-012`), `PATCH /api/stock-alerts/:id/approve` only flipped alert status to `APPROVED` without creating any replenishment order or updating live inventory projections when floor staff reported physical shrinkage or cycle-count discrepancies. Mutating `Dataset.onHand` directly on a manager click to record shrinkage would silently bump `dataVersion`, recompute and overwrite `plan_cache`, and invalidate cached baseline metrics across the network.
+
+### Decision
+1. **Structured Resolution Contract (`POST /api/stock-alerts/:id/resolve`)**:
+   - Extended `StockAlertSchema` with optional `reportedQty`, `status: "RESOLVED"`, structured `resolution: { action, linkedOrderId?, adjustedOnHand?, adjustmentDelta?, comment?, decidedBy, decidedAt }`, and dynamic read-time `linkedOrderStatus`.
+   - Enforces the same conditional atomic `{ id, status: "PENDING" }` immutability guarantee as legacy endpoints (`409 Conflict` on repeat resolve or legacy approve/reject), and requires a non-empty `comment` for `DISMISSED`.
+2. **Atomic `CONVERTED_TO_REQUEST` Escalation**:
+   - Resolving an alert with `CONVERTED_TO_REQUEST` atomically marks the alert `RESOLVED` (`resolution.linkedOrderId = order.id`) and persists a new `ReplenishmentOrder` (`origin: "ALERT_ESCALATION"`, `linkedAlertId: alert.id`, initial status `OPEN_REQUEST` or `AWAITING_DONOR` if a donor branch is selected) plus its initial `CREATED` `OrderEvent` inside the same MongoDB transaction (with standalone-mongod and `InMemoryRepository` compensating rollback).
+   - Because `OPEN_REQUEST` and `AWAITING_DONOR` are intent states, converting an alert does not reserve donor stock or modify `committedDeltas` until the order transitions into `COMMITTED`.
+3. **Live `LOGGED_ADJUSTMENT` Overlay Without Silent `dataVersion` Bump**:
+   - `CommittedDelta` in `packages/core/src/engine/projection.ts` carries an optional additive `adjustment` field applied cleanly in `projectPosition()` before classifying `OVERSTOCK`/`AT_RISK`/`HEALTHY` and computing `surplus`, `need`, and `lostUnits`.
+   - Resolving an alert with `LOGGED_ADJUSTMENT` (using `adjustmentDelta`, `adjustedOnHand`, or fallback `alert.reportedQty`) records `{ adjustmentDelta, adjustedOnHand }` in the alert's `resolution`, updates `runtime.committedDeltas` and `runtime.alertAdjustments`, and clears `runtime.scopedKpiCache` **without bumping `dataVersion` or rewriting `plan_cache`**.
+   - On server startup (and after any subsequent `dataVersion` plan refresh), `StockAlertService.syncLoggedAdjustments()` replays post-`planComputedAt` `LOGGED_ADJUSTMENT` resolutions into `committedDeltas` so restarts preserve live physical counts until the next authoritative sales/catalog write bumps `dataVersion`.
+
+---
+
+## ADR-016: Unified ReplenishmentOrder Pipeline, Two-Party Cross-Cluster Handshake, and Lazy Materialization
+
+### Context
+Prior to the Stage B–E redesign, three operational workflows lived in separate, disconnected paths:
+1. Stock alert approvals (`PATCH /api/stock-alerts/:id/approve`) changed alert status without creating a replenishment order or updating stock projections (`ADR-015`).
+2. Cross-branch transfer recommendations allowed either unilateral pulls across clusters or bottlenecked on Admin intervention, with no structured donor release/decline flow.
+3. Manual manager stock requests lived outside the morning recommendation queue and lacked donor ranking or unified audit history.
+
+### Decision
+1. **Unified `ReplenishmentOrder` & Immutable `OrderEvent` Trail (`packages/core/src/orders.ts`)**:
+   - Introduced one canonical order model covering `OrderOrigin` (`ENGINE | MANAGER_REQUEST | ALERT_ESCALATION`), `OrderType` (`TRANSFER | REORDER | MARKDOWN`), `OrderStatus` (`SUGGESTED | OPEN_REQUEST | AWAITING_DONOR | COMMITTED | RECEIVED | REJECTED | CANCELLED`), `ActorRef`, `OrderEvent`, and `ReplenishmentOrder`.
+   - Persisted orders and events in `replenishment_orders` and `order_events` collections (`MongoRepository` and `InMemoryRepository`), with unique `id` indexes plus query indexes on `status`, `(targetBranchId, status)`, `(sourceBranchId, status)`, and `linkedAlertId`.
+   - Every state transition appends an immutable `OrderEvent` in the same MongoDB transaction as the order update (with standalone-`mongod` and `InMemoryRepository` compensating rollback). `engineSnapshot.reasonCodes` is strictly read-only; human justification is recorded solely in `event.dispositionCode` and `event.comment`.
+2. **Pure Additive Core Extensions (`rankDonorCandidates` & `canTransition`)**:
+   - Exported pure `rankDonorCandidates(dataset, committedDeltas, sku, targetBranchId, qty, opts?)` in `packages/core/src/engine/donorRanking.ts` reusing `projectPosition()`, Haversine distance, and `TotalTransferCost(Q, D)` without modifying any frozen engine files or golden snapshots (`ADR-001`). Donors must keep at least 30 days of cover plus safety stock after release, exclude reserved units in `committedDeltas`, cap partial quantities, and rank by `netBenefitBhd desc`, `donorCoverDaysAfter desc`, and `branchIndex asc`.
+   - Exported pure transition table and `canTransition(order, actor, action, ownership)` guard in `packages/core/src/orders.ts`, distinguishing intra-cluster transfers (all branches within the manager's cluster via `scope.ts`) from cross-cluster handshakes.
+3. **Two-Party Cross-Cluster Handshake, `409` Surplus Guard & 24h Escalation**:
+   - `SUGGESTED`, `OPEN_REQUEST`, and `AWAITING_DONOR` are intent states and never touch `committedDeltas`.
+   - Cross-cluster transfers require receiving manager request (`REQUEST_TRANSFER` -> `AWAITING_DONOR`) followed by donor manager review and either release (`COMMIT` -> `COMMITTED`) or decline with required comment (`DECLINE`). Unanswered `AWAITING_DONOR` orders auto-escalate after 24 hours (`ESCALATE`, `DONOR_TIMEOUT_24H`). Admin force-commits at non-terminal stages require a non-empty `comment`.
+   - Moving into `COMMITTED` runs a synchronous check against live `committedDeltas` (`409 Conflict` on donor over-allocation), writes `donor.reserved += qty` and `target.inTransit += qty` (or `target.inTransit += qty` for `REORDER`, `target.reserved += qty` for `MARKDOWN`), and clears `scopedKpiCache`. Donor-branch managers see incoming transfers where their branch is the donor; out-of-scope order IDs return `404`.
+4. **Lazy Materialization & Legacy Decision Compatibility**:
+   - Engine recommendations stay virtual as `SUGGESTED` (`isVirtual: true`) without writing database rows until the first human action materializes them in `replenishment_orders` under their deterministic recommendation ID; manual and alert-escalated orders use UUIDs (`ord_<uuid>`).
+   - Startup idempotently migrates existing legacy `actions`/`audits` into `replenishment_orders` and `MIGRATED` events, while legacy `/api/recommendations/:id/decide` endpoints delegate through `OrderService` as thin adapters.
+5. **`RECEIVED` Clears `inTransit` Without Bumping `dataVersion`**:
+   - Receiving-branch managers or store staff confirm delivery via `POST /api/orders/:id/receive` (`COMMITTED -> RECEIVED`), which decrements `target.inTransit -= qty` and clears `scopedKpiCache` while preserving `donor.reserved` until the next authoritative sales/catalog write bumps `dataVersion`.
+   - Boot replay (`OrderService.replayOrdersIntoCommittedDeltas()`) mirrors this rule (`clearInTransitOnReceipt = order.status === "RECEIVED"`), preserving live inventory projections across restarts without bumping `dataVersion` or rewriting `plan_cache` (`ADR-013`, `ADR-015`).
+6. **Stage 0 Security Hardening & Stage D Unified UI**:
+   - Added `authenticate` + `requirePermission("sales:enter")` + branch scoping across all `/api/sales-entries*` endpoints and fixed `/api/kpis` scope leakage (`403`/`404` enforcement).
+   - Updated `apps/web` with the 3-tab `/queue` (`Suggested & Intra-cluster`, `Incoming Pull Requests`, `My Outgoing Requests`), ranked `DonorPicker` modal, structured alert `Resolve` dialog, staff `Incoming Deliveries` receipt confirmation, and chronological order-threaded `/audit` view.

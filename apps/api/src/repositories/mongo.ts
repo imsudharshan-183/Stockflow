@@ -1,46 +1,65 @@
 import {
-  ActionRecordSchema,
-  AuditEntrySchema,
+  BranchSchema,
   DEFAULT_POLICY,
   KpiSummarySchema,
+  OrderEventSchema,
   PositionStatusSchema,
   RecommendationSchema,
+  ReplenishmentOrderSchema,
+  StockAlertResolutionSchema,
   StockAlertSchema,
   analyze,
   generateDataset,
   ProductChangeRecordSchema,
   type ActedBy,
-  type ActionRecord,
   type Analysis,
-  type AuditEntry,
   type Branch,
   type Dataset,
+  type OrderEvent,
+  type OrderStatus,
   type Product,
   type ProductChangeRecord,
+  type ReplenishmentOrder,
   type StockAlert,
+  type StockAlertResolution,
 } from "@stockflow/core";
 import { gunzipSync, gzipSync } from "node:zlib";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { clearMemorySalesEntries } from "../db.js";
+import { ActionMetaRecordSchema, ApiAuditEntrySchema } from "../services/queueLifecycle.js";
 import {
   ActionModel,
   AuditModel,
+  BranchModel,
   DataVersionModel,
   FactModel,
+  ImportLogModel,
   MetaModel,
   MetaShape,
+  OrderEventModel,
   PlanCacheModel,
   PlanModel,
   ProductChangeModel,
   RefreshTokenModel,
+  ReplenishmentOrderModel,
   SalesEntryModel,
   SeriesModel,
   SeriesShape,
   StockAlertModel,
   UserModel,
 } from "./models.js";
-import type { CachedPlanRecord, SaveDecisionBatchResult, StockRepository } from "./types.js";
+import type {
+  ActionMetaRecord,
+  ApiAuditEntry,
+  CachedPlanRecord,
+  OrderLifecycleMeta,
+  ResolveStockAlertOrderPayload,
+  ResolveStockAlertResult,
+  SaveDecisionBatchResult,
+  SaveOrderWithEventResult,
+  StockRepository,
+} from "./types.js";
 import { MongoUserRepository } from "./mongoUser.js";
 import { getInitialSeedUsers } from "./seedData.js";
 
@@ -107,8 +126,12 @@ export class MongoRepository implements StockRepository {
           await FactModel.createIndexes();
           await SeriesModel.createIndexes();
           await SalesEntryModel.createIndexes();
+          await ImportLogModel.createIndexes();
+          await BranchModel.createIndexes();
           await PlanCacheModel.createIndexes();
           await StockAlertModel.createIndexes();
+          await ReplenishmentOrderModel.createIndexes();
+          await OrderEventModel.createIndexes();
         });
       pending.catch(() => {
         if (globalCache.__stockflowMongo?.pending === pending) delete globalCache.__stockflowMongo;
@@ -147,10 +170,17 @@ export class MongoRepository implements StockRepository {
         dropIfExists(RefreshTokenModel),
         dropIfExists(SalesEntryModel),
         dropIfExists(StockAlertModel),
+        dropIfExists(ReplenishmentOrderModel),
+        dropIfExists(OrderEventModel),
+        dropIfExists(ImportLogModel),
+        dropIfExists(BranchModel),
         dropIfExists(UserModel),
         dropCollectionByName("products"),
         dropCollectionByName("sales_entries"),
+        dropCollectionByName("import_log"),
         dropCollectionByName("stock_alerts"),
+        dropCollectionByName("replenishment_orders"),
+        dropCollectionByName("order_events"),
         dropCollectionByName("branches"),
         dropCollectionByName("audits"),
         dropCollectionByName("product_changes"),
@@ -163,11 +193,21 @@ export class MongoRepository implements StockRepository {
     await FactModel.createIndexes();
     await SeriesModel.createIndexes();
     await SalesEntryModel.createIndexes();
+    await ImportLogModel.createIndexes();
+    await BranchModel.createIndexes();
     await PlanCacheModel.createIndexes();
     await ActionModel.createIndexes();
     await ProductChangeModel.createIndexes();
     await StockAlertModel.createIndexes();
+    await ReplenishmentOrderModel.createIndexes();
+    await OrderEventModel.createIndexes();
     const data = customDataset ?? generateDataset();
+    if (data.branches.length > 0) {
+      for (const b of data.branches) {
+        const parsed = BranchSchema.parse(b);
+        await BranchModel.findOneAndUpdate({ id: parsed.id }, { $set: parsed }, { upsert: true });
+      }
+    }
     await this.persist(data);
     const initialAnalysis = analyze(data, DEFAULT_POLICY);
     await this.saveAnalysis(initialAnalysis);
@@ -182,9 +222,29 @@ export class MongoRepository implements StockRepository {
 
   async loadDataset(): Promise<Dataset> {
     await this.ensureConnected();
-    const existing: unknown = await MetaModel.findById("dataset").lean();
+    const [existing, branchDocs] = await Promise.all([
+      MetaModel.findById("dataset").lean(),
+      BranchModel.find().lean(),
+    ]);
     if (existing === null) throw new Error("MongoDB has no seeded dataset. Run pnpm seed:mongo.");
-    return this.read(MetaShape.parse(existing));
+    const meta = MetaShape.parse(existing);
+    if (branchDocs.length > 0) {
+      const byId = new Map<string, z.infer<typeof BranchSchema>>();
+      for (const doc of branchDocs) {
+        const parsed = BranchSchema.parse(doc);
+        byId.set(parsed.id, parsed);
+      }
+      const merged: z.infer<typeof BranchSchema>[] = meta.branches.map((b) => byId.get(b.id) ?? b);
+      const seenIds = new Set(merged.map((b) => b.id));
+      for (const b of byId.values()) {
+        if (!seenIds.has(b.id)) {
+          merged.push(b);
+          seenIds.add(b.id);
+        }
+      }
+      meta.branches = merged;
+    }
+    return this.read(meta);
   }
 
   async loadAnalysis(): Promise<Analysis | null> {
@@ -251,43 +311,48 @@ export class MongoRepository implements StockRepository {
     );
   }
 
-  async listActions(): Promise<ActionRecord[]> {
+  async listActions(): Promise<ActionMetaRecord[]> {
     await this.ensureConnected();
     const rows: unknown = await ActionModel.find().lean();
     if (!Array.isArray(rows)) throw new Error("action query failed");
-    return rows.map((row) => ActionRecordSchema.parse(row));
+    return rows.map((row) => normalizeActionRow(row as Record<string, unknown>));
   }
 
-  async saveAction(record: ActionRecord): Promise<void> {
+  async saveAction(record: ActionMetaRecord): Promise<void> {
     await this.ensureConnected();
-    await ActionModel.create(ActionRecordSchema.parse(record));
+    const parsed = stripUndefinedKeys(ActionMetaRecordSchema.parse(record));
+    await ActionModel.create(parsed);
   }
 
-  async saveActions(records: ActionRecord[]): Promise<void> {
+  async saveActions(records: ActionMetaRecord[]): Promise<void> {
     if (records.length === 0) return;
     await this.ensureConnected();
-    await ActionModel.insertMany(records.map((record) => ActionRecordSchema.parse(record)));
+    await ActionModel.insertMany(
+      records.map((record) => stripUndefinedKeys(ActionMetaRecordSchema.parse(record))),
+    );
   }
 
-  async listAudit(): Promise<AuditEntry[]> {
+  async listAudit(): Promise<ApiAuditEntry[]> {
     await this.ensureConnected();
     const rows: unknown = await AuditModel.find().lean();
     if (!Array.isArray(rows)) throw new Error("audit query failed");
-    return rows.map((row) => AuditEntrySchema.parse(row));
+    return rows.map((row) => normalizeAuditRow(row as Record<string, unknown>));
   }
 
-  async saveAudit(entry: AuditEntry): Promise<void> {
+  async saveAudit(entry: ApiAuditEntry): Promise<void> {
     await this.ensureConnected();
-    await AuditModel.create(AuditEntrySchema.parse(entry));
+    await AuditModel.create(stripUndefinedKeys(ApiAuditEntrySchema.parse(entry)));
   }
 
-  async saveAudits(entries: AuditEntry[]): Promise<void> {
+  async saveAudits(entries: ApiAuditEntry[]): Promise<void> {
     if (entries.length === 0) return;
     await this.ensureConnected();
-    await AuditModel.insertMany(entries.map((entry) => AuditEntrySchema.parse(entry)));
+    await AuditModel.insertMany(
+      entries.map((entry) => stripUndefinedKeys(ApiAuditEntrySchema.parse(entry))),
+    );
   }
 
-  private async extractDuplicateRecIds(error: unknown, pendingRecords: ActionRecord[]): Promise<Set<string> | null> {
+  private async extractDuplicateRecIds(error: unknown, pendingRecords: ActionMetaRecord[]): Promise<Set<string> | null> {
     const dupIds = new Set<string>();
     const err = error as {
       code?: number;
@@ -334,47 +399,84 @@ export class MongoRepository implements StockRepository {
     );
   }
 
-  async saveDecisionBatch(records: ActionRecord[], entries: AuditEntry[]): Promise<SaveDecisionBatchResult> {
+  async saveDecisionBatch(
+    records: ActionMetaRecord[],
+    entries: ApiAuditEntry[],
+    options?: { allowOverwriteIds?: ReadonlySet<string> },
+  ): Promise<SaveDecisionBatchResult> {
     const persistedIds = new Set<string>();
     const duplicateIds = new Set<string>();
     if (records.length === 0) return { persistedIds, duplicateIds };
     await this.ensureConnected();
 
-    const entryByRecId = new Map(entries.map((e) => [e.recommendationId, AuditEntrySchema.parse(e)]));
-    let pendingRecords: ActionRecord[] = [];
+    const allowOverwrite = options?.allowOverwriteIds;
+    const entryByRecId = new Map(
+      entries.map((e) => [e.recommendationId, stripUndefinedKeys(ApiAuditEntrySchema.parse(e))]),
+    );
+    const overwriteRecords: ActionMetaRecord[] = [];
+    let pendingRecords: ActionMetaRecord[] = [];
     const seen = new Set<string>();
     for (const raw of records) {
-      const parsed = ActionRecordSchema.parse(raw);
+      const parsed = stripUndefinedKeys(ActionMetaRecordSchema.parse(raw));
       if (seen.has(parsed.recommendationId)) {
         duplicateIds.add(parsed.recommendationId);
         continue;
       }
       seen.add(parsed.recommendationId);
-      pendingRecords.push(parsed);
+      if (allowOverwrite?.has(parsed.recommendationId)) {
+        overwriteRecords.push(parsed);
+      } else {
+        pendingRecords.push(parsed);
+      }
     }
 
     const session = await mongoose.startSession();
     let useTransaction = true;
     try {
-      while (pendingRecords.length > 0 && useTransaction) {
-        const pendingEntries = pendingRecords.map((r) => {
+      while ((pendingRecords.length > 0 || overwriteRecords.length > 0) && useTransaction) {
+        const allThisRound = [...pendingRecords, ...overwriteRecords];
+        const pendingEntries = allThisRound.map((r) => {
           const e = entryByRecId.get(r.recommendationId);
           if (!e) throw new Error(`Missing audit entry for ${r.recommendationId}`);
           return e;
         });
         try {
           await session.withTransaction(async () => {
-            await ActionModel.insertMany(pendingRecords, { ordered: false, session });
+            if (pendingRecords.length > 0) {
+              await ActionModel.insertMany(pendingRecords, { ordered: false, session });
+            }
+            for (const rec of overwriteRecords) {
+              await ActionModel.findOneAndUpdate(
+                { recommendationId: rec.recommendationId },
+                {
+                  $set: {
+                    id: rec.id,
+                    status: rec.status,
+                    decidedAt: rec.decidedAt,
+                    reasonCode: rec.reasonCode ?? null,
+                    comment: rec.comment ?? null,
+                    snapshot: rec.snapshot ?? null,
+                    rejectedUntil: rec.rejectedUntil ?? null,
+                    reopenedAt: rec.reopenedAt ?? null,
+                  },
+                },
+                { upsert: true, session },
+              );
+            }
             await AuditModel.insertMany(pendingEntries, { session });
           });
-          for (const r of pendingRecords) persistedIds.add(r.recommendationId);
+          for (const r of allThisRound) persistedIds.add(r.recommendationId);
           pendingRecords = [];
+          overwriteRecords.length = 0;
         } catch (err) {
           if (this.isTransactionUnsupported(err)) {
             useTransaction = false;
             break;
           }
-          const dup = await this.extractDuplicateRecIds(err, pendingRecords);
+          const dup =
+            pendingRecords.length > 0
+              ? await this.extractDuplicateRecIds(err, pendingRecords)
+              : null;
           if (!dup) throw err;
           for (const id of dup) duplicateIds.add(id);
           pendingRecords = pendingRecords.filter((r) => !dup.has(r.recommendationId));
@@ -386,35 +488,104 @@ export class MongoRepository implements StockRepository {
 
     // Fallback for standalone MongoDB without replica-set transactions:
     // Write audit entries first, then actions; clean up audit rows for duplicate actions.
-    if (!useTransaction && pendingRecords.length > 0) {
-      const pendingEntries = pendingRecords.map((r) => {
+    if (!useTransaction && (pendingRecords.length > 0 || overwriteRecords.length > 0)) {
+      const allThisRound = [...pendingRecords, ...overwriteRecords];
+      const pendingEntries = allThisRound.map((r) => {
         const e = entryByRecId.get(r.recommendationId);
         if (!e) throw new Error(`Missing audit entry for ${r.recommendationId}`);
         return e;
       });
       await AuditModel.insertMany(pendingEntries, { ordered: false });
-      try {
-        await ActionModel.insertMany(pendingRecords, { ordered: false });
-        for (const r of pendingRecords) persistedIds.add(r.recommendationId);
-      } catch (err) {
-        const dup = await this.extractDuplicateRecIds(err, pendingRecords);
-        if (!dup) throw err;
-        for (const id of dup) duplicateIds.add(id);
-        const dupAuditIds: string[] = [];
-        for (const r of pendingRecords) {
-          if (dup.has(r.recommendationId)) {
-            dupAuditIds.push(r.id);
-          } else {
-            persistedIds.add(r.recommendationId);
+      for (const rec of overwriteRecords) {
+        await ActionModel.findOneAndUpdate(
+          { recommendationId: rec.recommendationId },
+          {
+            $set: {
+              id: rec.id,
+              status: rec.status,
+              decidedAt: rec.decidedAt,
+              reasonCode: rec.reasonCode ?? null,
+              comment: rec.comment ?? null,
+              snapshot: rec.snapshot ?? null,
+              rejectedUntil: rec.rejectedUntil ?? null,
+              reopenedAt: rec.reopenedAt ?? null,
+            },
+          },
+          { upsert: true },
+        );
+        persistedIds.add(rec.recommendationId);
+      }
+      if (pendingRecords.length > 0) {
+        try {
+          await ActionModel.insertMany(pendingRecords, { ordered: false });
+          for (const r of pendingRecords) persistedIds.add(r.recommendationId);
+        } catch (err) {
+          const dup = await this.extractDuplicateRecIds(err, pendingRecords);
+          if (!dup) throw err;
+          for (const id of dup) duplicateIds.add(id);
+          const dupAuditIds: string[] = [];
+          for (const r of pendingRecords) {
+            if (dup.has(r.recommendationId)) {
+              dupAuditIds.push(r.id);
+            } else {
+              persistedIds.add(r.recommendationId);
+            }
           }
-        }
-        if (dupAuditIds.length > 0) {
-          await AuditModel.deleteMany({ id: { $in: dupAuditIds } });
+          if (dupAuditIds.length > 0) {
+            await AuditModel.deleteMany({ id: { $in: dupAuditIds } });
+          }
         }
       }
     }
 
     return { persistedIds, duplicateIds };
+  }
+
+  async reopenAction(
+    recommendationId: string,
+    reopenedAt: string,
+    auditEntry: ApiAuditEntry,
+  ): Promise<boolean> {
+    await this.ensureConnected();
+    const parsedEntry = stripUndefinedKeys(ApiAuditEntrySchema.parse(auditEntry));
+    const existing = await ActionModel.findOne({ recommendationId }).lean();
+    if (!existing) return false;
+
+    const session = await mongoose.startSession();
+    let useTransaction = true;
+    let updatedFlag = false;
+    try {
+      await session.withTransaction(async () => {
+        const res = await ActionModel.findOneAndUpdate(
+          { recommendationId },
+          { $set: { reopenedAt } },
+          { new: true, session },
+        ).lean();
+        if (!res) return;
+        updatedFlag = true;
+        await AuditModel.create([parsedEntry], { session });
+      });
+    } catch (err) {
+      if (this.isTransactionUnsupported(err)) {
+        useTransaction = false;
+      } else {
+        throw err;
+      }
+    } finally {
+      await session.endSession();
+    }
+
+    if (useTransaction) return updatedFlag;
+
+    const prevReopenedAt = existing.reopenedAt ?? null;
+    await ActionModel.updateOne({ recommendationId }, { $set: { reopenedAt } });
+    try {
+      await AuditModel.create(parsedEntry);
+    } catch (err) {
+      await ActionModel.updateOne({ recommendationId }, { $set: { reopenedAt: prevReopenedAt } });
+      throw err;
+    }
+    return true;
   }
 
   async saveProduct(product: Product): Promise<void> {
@@ -433,14 +604,20 @@ export class MongoRepository implements StockRepository {
 
   async saveBranch(branch: Branch): Promise<void> {
     await this.ensureConnected();
+    const parsed = BranchSchema.parse(branch);
+    await BranchModel.findOneAndUpdate(
+      { id: parsed.id },
+      { $set: parsed },
+      { upsert: true },
+    );
     const updated = await MetaModel.updateOne(
-      { _id: "dataset", "branches.id": branch.id },
-      { $set: { "branches.$": branch } },
+      { _id: "dataset", "branches.id": parsed.id },
+      { $set: { "branches.$": parsed } },
     );
     if (updated.matchedCount === 0) {
       await MetaModel.updateOne(
         { _id: "dataset" },
-        { $push: { branches: branch } },
+        { $push: { branches: parsed } },
       );
     }
   }
@@ -488,6 +665,8 @@ export class MongoRepository implements StockRepository {
     const [actionsRes, auditsRes] = await Promise.all([
       ActionModel.deleteMany({}),
       AuditModel.deleteMany({}),
+      ReplenishmentOrderModel.deleteMany({}),
+      OrderEventModel.deleteMany({}),
     ]);
     return {
       actionsRemoved: actionsRes.deletedCount ?? 0,
@@ -541,6 +720,309 @@ export class MongoRepository implements StockRepository {
       return { status: "not_found" };
     }
     return { status: "already_decided", alert: StockAlertSchema.parse(existing) };
+  }
+
+  async resolveStockAlert(
+    id: string,
+    resolution: StockAlertResolution,
+    linkedOrder?: ResolveStockAlertOrderPayload,
+  ): Promise<ResolveStockAlertResult> {
+    await this.ensureConnected();
+    // Strip undefined own properties so Schema.Types.Mixed never persists them as BSON null.
+    const parsedResolution = stripUndefinedKeys(StockAlertResolutionSchema.parse(resolution));
+
+    let preparedOrder: { orderDoc: Omit<ReplenishmentOrder, "events">; parsedEvent: OrderEvent } | null =
+      null;
+    if (linkedOrder) {
+      const parsedOrder = ReplenishmentOrderSchema.parse({ ...linkedOrder.order, events: [] });
+      const parsedEvent = OrderEventSchema.parse(linkedOrder.event);
+      const { events: _events, ...orderDoc } = parsedOrder;
+      preparedOrder = { orderDoc, parsedEvent };
+    }
+
+    const session = await mongoose.startSession();
+    let useTransaction = true;
+    let txResult: ResolveStockAlertResult | null = null;
+    let updatedAlertDoc: unknown = null;
+
+    try {
+      await session.withTransaction(async () => {
+        const updated = await StockAlertModel.findOneAndUpdate(
+          { id, status: "PENDING" },
+          {
+            $set: {
+              status: "RESOLVED",
+              decidedBy: parsedResolution.decidedBy,
+              decidedAt: parsedResolution.decidedAt,
+              resolution: parsedResolution,
+            },
+          },
+          { new: true, session },
+        ).lean();
+        if (!updated) {
+          throw new AlertNotPendingConflict();
+        }
+        updatedAlertDoc = updated;
+        if (preparedOrder) {
+          await ReplenishmentOrderModel.create([preparedOrder.orderDoc], { session });
+          await OrderEventModel.create([preparedOrder.parsedEvent], { session });
+        }
+      });
+
+      const alert = StockAlertSchema.parse(updatedAlertDoc);
+      const order = preparedOrder ? await this.getOrder(preparedOrder.orderDoc.id) : null;
+      txResult = { status: "resolved", alert, order };
+    } catch (err) {
+      if (err instanceof AlertNotPendingConflict) {
+        const existing = await StockAlertModel.findOne({ id }).lean();
+        txResult = existing
+          ? { status: "already_decided", alert: StockAlertSchema.parse(existing) }
+          : { status: "not_found" };
+      } else if (this.isTransactionUnsupported(err)) {
+        useTransaction = false;
+      } else {
+        throw err;
+      }
+    } finally {
+      await session.endSession();
+    }
+
+    if (useTransaction && txResult) {
+      return txResult;
+    }
+
+    // Fallback for standalone MongoDB without replica-set transactions:
+    // Compensate alert status + order doc manually if creating the linked order or event fails.
+    const updated = await StockAlertModel.findOneAndUpdate(
+      { id, status: "PENDING" },
+      {
+        $set: {
+          status: "RESOLVED",
+          decidedBy: parsedResolution.decidedBy,
+          decidedAt: parsedResolution.decidedAt,
+          resolution: parsedResolution,
+        },
+      },
+      { new: true },
+    ).lean();
+    if (!updated) {
+      const existing = await StockAlertModel.findOne({ id }).lean();
+      if (!existing) {
+        return { status: "not_found" };
+      }
+      return { status: "already_decided", alert: StockAlertSchema.parse(existing) };
+    }
+
+    if (preparedOrder) {
+      let orderInserted = false;
+      try {
+        await ReplenishmentOrderModel.create(preparedOrder.orderDoc);
+        orderInserted = true;
+        await OrderEventModel.create(preparedOrder.parsedEvent);
+      } catch (err) {
+        if (orderInserted) {
+          await ReplenishmentOrderModel.deleteOne({ id: preparedOrder.orderDoc.id });
+        }
+        await StockAlertModel.updateOne(
+          { id },
+          {
+            $set: {
+              status: "PENDING",
+              decidedBy: null,
+              decidedAt: null,
+              resolution: null,
+            },
+          },
+        );
+        throw err;
+      }
+    }
+
+    const alert = StockAlertSchema.parse(updated);
+    const order = preparedOrder ? await this.getOrder(preparedOrder.orderDoc.id) : null;
+    return { status: "resolved", alert, order };
+  }
+
+  private isDuplicateKeyError(error: unknown): boolean {
+    const err = error as { code?: number; message?: string };
+    return err.code === 11000 || (typeof err.message === "string" && err.message.includes("E11000"));
+  }
+
+  async listOrders(): Promise<ReplenishmentOrder[]> {
+    await this.ensureConnected();
+    const [orderRows, eventRows] = await Promise.all([
+      ReplenishmentOrderModel.find().lean(),
+      OrderEventModel.find().sort({ at: 1 }).lean(),
+    ]);
+    const eventsByOrder = new Map<string, OrderEvent[]>();
+    for (const row of eventRows) {
+      const parsed = OrderEventSchema.parse(row);
+      const list = eventsByOrder.get(parsed.orderId) ?? [];
+      list.push(parsed);
+      eventsByOrder.set(parsed.orderId, list);
+    }
+    return orderRows.map((row) =>
+      ReplenishmentOrderSchema.parse({
+        ...row,
+        events: eventsByOrder.get(String(row.id)) ?? [],
+      }),
+    );
+  }
+
+  async getOrder(id: string): Promise<ReplenishmentOrder | null> {
+    await this.ensureConnected();
+    const [row, eventRows] = await Promise.all([
+      ReplenishmentOrderModel.findOne({ id }).lean(),
+      OrderEventModel.find({ orderId: id }).sort({ at: 1 }).lean(),
+    ]);
+    if (!row) return null;
+    const events = eventRows.map((e) => OrderEventSchema.parse(e));
+    return ReplenishmentOrderSchema.parse({ ...row, events });
+  }
+
+  async listOrderEvents(orderId?: string): Promise<OrderEvent[]> {
+    await this.ensureConnected();
+    const filter = orderId ? { orderId } : {};
+    const rows = await OrderEventModel.find(filter).sort({ at: 1 }).lean();
+    return rows.map((row) => OrderEventSchema.parse(row));
+  }
+
+  async listOrderLifecycleMeta(): Promise<Map<string, OrderLifecycleMeta>> {
+    await this.ensureConnected();
+    const rows = await ReplenishmentOrderModel.find(
+      {},
+      { id: 1, rejectionSnapshot: 1, rejectedUntil: 1, reopenedAt: 1 },
+    ).lean();
+    const map = new Map<string, OrderLifecycleMeta>();
+    for (const row of rows) {
+      const id = String(row.id);
+      const snapshotRaw = row.rejectionSnapshot as
+        | { netBenefit?: number; targetCoverDays?: number | null }
+        | null
+        | undefined;
+      map.set(id, {
+        rejectionSnapshot:
+          snapshotRaw && typeof snapshotRaw.netBenefit === "number"
+            ? {
+                netBenefit: snapshotRaw.netBenefit,
+                targetCoverDays: snapshotRaw.targetCoverDays ?? null,
+              }
+            : null,
+        rejectedUntil: row.rejectedUntil ? String(row.rejectedUntil) : null,
+        reopenedAt: row.reopenedAt ? String(row.reopenedAt) : null,
+      });
+    }
+    return map;
+  }
+
+  async saveOrderWithEvent(
+    order: ReplenishmentOrder,
+    event: OrderEvent,
+    expectedStatus: OrderStatus | null,
+    lifecycleMeta?: OrderLifecycleMeta,
+  ): Promise<SaveOrderWithEventResult> {
+    await this.ensureConnected();
+    const parsedOrder = ReplenishmentOrderSchema.parse({ ...order, events: [] });
+    const parsedEvent = OrderEventSchema.parse(event);
+    const { events: _events, ...baseOrderDoc } = parsedOrder;
+    const orderDoc = lifecycleMeta
+      ? {
+          ...baseOrderDoc,
+          ...(lifecycleMeta.rejectionSnapshot !== undefined
+            ? { rejectionSnapshot: lifecycleMeta.rejectionSnapshot }
+            : {}),
+          ...(lifecycleMeta.rejectedUntil !== undefined
+            ? { rejectedUntil: lifecycleMeta.rejectedUntil }
+            : {}),
+          ...(lifecycleMeta.reopenedAt !== undefined
+            ? { reopenedAt: lifecycleMeta.reopenedAt }
+            : {}),
+        }
+      : baseOrderDoc;
+
+    const session = await mongoose.startSession();
+    let useTransaction = true;
+    let txResult: SaveOrderWithEventResult | null = null;
+    try {
+      await session.withTransaction(async () => {
+        if (expectedStatus === null) {
+          await ReplenishmentOrderModel.create([orderDoc], { session });
+          await OrderEventModel.create([parsedEvent], { session });
+        } else {
+          const updated = await ReplenishmentOrderModel.findOneAndUpdate(
+            { id: parsedOrder.id, status: expectedStatus },
+            { $set: orderDoc },
+            { new: true, session },
+          ).lean();
+          if (!updated) {
+            throw new OrderOptimisticConflict();
+          }
+          await OrderEventModel.create([parsedEvent], { session });
+        }
+      });
+      const hydrated = await this.getOrder(parsedOrder.id);
+      if (!hydrated) {
+        throw new Error(`Persisted order ${parsedOrder.id} missing after transaction`);
+      }
+      txResult = { status: "saved", order: hydrated };
+    } catch (err) {
+      if (err instanceof OrderOptimisticConflict || this.isDuplicateKeyError(err)) {
+        txResult = { status: "conflict" };
+      } else if (this.isTransactionUnsupported(err)) {
+        useTransaction = false;
+      } else {
+        throw err;
+      }
+    } finally {
+      await session.endSession();
+    }
+
+    if (useTransaction && txResult) {
+      return txResult;
+    }
+
+    // Fallback for standalone MongoDB without replica-set transactions:
+    // Compensate manually if writing the immutable OrderEvent fails.
+    if (expectedStatus === null) {
+      try {
+        await ReplenishmentOrderModel.create(orderDoc);
+      } catch (err) {
+        if (this.isDuplicateKeyError(err)) return { status: "conflict" };
+        throw err;
+      }
+      try {
+        await OrderEventModel.create(parsedEvent);
+      } catch (err) {
+        await ReplenishmentOrderModel.deleteOne({ id: parsedOrder.id });
+        throw err;
+      }
+    } else {
+      const previous = await ReplenishmentOrderModel.findOne({ id: parsedOrder.id }).lean();
+      if (!previous || previous.status !== expectedStatus) {
+        return { status: "conflict" };
+      }
+      const updated = await ReplenishmentOrderModel.findOneAndUpdate(
+        { id: parsedOrder.id, status: expectedStatus },
+        { $set: orderDoc },
+        { new: true },
+      ).lean();
+      if (!updated) {
+        return { status: "conflict" };
+      }
+      try {
+        await OrderEventModel.create(parsedEvent);
+      } catch (err) {
+        const { _id, __v, ...prevDoc } = previous as Record<string, unknown>;
+        await ReplenishmentOrderModel.replaceOne({ id: parsedOrder.id }, prevDoc);
+        throw err;
+      }
+    }
+
+    const hydrated = await this.getOrder(parsedOrder.id);
+    if (!hydrated) {
+      throw new Error(`Persisted order ${parsedOrder.id} missing after save`);
+    }
+    return { status: "saved", order: hydrated };
   }
 
   async close(): Promise<void> {
@@ -637,14 +1119,36 @@ export class MongoRepository implements StockRepository {
     if (entries.length > 0) {
       const skuIndexBySku = new Map(dataset.products.map((p, i) => [p.sku, i]));
       const branchIndexById = new Map(dataset.branches.map((b, i) => [b.id, i]));
+      const knownDates = new Set(dataset.dates);
+      const extraDates = Array.from(
+        new Set(entries.map((e) => e.date).filter((d) => !knownDates.has(d))),
+      ).sort();
+      for (const extraDate of extraDates) {
+        let insertAt = dataset.dates.findIndex((d) => d > extraDate);
+        if (insertAt < 0) insertAt = dataset.dates.length;
+        dataset.dates.splice(insertAt, 0, extraDate);
+        for (let p = 0; p < dataset.products.length; p += 1) {
+          for (let b = 0; b < dataset.branches.length; b += 1) {
+            const stockRow = dataset.onHand[p]?.[b];
+            const prevStock =
+              insertAt > 0
+                ? (stockRow?.[insertAt - 1] ?? 0)
+                : (stockRow?.[0] ?? 0);
+            dataset.sales[p]?.[b]?.splice(insertAt, 0, 0);
+            stockRow?.splice(insertAt, 0, prevStock);
+            dataset.demand[p]?.[b]?.splice(insertAt, 0, 0);
+          }
+        }
+      }
+      const latestDate = dataset.dates[dataset.dates.length - 1];
+      if (latestDate) dataset.asOf = latestDate;
+
       const dateIndexByDate = new Map(dataset.dates.map((d, i) => [d, i]));
-      const lastDateIdx = dataset.dates.length - 1;
       for (const entry of entries) {
         const sIdx = skuIndexBySku.get(entry.sku);
         const bIdx = branchIndexById.get(entry.branchId);
-        if (sIdx === undefined || bIdx === undefined) continue;
-        const dIdx = dateIndexByDate.get(entry.date) ?? lastDateIdx;
-        if (dIdx < 0) continue;
+        const dIdx = dateIndexByDate.get(entry.date);
+        if (sIdx === undefined || bIdx === undefined || dIdx === undefined) continue;
         const salesRow = dataset.sales[sIdx]?.[bIdx];
         const onHandRow = dataset.onHand[sIdx]?.[bIdx];
         const demandRow = dataset.demand[sIdx]?.[bIdx];
@@ -657,6 +1161,61 @@ export class MongoRepository implements StockRepository {
     }
 
     return dataset;
+  }
+}
+
+function stripUndefinedKeys<T extends Record<string, unknown>>(obj: T): T {
+  return Object.fromEntries(
+    Object.entries(obj).filter(([, value]) => value !== undefined),
+  ) as T;
+}
+
+function normalizeActionRow(row: Record<string, unknown>): ActionMetaRecord {
+  const cleaned: Record<string, unknown> = {
+    id: row.id,
+    recommendationId: row.recommendationId,
+    status: row.status,
+    decidedAt: row.decidedAt,
+    reopenedAt: row.reopenedAt ?? null,
+  };
+  if (typeof row.reasonCode === "string") cleaned.reasonCode = row.reasonCode;
+  if (typeof row.comment === "string") cleaned.comment = row.comment;
+  if (row.snapshot && typeof row.snapshot === "object") cleaned.snapshot = row.snapshot;
+  if (typeof row.rejectedUntil === "string") cleaned.rejectedUntil = row.rejectedUntil;
+  return ActionMetaRecordSchema.parse(cleaned);
+}
+
+function normalizeAuditRow(row: Record<string, unknown>): ApiAuditEntry {
+  const cleaned: Record<string, unknown> = {
+    id: row.id,
+    at: row.at,
+    user: row.user,
+    recommendationId: row.recommendationId,
+    decision: row.decision,
+    action: row.action,
+    sku: row.sku,
+    productName: row.productName,
+    branchId: row.branchId,
+    branchName: row.branchName,
+    donorBranchId: row.donorBranchId ?? null,
+    netBenefit: row.netBenefit,
+    reasonCodes: row.reasonCodes,
+  };
+  if (typeof row.reasonCode === "string") cleaned.reasonCode = row.reasonCode;
+  if (typeof row.comment === "string") cleaned.comment = row.comment;
+  if (row.actedBy && typeof row.actedBy === "object") cleaned.actedBy = row.actedBy;
+  return ApiAuditEntrySchema.parse(cleaned);
+}
+
+class OrderOptimisticConflict extends Error {
+  constructor() {
+    super("Order status conflict");
+  }
+}
+
+class AlertNotPendingConflict extends Error {
+  constructor() {
+    super("Stock alert is missing or no longer PENDING");
   }
 }
 

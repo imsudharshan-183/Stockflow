@@ -1,16 +1,20 @@
-import { ArrowRight, Boxes, CircleDollarSign, ListOrdered, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, ListOrdered, RefreshCw, TriangleAlert } from "lucide-react";
 import { Link } from "react-router-dom";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { ChartCard, weeklyPoints } from "@/features/overview/AdminOverview";
 import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
 import { ProofOfValuePanel } from "@/features/overview/ProofOfValuePanel";
+import { useBahrainToday } from "@/hooks/useBahrainToday";
+import type { LiveOverviewResponse } from "@/lib/api";
 import {
+  diffCalendarDays,
+  formatBahrainTimeHm,
   formatDate,
   formatMoney,
   formatNumber,
@@ -24,6 +28,9 @@ interface ManagerOverviewProps {
   recommendations: readonly Recommendation[];
   selectedLocation?: string | null;
   totalActions: number;
+  live?: LiveOverviewResponse;
+  isRefreshing?: boolean;
+  onRefresh?: () => void;
   recommendationsLoading?: boolean;
   recommendationsError?: string | null;
   onRetryRecommendations?: () => void;
@@ -33,16 +40,25 @@ export function ManagerOverview({
   report,
   recommendations,
   selectedLocation = null,
+  live,
+  isRefreshing = false,
+  onRefresh,
   recommendationsLoading = false,
   recommendationsError = null,
   onRetryRecommendations,
 }: ManagerOverviewProps) {
   const weeks = weeklyPoints(report.trend);
+  const today = useBahrainToday();
+  const asOfDataDate = live?.meta.asOfDataDate ?? report.asOf;
+  const staleDataDays = Math.max(0, diffCalendarDays(today.isoDate, asOfDataDate));
+  const lastUpdatedHm = live ? formatBahrainTimeHm(live.meta.computedAt) : undefined;
   const branchNames = report.branches.map((b) => b.name).join(", ");
   const pendingApprovalsCount =
+    live?.metrics.pendingActionsCount.value ??
     report.operational?.pendingApprovalsCount ??
     recommendations.filter((row) => row.status === "PENDING").length;
   const backlogValue =
+    live?.metrics.pendingEstimatedGain.value ??
     report.operational?.backlogValue ??
     recommendations
       .filter((row) => row.status === "PENDING")
@@ -55,7 +71,35 @@ export function ManagerOverview({
     <div className="space-y-6">
       <PageHeader
         title="Cluster overview"
-        subtitle={`As of ${formatDate(report.asOf)} · ${formatNumber(report.branches.length)} assigned branches (${branchNames})`}
+        lastUpdated={lastUpdatedHm}
+        subtitle={`Today: ${today.displayDate} · Data through: ${formatDate(asOfDataDate)} · ${formatNumber(report.branches.length)} assigned branches (${branchNames})`}
+        actions={
+          staleDataDays > 1 || onRefresh ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {staleDataDays > 1 ? (
+                <Link to="/data?tab=import">
+                  <Badge tone="risk">
+                    Data is {formatNumber(staleDataDays)}{" "}
+                    {staleDataDays === 1 ? "day" : "days"} old - import latest sales
+                  </Badge>
+                </Link>
+              ) : null}
+              {onRefresh ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  loading={isRefreshing}
+                  onClick={onRefresh}
+                  className="gap-1.5"
+                >
+                  <RefreshCw className="size-3.5" aria-hidden="true" />
+                  Refresh
+                </Button>
+              ) : null}
+            </div>
+          ) : undefined
+        }
       />
 
       {/* Manager Cluster Hero Panel */}
@@ -118,7 +162,7 @@ export function ManagerOverview({
         />
         <KpiCard
           label="Cluster sales at risk"
-          value={formatMoney(report.lostSalesAtRisk)}
+          value={formatMoney(live?.metrics.salesAtRisk.value ?? report.lostSalesAtRisk)}
           note="Shelf revenue your assigned branches may miss before next delivery."
           formula="Expected lost units × retail price for positions below reorder level in your cluster."
           icon={CircleDollarSign}
@@ -127,8 +171,8 @@ export function ManagerOverview({
         />
         <KpiCard
           label="Cluster overstock value"
-          value={formatMoney(report.cashReleasable)}
-          note={`Includes ${formatMoney(report.deadStockValue)} dead stock in cluster (<1 unit/wk)`}
+          value={formatMoney(live?.metrics.overstockValue.value ?? report.cashReleasable)}
+          note={`Includes ${formatMoney(live?.metrics.deadStockValue.value ?? report.deadStockValue)} dead stock in cluster (<1 unit/wk)`}
           formula="Stock above the 30-day donor floor × unit cost across your assigned branches."
           icon={Boxes}
           tone="warn"

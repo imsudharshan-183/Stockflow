@@ -22,6 +22,7 @@ export const PermissionActionSchema = z.enum([
   "dashboard:operational:scoped",
   "catalog:view",
   "sales:enter",
+  "orders:receive",
   // DECISION: Strict separation of duties — store staff can flag floor shortages in their own branch
   // (`stock:flag`), while only scoped managers/admins can decide escalations (`stock:flag:decide`).
   "stock:flag",
@@ -43,6 +44,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<PermissionAction>> = {
     "dashboard:operational:scoped",
     "catalog:view",
     "sales:enter",
+    "orders:receive",
     "stock:flag:decide",
   ]),
   manager: new Set([
@@ -53,11 +55,13 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<PermissionAction>> = {
     "dashboard:operational:scoped",
     "catalog:view",
     "sales:enter",
+    "orders:receive",
     "stock:flag:decide",
   ]),
   staff: new Set([
     "recommendations:read",
     "catalog:view",
+    "orders:receive",
     "stock:flag",
   ]),
 };

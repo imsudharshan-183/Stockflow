@@ -55,11 +55,30 @@ const factSchema = new Schema({
 });
 factSchema.index({ branchId: 1, sku: 1, date: 1 }, { unique: true });
 
+const branchCollectionSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    name: { type: String, required: true },
+    city: { type: String, required: true },
+    region: { type: String, required: true },
+    coordinates: { type: [Number], default: undefined },
+    status: { type: String, enum: ["active", "archived"], default: "active" },
+  },
+  { collection: "branches" },
+);
+
+export const BranchModel = mongoose.model("StockflowBranch", branchCollectionSchema);
+
 const actionSchema = new Schema({
   id: { type: String, required: true, unique: true },
   recommendationId: { type: String, required: true, unique: true },
   status: { type: String, required: true },
   decidedAt: { type: String, required: true },
+  reasonCode: { type: String, required: false },
+  comment: { type: String, required: false },
+  snapshot: { type: Schema.Types.Mixed, required: false },
+  rejectedUntil: { type: String, required: false },
+  reopenedAt: { type: String, default: null },
 });
 
 const actedBySchema = new Schema(
@@ -86,6 +105,7 @@ const auditSchema = new Schema({
   netBenefit: { type: Number, required: true },
   reasonCodes: { type: [String], required: true },
   reasonCode: { type: String, required: false },
+  comment: { type: String, required: false },
   actedBy: { type: actedBySchema, required: false },
 });
 
@@ -209,15 +229,143 @@ const stockAlertSchema = new Schema(
       enum: ["CRITICAL_LOW", "DAMAGED_SHRINKAGE", "COUNT_MISMATCH", "OTHER"],
       default: "CRITICAL_LOW",
     },
+    reportedQty: { type: Number, required: false },
     flaggedBy: { type: actedBySchema, required: true },
     flaggedAt: { type: String, required: true },
     note: { type: String, required: true },
-    status: { type: String, required: true, enum: ["PENDING", "APPROVED", "REJECTED"], default: "PENDING" },
+    status: {
+      type: String,
+      required: true,
+      enum: ["PENDING", "APPROVED", "REJECTED", "RESOLVED"],
+      default: "PENDING",
+    },
     decidedBy: { type: actedBySchema, default: null },
     decidedAt: { type: String, default: null },
+    resolution: { type: Schema.Types.Mixed, default: null },
   },
   { collection: "stock_alerts" },
 );
 stockAlertSchema.index({ branchId: 1, status: 1, flaggedAt: -1 });
 
 export const StockAlertModel = mongoose.model("StockflowStockAlert", stockAlertSchema);
+
+const replenishmentOrderSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    origin: {
+      type: String,
+      required: true,
+      enum: ["ENGINE", "MANAGER_REQUEST", "ALERT_ESCALATION"],
+    },
+    type: { type: String, required: true, enum: ["TRANSFER", "REORDER", "MARKDOWN"] },
+    status: {
+      type: String,
+      required: true,
+      enum: [
+        "SUGGESTED",
+        "OPEN_REQUEST",
+        "AWAITING_DONOR",
+        "COMMITTED",
+        "RECEIVED",
+        "REJECTED",
+        "CANCELLED",
+      ],
+      index: true,
+    },
+    sku: { type: String, required: true },
+    productName: { type: String, required: true },
+    category: { type: String, required: true },
+    targetBranchId: { type: String, required: true },
+    targetBranchName: { type: String, required: true },
+    sourceBranchId: { type: String, default: null },
+    sourceBranchName: { type: String, default: null },
+    quantity: { type: Number, required: true },
+    requestedBy: { type: actedBySchema, default: null },
+    linkedAlertId: { type: String, default: null, index: true },
+    engineSnapshot: { type: Schema.Types.Mixed, required: true },
+    createdAt: { type: String, required: true },
+    updatedAt: { type: String, required: true },
+    awaitingDonorSince: { type: String, default: null },
+    escalatedAt: { type: String, default: null },
+    committedAt: { type: String, default: null },
+    receivedAt: { type: String, default: null },
+    rejectionSnapshot: { type: Schema.Types.Mixed, default: null },
+    rejectedUntil: { type: String, default: null },
+    reopenedAt: { type: String, default: null },
+  },
+  { collection: "replenishment_orders" },
+);
+replenishmentOrderSchema.index({ targetBranchId: 1, status: 1 });
+replenishmentOrderSchema.index({ sourceBranchId: 1, status: 1 });
+
+export const ReplenishmentOrderModel = mongoose.model(
+  "StockflowReplenishmentOrder",
+  replenishmentOrderSchema,
+);
+
+const importLogSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    importedAt: { type: String, required: true, index: true },
+    fileName: { type: String, required: true },
+    user: { type: actedBySchema, required: true },
+    inserted: { type: Number, required: true, min: 0 },
+    updated: { type: Number, required: true, min: 0 },
+    errorCount: { type: Number, required: true, min: 0 },
+    minDate: { type: String, default: null },
+    maxDate: { type: String, default: null },
+    branchIds: { type: [String], default: [] },
+  },
+  { collection: "import_log" },
+);
+importLogSchema.index({ importedAt: -1 });
+importLogSchema.index({ "user.userId": 1, importedAt: -1 });
+
+export const ImportLogModel = mongoose.model("StockflowImportLog", importLogSchema);
+
+const orderEventSchema = new Schema(
+  {
+    id: { type: String, required: true, unique: true },
+    orderId: { type: String, required: true },
+    at: { type: String, required: true },
+    actor: { type: actedBySchema, required: true },
+    action: {
+      type: String,
+      required: true,
+      enum: [
+        "CREATED",
+        "REQUEST_TRANSFER",
+        "COMMIT",
+        "DECLINE",
+        "REROUTE",
+        "CANCEL",
+        "RECEIVE",
+        "ESCALATE",
+        "MIGRATED",
+      ],
+    },
+    fromStatus: { type: String, default: null },
+    toStatus: {
+      type: String,
+      required: true,
+      enum: [
+        "SUGGESTED",
+        "OPEN_REQUEST",
+        "AWAITING_DONOR",
+        "COMMITTED",
+        "RECEIVED",
+        "REJECTED",
+        "CANCELLED",
+      ],
+    },
+    dispositionCode: { type: String, required: false },
+    comment: { type: String, required: false },
+    sourceBranchId: { type: String, default: null },
+    quantity: { type: Number, required: false },
+    isAdminOverride: { type: Boolean, required: false },
+  },
+  { collection: "order_events" },
+);
+orderEventSchema.index({ orderId: 1, at: 1 });
+
+export const OrderEventModel = mongoose.model("StockflowOrderEvent", orderEventSchema);

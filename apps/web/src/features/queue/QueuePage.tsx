@@ -1,8 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, Check, ChevronRight, Search, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowRight,
+  Check,
+  ChevronRight,
+  PackageCheck,
+  Plus,
+  Repeat2,
+  RotateCcw,
+  Search,
+  Send,
+  X,
+} from "lucide-react";
+import { useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
+import { DonorPicker } from "@/components/shared/DonorPicker";
+import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
@@ -31,117 +44,199 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { QUEUE_PAGE_SIZE } from "@/config";
 import { useAuth } from "@/features/auth/AuthContext";
-import { RecommendationDrawer } from "@/features/queue/RecommendationDrawer";
-import { queryKeys } from "@/hooks/queryKeys";
-import { useLocationScope } from "@/hooks/useLocationScope";
-import { api } from "@/lib/api";
 import {
-  REASON_LABELS,
+  OrderDrawer,
+  type OrderActionCapabilities,
+} from "@/features/queue/OrderDrawer";
+import { RequestStockDialog } from "@/features/queue/RequestStockDialog";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
+import { useLocationScope } from "@/hooks/useLocationScope";
+import { api, type LifecycleOrder, type QueueLifecycleView } from "@/lib/api";
+import {
   actionLabel,
+  formatCover,
   formatMoney,
   formatMoneyFull,
   formatNumber,
-  statusLabel,
+  orderOriginLabel,
 } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import {
+  canTransition,
   formatProductDisplayName,
   matchesProductQuery,
-  type Action,
-  type Recommendation,
-  type RecommendationQuery,
-  type RecommendationStatus,
+  type OrderOwnership,
+  type OrderQueueTab,
+  type OrderStatus,
+  type OrderType,
+  type ReplenishmentOrder,
+  type User,
 } from "@stockflow/core";
 
 export function QueuePage() {
   const { user } = useAuth();
-  const canDecide = user ? user.role === "admin" || user.role === "manager" : true;
+  const canDecide = user ? user.role === "admin" || user.role === "manager" : false;
   const { selectedLocation } = useLocationScope();
   const [params, setParams] = useSearchParams();
   const filters = readFilters(params);
   const effectiveBranch = filters.branch || selectedLocation || undefined;
-  const query: RecommendationQuery = { ...toQuery(filters), branch: effectiveBranch };
 
-  const kpis = useQuery({
+  const activeQuery = {
+    queue: filters.tab,
+    branch: effectiveBranch,
+    category: filters.category || undefined,
+    type: isOrderType(filters.type) ? filters.type : undefined,
+    status: filters.tab === "outgoing" && isOrderStatus(filters.status) ? filters.status : undefined,
+    ...(filters.tab === "suggested" ? { view: filters.view } : {}),
+  };
+
+  const kpisQuery = useQuery({
     queryKey: queryKeys.kpis(effectiveBranch),
     queryFn: () => api.kpis(effectiveBranch),
   });
-  const list = useQuery({
-    queryKey: queryKeys.recommendations(query),
-    queryFn: () => api.recommendations(query),
+
+  const ordersQuery = useQuery({
+    queryKey: queryKeys.orders(activeQuery),
+    queryFn: () => api.listOrders(activeQuery),
+  });
+
+  const incomingCountQuery = useQuery({
+    queryKey: queryKeys.orders({ queue: "incoming", branch: effectiveBranch }),
+    queryFn: () => api.listOrders({ queue: "incoming", branch: effectiveBranch }),
   });
 
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
   const lastTriggerRowIdRef = useRef<string | null>(null);
 
-  // Reject confirmation dialog state (shared by single row, drawer, and batch reject)
-  const [rejectTargets, setRejectTargets] = useState<readonly Recommendation[] | null>(null);
+  const [requestDialogOpen, setRequestDialogOpen] = useState(false);
+  const [declineTarget, setDeclineTarget] = useState<ReplenishmentOrder | null>(null);
+  const [declineComment, setDeclineComment] = useState("");
+  const [overrideTarget, setOverrideTarget] = useState<ReplenishmentOrder | null>(null);
+  const [overrideComment, setOverrideComment] = useState("");
+  const [donorModalTarget, setDonorModalTarget] = useState<{
+    mode: "reroute" | "request";
+    order: ReplenishmentOrder;
+  } | null>(null);
+  const [donorModalSelection, setDonorModalSelection] = useState<string | null>(null);
+  const [donorModalComment, setDonorModalComment] = useState("");
 
-  const client = useQueryClient();
+  const queryClient = useQueryClient();
 
-  const invalidateAll = async () => {
-    await Promise.all([
-      client.invalidateQueries({ queryKey: ["recommendations"] }),
-      client.invalidateQueries({ queryKey: ["kpis"] }),
-      client.invalidateQueries({ queryKey: ["branch"] }),
-      client.invalidateQueries({ queryKey: ["product"] }),
-      client.invalidateQueries({ queryKey: ["audit"] }),
-    ]);
-  };
+  const invalidateAll = () => invalidateOperationalQueries(queryClient);
 
-  const singleDecision = useMutation({
-    mutationFn: (input: { id: string; decision: "approve" | "reject" }) =>
-      api.decide(input.id, input.decision),
-    onSuccess: async (_data, input) => {
-      toast.success(input.decision === "approve" ? "Action approved" : "Action rejected");
-      setSelected((prev) => {
-        if (!prev.has(input.id)) return prev;
-        const next = new Set(prev);
-        next.delete(input.id);
-        return next;
-      });
-      if (input.decision === "reject") {
-        setRejectTargets(null);
-      }
+  const commitMutation = useMutation({
+    mutationFn: ({ id, comment, force }: { id: string; comment?: string; force?: boolean }) =>
+      api.commitOrder(id, { ...(comment ? { comment } : {}), ...(force ? { force } : {}) }),
+    onSuccess: async (updated) => {
+      toast.success(
+        updated.type === "TRANSFER" && updated.sourceBranchId
+          ? `Released ${formatNumber(updated.quantity)} units for ${updated.sku}`
+          : `Committed ${actionLabel(updated.type).toLowerCase()} for ${updated.sku}`,
+      );
+      setOverrideTarget(null);
+      setOverrideComment("");
       await invalidateAll();
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "Unable to record decision");
-    },
+    onError: (err: Error) => toast.error(err.message || "Unable to commit order"),
   });
 
-  const batchDecision = useMutation({
-    mutationFn: (input: { ids: readonly string[]; decision: "approve" | "reject"; reasonCode?: string }) =>
-      api.decideBatch(input.ids, input.decision, input.reasonCode),
-    onSuccess: async (data, input) => {
-      const counts = { ok: 0, already_decided: 0, forbidden: 0, not_found: 0 };
-      for (const item of data.results) {
-        counts[item.status] += 1;
-      }
-      const actionLabel = input.decision === "approve" ? "Approved" : "Rejected";
-      const parts: string[] = [];
-      if (counts.ok > 0) parts.push(`${actionLabel} ${formatNumber(counts.ok)}`);
-      if (counts.already_decided > 0) parts.push(`Already decided ${formatNumber(counts.already_decided)}`);
-      if (counts.forbidden > 0) parts.push(`Forbidden ${formatNumber(counts.forbidden)}`);
-      if (counts.not_found > 0) parts.push(`Not found ${formatNumber(counts.not_found)}`);
-      const summary = parts.length > 0 ? parts.join(" · ") : `${actionLabel} ${formatNumber(0)}`;
-      if (counts.forbidden > 0 || counts.not_found > 0) {
-        toast.warning(summary);
-      } else {
-        toast.success(summary);
-      }
-      setSelected(new Set());
-      setRejectTargets(null);
+  const requestTransferMutation = useMutation({
+    mutationFn: ({
+      id,
+      sourceBranchId,
+      comment,
+    }: {
+      id: string;
+      sourceBranchId?: string;
+      comment?: string;
+    }) =>
+      api.requestOrderTransfer(id, {
+        ...(sourceBranchId ? { sourceBranchId } : {}),
+        ...(comment ? { comment } : {}),
+      }),
+    onSuccess: async (updated) => {
+      toast.success(
+        `Sent transfer request for ${updated.sku} to ${updated.sourceBranchName ?? updated.sourceBranchId}`,
+      );
+      setDonorModalTarget(null);
+      setDonorModalSelection(null);
+      setDonorModalComment("");
       await invalidateAll();
     },
-    onError: (err: Error) => {
-      toast.error(err.message || "Batch decision failed");
-    },
+    onError: (err: Error) => toast.error(err.message || "Unable to request donor transfer"),
   });
 
-  const serverRows = useMemo(() => list.data?.recommendations ?? [], [list.data]);
+  const declineMutation = useMutation({
+    mutationFn: ({ id, comment }: { id: string; comment: string }) =>
+      api.declineOrder(id, { comment }),
+    onSuccess: async (updated) => {
+      toast.success(`Declined order for ${updated.sku}`);
+      setDeclineTarget(null);
+      setDeclineComment("");
+      await invalidateAll();
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to decline order"),
+  });
+
+  const rerouteMutation = useMutation({
+    mutationFn: ({
+      id,
+      sourceBranchId,
+      comment,
+    }: {
+      id: string;
+      sourceBranchId: string;
+      comment?: string;
+    }) => api.rerouteOrder(id, { sourceBranchId, ...(comment ? { comment } : {}) }),
+    onSuccess: async (updated) => {
+      toast.success(
+        `Rerouted ${updated.sku} request to ${updated.sourceBranchName ?? updated.sourceBranchId}`,
+      );
+      setDonorModalTarget(null);
+      setDonorModalSelection(null);
+      setDonorModalComment("");
+      await invalidateAll();
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to reroute transfer"),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: ({ id }: { id: string }) => api.cancelOrder(id, {}),
+    onSuccess: async (updated) => {
+      toast.success(`Cancelled request for ${updated.sku}`);
+      await invalidateAll();
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to cancel request"),
+  });
+
+  const receiveMutation = useMutation({
+    mutationFn: ({ id }: { id: string }) => api.receiveOrder(id, {}),
+    onSuccess: async (updated) => {
+      toast.success(`Confirmed receipt of ${formatNumber(updated.quantity)} units (${updated.sku})`);
+      await invalidateAll();
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to confirm receipt"),
+  });
+
+  const reopenMutation = useMutation({
+    mutationFn: ({ id, comment }: { id: string; comment?: string }) => api.reopenOrder(id, comment),
+    onSuccess: async (updated) => {
+      toast.success(`Reopened ${updated.sku} back into Pending`);
+      await invalidateAll();
+    },
+    onError: (err: Error) => toast.error(err.message || "Unable to reopen order"),
+  });
+
+  const isAnyMutating =
+    commitMutation.isPending ||
+    requestTransferMutation.isPending ||
+    declineMutation.isPending ||
+    rerouteMutation.isPending ||
+    cancelMutation.isPending ||
+    receiveMutation.isPending ||
+    reopenMutation.isPending;
+
+  const serverRows = useMemo(() => ordersQuery.data?.orders ?? [], [ordersQuery.data]);
 
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -149,8 +244,10 @@ export function QueuePage() {
     return serverRows.filter(
       (row) =>
         matchesProductQuery(row, q) ||
-        row.branchName.toLowerCase().includes(q) ||
-        (row.donorBranchName?.toLowerCase().includes(q) ?? false),
+        row.targetBranchName.toLowerCase().includes(q) ||
+        row.targetBranchId.toLowerCase().includes(q) ||
+        (row.sourceBranchName?.toLowerCase().includes(q) ?? false) ||
+        (row.sourceBranchId?.toLowerCase().includes(q) ?? false),
     );
   }, [serverRows, search]);
 
@@ -162,154 +259,187 @@ export function QueuePage() {
     [filteredRows, startIndex],
   );
 
-  // Reconcile selection when visible/filtered rows change
-  useEffect(() => {
-    setSelected((prev) => {
-      if (prev.size === 0) return prev;
-      const validPendingIds = new Set(
-        filteredRows.filter((row) => row.status === "PENDING").map((row) => row.id),
-      );
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (validPendingIds.has(id)) {
-          next.add(id);
-        } else {
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [filteredRows]);
-
   const totalWorth = useMemo(
-    () => serverRows.reduce((sum, row) => sum + row.netBenefit, 0),
-    [serverRows],
+    () =>
+      ordersQuery.data?.totalNetBenefit ??
+      serverRows.reduce((sum, row) => sum + row.engineSnapshot.netBenefitBhd, 0),
+    [ordersQuery.data?.totalNetBenefit, serverRows],
   );
+  const headerCount = ordersQuery.data?.total ?? serverRows.length;
   const filteredWorth = useMemo(
-    () => filteredRows.reduce((sum, row) => sum + row.netBenefit, 0),
+    () => filteredRows.reduce((sum, row) => sum + row.engineSnapshot.netBenefitBhd, 0),
     [filteredRows],
   );
 
-  const pendingOnPage = useMemo(
-    () => visible.filter((row) => row.status === "PENDING"),
-    [visible],
-  );
-  const selectedOnPageCount = useMemo(
-    () => pendingOnPage.filter((row) => selected.has(row.id)).length,
-    [pendingOnPage, selected],
-  );
-  const allPendingSelected =
-    pendingOnPage.length > 0 && selectedOnPageCount === pendingOnPage.length;
-  const somePendingSelected = selectedOnPageCount > 0 && !allPendingSelected;
-
-  const selectAllRef = useRef<HTMLInputElement>(null);
-  useEffect(() => {
-    if (selectAllRef.current) {
-      selectAllRef.current.indeterminate = somePendingSelected;
-    }
-  }, [somePendingSelected]);
-
-  const selectedRows = useMemo(
-    () => filteredRows.filter((row) => row.status === "PENDING" && selected.has(row.id)),
-    [filteredRows, selected],
-  );
-  const selectedWorth = useMemo(
-    () => selectedRows.reduce((sum, row) => sum + row.netBenefit, 0),
-    [selectedRows],
+  const openOrder = useMemo(
+    () => serverRows.find((row) => row.id === openOrderId) ?? null,
+    [serverRows, openOrderId],
   );
 
-  const openRecommendation = useMemo(
-    () => serverRows.find((row) => row.id === openId) ?? null,
-    [serverRows, openId],
-  );
+  const incomingCount = incomingCountQuery.data?.total ?? 0;
 
   const hasActiveFilters = Boolean(
-    search.trim() || filters.branch || filters.category || filters.action || filters.status,
+    search.trim() || filters.branch || filters.category || filters.type || filters.status,
   );
 
-  function writeFilters(next: Partial<Filters>) {
-    const merged: Filters = { ...filters, page: 1, ...next };
+  function writeFilters(next: Partial<QueueFilters>) {
+    const merged: QueueFilters = { ...filters, page: 1, ...next };
     const upcoming = new URLSearchParams();
+    if (merged.tab !== "suggested") upcoming.set("tab", merged.tab);
+    if (merged.tab === "suggested" && merged.view !== "pending") {
+      upcoming.set("view", merged.view);
+    }
     if (merged.branch) upcoming.set("branch", merged.branch);
     if (merged.category) upcoming.set("category", merged.category);
-    if (merged.action) upcoming.set("action", merged.action);
-    if (merged.status) upcoming.set("status", merged.status);
+    if (merged.type) upcoming.set("type", merged.type);
+    if (merged.tab === "outgoing" && merged.status) upcoming.set("status", merged.status);
     if (merged.page > 1) upcoming.set("page", String(merged.page));
     setParams(upcoming);
   }
 
   function clearAllFilters() {
     setSearch("");
-    setParams(new URLSearchParams());
-    setSelected(new Set());
+    writeFilters({ branch: "", category: "", type: "", status: "" });
+  }
+
+  function handleCommitAction(order: ReplenishmentOrder) {
+    if (
+      user?.role === "admin" &&
+      order.type === "TRANSFER" &&
+      (order.status === "AWAITING_DONOR" || order.status === "OPEN_REQUEST")
+    ) {
+      setOverrideTarget(order);
+      setOverrideComment("");
+      return;
+    }
+    commitMutation.mutate({ id: order.id });
+  }
+
+  function handleRequestTransferAction(order: ReplenishmentOrder) {
+    if (order.sourceBranchId) {
+      requestTransferMutation.mutate({
+        id: order.id,
+        sourceBranchId: order.sourceBranchId,
+      });
+      return;
+    }
+    setDonorModalTarget({ mode: "request", order });
+    setDonorModalSelection(null);
+    setDonorModalComment("");
+  }
+
+  function handleOpenReroute(order: ReplenishmentOrder) {
+    setDonorModalTarget({
+      mode: order.status === "OPEN_REQUEST" && !order.sourceBranchId ? "request" : "reroute",
+      order,
+    });
+    setDonorModalSelection(null);
+    setDonorModalComment("");
   }
 
   function openRowDrawer(rowId: string) {
     lastTriggerRowIdRef.current = rowId;
-    setOpenId(rowId);
+    setOpenOrderId(rowId);
   }
 
   function handleDrawerOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       const returnId = lastTriggerRowIdRef.current;
-      setOpenId(null);
+      setOpenOrderId(null);
       if (returnId) {
         window.requestAnimationFrame(() => {
-          const rowEl = document.querySelector<HTMLElement>(`[data-row-id="${returnId}"]`);
-          rowEl?.focus();
+          document.querySelector<HTMLElement>(`[data-row-id="${returnId}"]`)?.focus();
         });
       }
     }
   }
 
-  const activeTabValue = filters.action || "ALL";
-  const branches = kpis.data?.branches ?? [];
-  const categories = kpis.data?.categories ?? [];
+  const branches = kpisQuery.data?.branches ?? [];
+  const categories = kpisQuery.data?.categories ?? [];
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Action queue"
         subtitle={
-          list.data
-            ? `${formatNumber(serverRows.length)} actions · ${formatMoney(totalWorth)} estimated gain`
-            : "Ranked by estimated gain."
+          ordersQuery.data
+            ? `${formatNumber(headerCount)} ${filters.tab === "suggested" ? `${lifecycleViewLabel(filters.view).toLowerCase()} ` : ""}orders in view · ${formatMoney(totalWorth)} estimated gain`
+            : "Governed replenishment queue across transfers, pull requests, and store orders."
+        }
+        actions={
+          canDecide ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => setRequestDialogOpen(true)}
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              Request Stock
+            </Button>
+          ) : undefined
         }
       />
 
-      {/* Action Type Tabs synced with Action filter */}
+      {/* Three Queue Tabs + Lifecycle Status Filter */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
-          value={activeTabValue}
+          value={filters.tab}
           onValueChange={(val) => {
-            const nextAction = val === "ALL" ? "" : String(val);
-            writeFilters({ action: nextAction });
+            const nextTab = isOrderQueueTab(String(val)) ? (String(val) as OrderQueueTab) : "suggested";
+            writeFilters({ tab: nextTab, status: "" });
           }}
         >
           <TabsList className="h-auto min-h-9 w-full flex-wrap justify-start rounded-xl bg-secondary p-1 sm:w-fit">
-            <TabsTrigger value="ALL" className="rounded-lg px-3 text-xs font-medium">
-              All
+            <TabsTrigger value="suggested" className="rounded-lg px-3 text-xs font-medium">
+              Suggested &amp; Intra-cluster
             </TabsTrigger>
-            <TabsTrigger value="TRANSFER" className="rounded-lg px-3 text-xs font-medium">
-              Transfers
+            <TabsTrigger value="incoming" className="rounded-lg px-3 text-xs font-medium">
+              <span>Incoming Pull Requests</span>
+              {incomingCount > 0 ? (
+                <Badge tone="over" className="ml-1 px-1.5 py-0 text-[10px]">
+                  {formatNumber(incomingCount)}
+                </Badge>
+              ) : null}
             </TabsTrigger>
-            <TabsTrigger value="REORDER" className="rounded-lg px-3 text-xs font-medium">
-              Reorders
-            </TabsTrigger>
-            <TabsTrigger value="MARKDOWN" className="rounded-lg px-3 text-xs font-medium">
-              Markdowns
+            <TabsTrigger value="outgoing" className="rounded-lg px-3 text-xs font-medium">
+              My Outgoing Requests
             </TabsTrigger>
           </TabsList>
         </Tabs>
+
+        {filters.tab === "suggested" ? (
+          <div
+            className="flex flex-wrap items-center gap-1 rounded-xl border border-border bg-secondary/70 p-1"
+            role="group"
+            aria-label="Queue lifecycle status"
+          >
+            {(
+              [
+                { value: "pending", label: "Pending" },
+                { value: "in_progress", label: "In progress" },
+                { value: "decided", label: "Decided" },
+              ] as const
+            ).map((opt) => (
+              <Button
+                key={opt.value}
+                type="button"
+                size="xs"
+                variant={filters.view === opt.value ? "primary" : "ghost"}
+                aria-pressed={filters.view === opt.value}
+                onClick={() => writeFilters({ view: opt.value })}
+                className="rounded-lg px-2.5 text-xs font-medium"
+              >
+                {opt.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {/* Table Card */}
       <TableCard>
-        {/* Attached Toolbar Strip */}
         <TableToolbar>
           <div className="flex flex-1 flex-wrap items-center gap-2">
-            {/* Search Input */}
             <div className="relative min-w-[200px] flex-1 sm:max-w-[260px]">
               <Search
                 className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -322,7 +452,7 @@ export function QueuePage() {
                   setSearch(e.target.value);
                   if (filters.page > 1) writeFilters({ page: 1 });
                 }}
-                placeholder="Search SKU or product..."
+                placeholder="Search SKU, product, or branch..."
                 aria-label="Search SKU or product"
                 className="h-9 rounded-xl border-border bg-card pr-8 pl-8 text-xs shadow-xs"
               />
@@ -340,7 +470,6 @@ export function QueuePage() {
               ) : null}
             </div>
 
-            {/* Branch Select (only place in the app for queue branch filter) */}
             <ToolbarSelect
               ariaLabel="Filter by branch"
               value={filters.branch}
@@ -354,7 +483,6 @@ export function QueuePage() {
               ))}
             </ToolbarSelect>
 
-            {/* Category Select */}
             <ToolbarSelect
               ariaLabel="Filter by category"
               value={filters.category}
@@ -368,21 +496,38 @@ export function QueuePage() {
               ))}
             </ToolbarSelect>
 
-            {/* Status Select */}
-            <ToolbarSelect
-              ariaLabel="Filter by status"
-              value={filters.status}
-              onChange={(status) => writeFilters({ status })}
-            >
-              <option value="">All statuses</option>
-              <option value="PENDING">Pending</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
-            </ToolbarSelect>
+            {filters.tab !== "incoming" ? (
+              <ToolbarSelect
+                ariaLabel="Filter by type"
+                value={filters.type}
+                onChange={(type) => writeFilters({ type })}
+              >
+                <option value="">All types</option>
+                <option value="TRANSFER">Transfers</option>
+                <option value="REORDER">Reorders</option>
+                <option value="MARKDOWN">Markdowns</option>
+              </ToolbarSelect>
+            ) : null}
+
+            {filters.tab === "outgoing" ? (
+              <ToolbarSelect
+                ariaLabel="Filter by status"
+                value={filters.status}
+                onChange={(status) => writeFilters({ status })}
+              >
+                <option value="">All statuses</option>
+                <option value="OPEN_REQUEST">Open Request</option>
+                <option value="AWAITING_DONOR">Awaiting Donor</option>
+                <option value="COMMITTED">Committed</option>
+                <option value="RECEIVED">Received</option>
+                <option value="REJECTED">Declined</option>
+                <option value="CANCELLED">Cancelled</option>
+              </ToolbarSelect>
+            ) : null}
           </div>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
-            {list.data ? (
+            {ordersQuery.data ? (
               <span>
                 Showing <span className="font-medium text-foreground">{formatNumber(visible.length)}</span>{" "}
                 of <span className="font-medium text-foreground">{formatNumber(filteredRows.length)}</span>{" "}
@@ -390,7 +535,7 @@ export function QueuePage() {
                 benefit
               </span>
             ) : (
-              <span>Loading queue...</span>
+              <span>Loading orders...</span>
             )}
             {hasActiveFilters ? (
               <Button variant="ghost" size="sm" onClick={clearAllFilters}>
@@ -400,23 +545,32 @@ export function QueuePage() {
           </div>
         </TableToolbar>
 
-        {/* Loading, Error, Empty, or Rows */}
-        {list.isPending ? (
+        {ordersQuery.isPending ? (
           <div className="p-4">
             <TableSkeleton rows={8} />
           </div>
-        ) : list.isError ? (
+        ) : ordersQuery.isError ? (
           <div className="p-4">
-            <ErrorBlock message={list.error.message} onRetry={() => void list.refetch()} />
+            <ErrorBlock message={ordersQuery.error.message} onRetry={() => void ordersQuery.refetch()} />
           </div>
         ) : filteredRows.length === 0 ? (
           <div className="p-4">
             <EmptyBlock
-              title="No matching actions"
+              title={
+                filters.tab === "incoming"
+                  ? "No incoming pull requests"
+                  : filters.tab === "outgoing"
+                    ? "No outgoing requests"
+                    : "No suggested orders"
+              }
               body={
                 hasActiveFilters
-                  ? "No recommendations match your active filters."
-                  : "There are no recommendations in the queue today."
+                  ? "No orders match your active filters."
+                  : filters.tab === "incoming"
+                    ? "Requests from other branches asking to pull surplus stock from your stores will appear here."
+                    : filters.tab === "outgoing"
+                      ? "Use Request Stock to submit a manual replenishment request or pull from a donor branch."
+                      : "There are no open replenishment suggestions right now."
               }
               action={
                 hasActiveFilters ? (
@@ -428,430 +582,264 @@ export function QueuePage() {
             />
           </div>
         ) : (
-          <>
-            {/* Desktop & Tablet Fixed-Layout Table (>= 768px) */}
-            <div className="hidden md:block">
-              <Table className="min-w-[920px]">
-                <TableHeader>
-                  <tr className="border-b border-border">
-                    {canDecide ? (
-                      <TableHead className="w-9 px-2.5 text-center xl:w-10 xl:px-3">
-                        <input
-                          ref={selectAllRef}
-                          type="checkbox"
-                          aria-label="Select visible pending actions"
-                          checked={allPendingSelected}
-                          disabled={pendingOnPage.length === 0}
-                          onChange={(event) => {
-                            const next = new Set(selected);
-                            for (const row of pendingOnPage) {
-                              if (event.target.checked) next.add(row.id);
-                              else next.delete(row.id);
-                            }
-                            setSelected(next);
-                          }}
-                          className="size-4 rounded border-input accent-primary focus-visible:ring-2 focus-visible:ring-primary/40"
-                        />
-                        <span className="sr-only">Select</span>
-                      </TableHead>
-                    ) : null}
-                    <TableHead className="hidden w-11 px-2 lg:table-cell xl:w-14 xl:px-2.5">Rank</TableHead>
-                    <TableHead className="w-[88px] px-2 xl:w-[112px] xl:px-2.5">Action</TableHead>
-                    <TableHead className="w-[24%] border-r border-divider-soft px-3 xl:w-[28%]">
-                      Product
-                    </TableHead>
-                    <TableHead className="w-[136px] px-2.5 lg:w-[152px] xl:w-[196px] xl:px-3">
-                      Branch(es)
-                    </TableHead>
-                    <TableHead className="w-[54px] border-r border-divider-soft px-2.5 text-right xl:w-[72px] xl:px-3">
-                      Qty
-                    </TableHead>
-                    <TableHead className="w-[100px] pr-4 pl-2.5 text-right xl:w-[116px] xl:pr-5">
-                      Estimated gain
-                    </TableHead>
-                    <TableHead
-                      className={cn(
-                        "w-[98px] px-3 xl:w-[110px]",
-                        canDecide ? "border-r border-divider-soft" : "",
-                      )}
+          <div className="overflow-x-auto">
+            <Table className="min-w-[920px]">
+              <TableHeader>
+                <tr className="border-b border-border">
+                  <TableHead className="w-[100px] px-3">Type</TableHead>
+                  <TableHead className="w-[24%] px-3">Product</TableHead>
+                  <TableHead className="w-[180px] px-3">Route</TableHead>
+                  <TableHead className="w-[72px] px-3 text-right">Qty</TableHead>
+                  {filters.tab === "incoming" ? (
+                    <>
+                      <TableHead className="w-[125px] px-3 text-right">Available surplus</TableHead>
+                      <TableHead className="w-[130px] px-3 text-right">Cover after release</TableHead>
+                    </>
+                  ) : (
+                    <TableHead className="w-[125px] px-3 text-right">Estimated gain</TableHead>
+                  )}
+                  <TableHead className="w-[130px] px-3">Status</TableHead>
+                  <TableHead className="px-3 text-right">Actions</TableHead>
+                </tr>
+              </TableHeader>
+              <TableBody>
+                {visible.map((order) => {
+                  const caps = getOrderCapabilities(order, user, filters.tab);
+
+                  return (
+                    <TableRow
+                      key={order.id}
+                      data-row-id={order.id}
+                      tabIndex={0}
+                      onClick={() => openRowDrawer(order.id)}
+                      onKeyDown={(event) => {
+                        if (event.target !== event.currentTarget) return;
+                        if (event.key === "Enter" || event.key === " ") {
+                          event.preventDefault();
+                          openRowDrawer(order.id);
+                        }
+                      }}
+                      className="cursor-pointer"
                     >
-                      Status
-                    </TableHead>
-                    {canDecide ? (
-                      <TableHead className="w-[92px] px-2.5 text-right xl:w-[104px] xl:px-3">
-                        <span className="sr-only">Actions</span>
-                      </TableHead>
-                    ) : (
-                      <TableHead className="w-9 px-2 text-right">
-                        <span className="sr-only">Details</span>
-                      </TableHead>
-                    )}
-                  </tr>
-                </TableHeader>
-
-                <TableBody>
-                  {visible.map((row) => {
-                    const isSelected = selected.has(row.id);
-                    const isRowApproving =
-                      singleDecision.isPending &&
-                      singleDecision.variables?.id === row.id &&
-                      singleDecision.variables.decision === "approve";
-                    const isRowRejecting =
-                      singleDecision.isPending &&
-                      singleDecision.variables?.id === row.id &&
-                      singleDecision.variables.decision === "reject";
-                    const isRowBusy = isRowApproving || isRowRejecting || batchDecision.isPending;
-
-                    return (
-                      <TableRow
-                        key={row.id}
-                        data-row-id={row.id}
-                        data-state={isSelected ? "selected" : undefined}
-                        tabIndex={0}
-                        aria-label={`${actionLabel(row.action)} ${row.productName} at ${row.branchName}, net benefit ${formatMoneyFull(row.netBenefit)}`}
-                        onClick={() => openRowDrawer(row.id)}
-                        onKeyDown={(event) => {
-                          if (event.target !== event.currentTarget) return;
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            openRowDrawer(row.id);
-                          }
-                        }}
-                        className="cursor-pointer"
-                      >
-                        {canDecide ? (
-                          <TableCell
-                            className="w-9 px-2.5 text-center xl:w-10 xl:px-3"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <input
-                              type="checkbox"
-                              aria-label={`Select ${row.productName}`}
-                              disabled={row.status !== "PENDING"}
-                              checked={isSelected}
-                              onChange={(event) => {
-                                const next = new Set(selected);
-                                if (event.target.checked) next.add(row.id);
-                                else next.delete(row.id);
-                                setSelected(next);
-                              }}
-                              className="size-4 rounded border-input accent-primary disabled:opacity-40"
-                            />
-                          </TableCell>
-                        ) : null}
-
-                        {/* Rank (hidden 768-1023px) */}
-                        <TableCell className="hidden px-2 text-xs font-medium text-muted-foreground tabular-nums lg:table-cell xl:px-2.5">
-                          {row.rank}
-                        </TableCell>
-
-                        {/* Action Badge */}
-                        <TableCell className="px-2 xl:px-2.5">
+                      <TableCell className="px-3">
+                        <div className="flex flex-col items-start gap-1">
                           <Badge
                             tone={
-                              row.action === "TRANSFER"
+                              order.type === "TRANSFER"
                                 ? "transfer"
-                                : row.action === "REORDER"
+                                : order.type === "REORDER"
                                   ? "reorder"
                                   : "markdown"
                             }
                           >
-                            {actionLabel(row.action)}
+                            {actionLabel(order.type)}
                           </Badge>
-                        </TableCell>
+                          <span className="text-[11px] text-muted-foreground">
+                            {orderOriginLabel(order.origin)}
+                          </span>
+                        </div>
+                      </TableCell>
 
-                        {/* Product (Group 1 boundary) */}
-                        <TableCell className="border-r border-divider-soft px-3">
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <div className="truncate font-semibold text-foreground">
-                                  {formatProductDisplayName(row.productName, row.sku)}
-                                </div>
-                              }
-                            />
-                            <TooltipContent side="top">
-                              {formatProductDisplayName(row.productName, row.sku)}
-                            </TooltipContent>
-                          </Tooltip>
-                          <div
-                            className="truncate text-xs text-muted-foreground"
-                            title={`${row.sku} · ${row.category}`}
-                          >
-                            <span>{row.sku}</span>
-                            <span className="hidden lg:inline"> · {row.category}</span>
-                          </div>
-                        </TableCell>
-
-                        {/* Branch(es) */}
-                        <TableCell className="px-2.5 xl:px-3">
-                          {row.donorBranchName ? (
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <div className="min-w-0">
-                                    <div className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                                      <span className="truncate">{row.donorBranchName}</span>
-                                      <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
-                                    </div>
-                                    <div className="truncate text-sm font-medium text-foreground">
-                                      {row.branchName}
-                                    </div>
-                                  </div>
-                                }
-                              />
-                              <TooltipContent side="top">
-                                Transfer from {row.donorBranchName} to {row.branchName}
-                              </TooltipContent>
-                            </Tooltip>
-                          ) : (
-                            <Tooltip>
-                              <TooltipTrigger
-                                render={
-                                  <div className="truncate text-sm text-foreground">
-                                    {row.branchName}
-                                  </div>
-                                }
-                              />
-                              <TooltipContent side="top">{row.branchName}</TooltipContent>
-                            </Tooltip>
-                          )}
-                        </TableCell>
-
-                        {/* Quantity (Group 2 boundary, right-aligned) */}
-                        <TableCell className="border-r border-divider-soft px-2.5 text-right font-medium text-foreground tabular-nums xl:px-3">
-                          {formatNumber(row.quantity)}
-                        </TableCell>
-
-                        {/* Net Benefit (right-aligned, most prominent number) */}
-                        <TableCell className="pr-4 pl-2.5 text-right font-semibold text-foreground tabular-nums xl:pr-5">
-                          {formatMoneyFull(row.netBenefit)}
-                        </TableCell>
-
-                        {/* Status (Group 3 boundary) */}
-                        <TableCell
-                          className={cn(
-                            "px-3",
-                            canDecide ? "border-r border-divider-soft" : "",
-                          )}
-                        >
-                          <Badge
-                            tone={
-                              row.status === "APPROVED"
-                                ? "approved"
-                                : row.status === "REJECTED"
-                                  ? "rejected"
-                                  : "pending"
+                      <TableCell className="px-3">
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <div className="truncate font-semibold text-foreground">
+                                {formatProductDisplayName(order.productName, order.sku)}
+                              </div>
                             }
-                            dot
-                          >
-                            {statusLabel(row.status)}
-                          </Badge>
-                        </TableCell>
+                          />
+                          <TooltipContent side="top">
+                            {formatProductDisplayName(order.productName, order.sku)}
+                          </TooltipContent>
+                        </Tooltip>
+                        <div className="truncate text-xs text-muted-foreground">
+                          <span className="font-mono">{order.sku}</span> · {order.category}
+                        </div>
+                      </TableCell>
 
-                        {/* Actions (Group 4: horizontal icon buttons + chevron affordance) */}
-                        {canDecide ? (
-                          <TableCell
-                            className="px-2.5 text-right xl:px-3"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <div className="flex items-center justify-end gap-1">
-                              <Button
-                                variant="soft-success"
-                                size="icon-xs"
-                                tooltip="Approve action"
-                                aria-label={`Approve ${row.productName}`}
-                                disabled={row.status !== "PENDING" || isRowBusy}
-                                loading={isRowApproving}
-                                onClick={() =>
-                                  singleDecision.mutate({ id: row.id, decision: "approve" })
-                                }
-                              >
-                                <Check className="size-3.5" aria-hidden="true" />
-                              </Button>
-                              <Button
-                                variant="soft-danger"
-                                size="icon-xs"
-                                tooltip="Reject action"
-                                aria-label={`Reject ${row.productName}`}
-                                disabled={row.status !== "PENDING" || isRowBusy}
-                                loading={isRowRejecting}
-                                onClick={() => setRejectTargets([row])}
-                              >
-                                <X className="size-3.5" aria-hidden="true" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                tooltip="Inspect details"
-                                aria-label={`Inspect ${row.productName}`}
-                                onClick={() => openRowDrawer(row.id)}
-                                className="ml-0.5 text-muted-foreground hover:text-foreground"
-                              >
-                                <ChevronRight
-                                  className="size-4 shrink-0 transition-transform duration-150 group-hover/row:translate-x-0.5"
-                                  aria-hidden="true"
-                                />
-                              </Button>
+                      <TableCell className="px-3">
+                        {order.sourceBranchName ? (
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1 truncate text-xs text-muted-foreground">
+                              <span className="truncate">{order.sourceBranchName}</span>
+                              <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
                             </div>
-                          </TableCell>
+                            <div className="truncate text-sm font-medium text-foreground">
+                              {order.targetBranchName}
+                            </div>
+                          </div>
                         ) : (
-                          <TableCell
-                            className="px-2 text-right"
-                            onClick={(event) => event.stopPropagation()}
-                          >
+                          <div>
+                            <div className="truncate text-sm font-medium text-foreground">
+                              {order.targetBranchName}
+                            </div>
+                            <div className="text-xs text-muted-foreground">{order.targetBranchId}</div>
+                          </div>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="px-3 text-right font-medium text-foreground tabular-nums">
+                        {formatNumber(order.quantity)}
+                      </TableCell>
+
+                      {filters.tab === "incoming" ? (
+                        <>
+                          <TableCell className="px-3 text-right font-medium text-foreground tabular-nums">
+                            {order.donorAvailableSurplus !== undefined
+                              ? `${formatNumber(order.donorAvailableSurplus)} units`
+                              : "—"}
+                          </TableCell>
+                          <TableCell className="px-3 text-right text-foreground tabular-nums">
+                            {formatCover(order.donorCoverDaysAfter)}
+                          </TableCell>
+                        </>
+                      ) : (
+                        <TableCell className="px-3 text-right font-semibold text-foreground tabular-nums">
+                          {formatMoneyFull(order.engineSnapshot.netBenefitBhd)}
+                        </TableCell>
+                      )}
+
+                      <TableCell className="px-3">
+                        <div className="flex flex-col items-start gap-1">
+                          <OrderStatusBadge status={order.status} />
+                          {order.isEscalated ? (
+                            <Badge tone="risk" className="px-1.5 py-0 text-[10px]">
+                              Escalated
+                            </Badge>
+                          ) : null}
+                          {order.reopenBadge ? (
+                            <Badge
+                              tone={order.reopenBadge.kind === "worsened" ? "risk" : "over"}
+                              className="px-1.5 py-0 text-[10px]"
+                            >
+                              {order.reopenBadge.label}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </TableCell>
+
+                      <TableCell className="px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                          {canDecide && order.canReopen ? (
+                            <Button
+                              variant="secondary"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => reopenMutation.mutate({ id: order.id })}
+                            >
+                              <RotateCcw className="size-3.5" aria-hidden="true" />
+                              Reopen
+                            </Button>
+                          ) : null}
+
+                          {caps.canRelease ? (
+                            <Button
+                              variant="soft-success"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => handleCommitAction(order)}
+                            >
+                              <Check className="size-3.5" aria-hidden="true" />
+                              Release
+                            </Button>
+                          ) : null}
+
+                          {caps.canCommit ? (
+                            <Button
+                              variant="soft-success"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => handleCommitAction(order)}
+                            >
+                              <Check className="size-3.5" aria-hidden="true" />
+                              Commit
+                            </Button>
+                          ) : null}
+
+                          {caps.canRequestTransfer ? (
+                            <Button
+                              variant="primary"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => handleRequestTransferAction(order)}
+                            >
+                              <Send className="size-3" aria-hidden="true" />
+                              Request Transfer
+                            </Button>
+                          ) : null}
+
+                          {caps.canDecline ? (
+                            <Button
+                              variant="soft-danger"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => {
+                                setDeclineTarget(order);
+                                setDeclineComment("");
+                              }}
+                            >
+                              <X className="size-3.5" aria-hidden="true" />
+                              Decline
+                            </Button>
+                          ) : null}
+
+                          {caps.canReroute ? (
+                            <Button
+                              variant="outline"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => handleOpenReroute(order)}
+                            >
+                              <Repeat2 className="size-3.5" aria-hidden="true" />
+                              {order.sourceBranchId ? "Reroute" : "Choose Donor"}
+                            </Button>
+                          ) : null}
+
+                          {caps.canCancel ? (
                             <Button
                               variant="ghost"
-                              size="icon-xs"
-                              tooltip="Inspect details"
-                              aria-label={`Inspect ${row.productName}`}
-                              onClick={() => openRowDrawer(row.id)}
-                              className="text-muted-foreground hover:text-foreground"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => cancelMutation.mutate({ id: order.id })}
                             >
-                              <ChevronRight className="size-4" aria-hidden="true" />
+                              Cancel
                             </Button>
-                          </TableCell>
-                        )}
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                          ) : null}
 
-            {/* Mobile Compact Card List (< 768px) */}
-            <div className="divide-y divide-border md:hidden" role="list" aria-label="Action queue">
-              {visible.map((row) => {
-                const isSelected = selected.has(row.id);
-                const isRowApproving =
-                  singleDecision.isPending &&
-                  singleDecision.variables?.id === row.id &&
-                  singleDecision.variables.decision === "approve";
-                const isRowRejecting =
-                  singleDecision.isPending &&
-                  singleDecision.variables?.id === row.id &&
-                  singleDecision.variables.decision === "reject";
-                const isRowBusy = isRowApproving || isRowRejecting || batchDecision.isPending;
+                          {caps.canReceive ? (
+                            <Button
+                              variant="primary"
+                              size="xs"
+                              disabled={isAnyMutating}
+                              onClick={() => receiveMutation.mutate({ id: order.id })}
+                            >
+                              <PackageCheck className="size-3.5" aria-hidden="true" />
+                              Confirm Receipt
+                            </Button>
+                          ) : null}
 
-                return (
-                  <div
-                    key={row.id}
-                    role="listitem"
-                    data-row-id={row.id}
-                    tabIndex={0}
-                    onClick={() => openRowDrawer(row.id)}
-                    onKeyDown={(event) => {
-                      if (event.target !== event.currentTarget) return;
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        openRowDrawer(row.id);
-                      }
-                    }}
-                    className={cn(
-                      "cursor-pointer space-y-2.5 p-4 transition-colors hover:bg-row-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/50",
-                      isSelected ? "bg-row-selected" : "",
-                    )}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <Badge
-                          tone={
-                            row.action === "TRANSFER"
-                              ? "transfer"
-                              : row.action === "REORDER"
-                                ? "reorder"
-                                : "markdown"
-                          }
-                        >
-                          {actionLabel(row.action)}
-                        </Badge>
-                        <Badge
-                          tone={
-                            row.status === "APPROVED"
-                              ? "approved"
-                              : row.status === "REJECTED"
-                                ? "rejected"
-                                : "pending"
-                          }
-                          dot
-                        >
-                          {statusLabel(row.status)}
-                        </Badge>
-                      </div>
-                      <span className="text-sm font-semibold text-foreground tabular-nums">
-                        {formatMoneyFull(row.netBenefit)}
-                      </span>
-                    </div>
-
-                    <div>
-                      <p className="font-semibold text-foreground">
-                        {formatProductDisplayName(row.productName, row.sku)}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {row.sku} · {row.category} · {formatNumber(row.quantity)} units
-                      </p>
-                      <p className="mt-0.5 text-xs text-foreground">
-                        {row.donorBranchName
-                          ? `${row.donorBranchName} → ${row.branchName}`
-                          : row.branchName}
-                      </p>
-                    </div>
-
-                    {canDecide ? (
-                      <div
-                        className="flex items-center justify-between gap-2 pt-1"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        <label className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                          <input
-                            type="checkbox"
-                            disabled={row.status !== "PENDING"}
-                            checked={isSelected}
-                            onChange={(event) => {
-                              const next = new Set(selected);
-                              if (event.target.checked) next.add(row.id);
-                              else next.delete(row.id);
-                              setSelected(next);
-                            }}
-                            className="size-4 rounded border-input accent-primary"
-                          />
-                          Select
-                        </label>
-                        <div className="flex items-center gap-1.5">
                           <Button
-                            variant="soft-success"
-                            size="xs"
-                            disabled={row.status !== "PENDING" || isRowBusy}
-                            loading={isRowApproving}
-                            onClick={() =>
-                              singleDecision.mutate({ id: row.id, decision: "approve" })
-                            }
+                            variant="ghost"
+                            size="icon-xs"
+                            tooltip="Inspect details"
+                            aria-label={`Inspect ${order.productName}`}
+                            onClick={() => openRowDrawer(order.id)}
+                            className="text-muted-foreground hover:text-foreground"
                           >
-                            <Check className="size-3" aria-hidden="true" />
-                            Approve
-                          </Button>
-                          <Button
-                            variant="soft-danger"
-                            size="xs"
-                            disabled={row.status !== "PENDING" || isRowBusy}
-                            loading={isRowRejecting}
-                            onClick={() => setRejectTargets([row])}
-                          >
-                            <X className="size-3" aria-hidden="true" />
-                            Reject
+                            <ChevronRight className="size-4" aria-hidden="true" />
                           </Button>
                         </div>
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          </>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
 
-        {/* Table Card Footer (Result count + Pagination) */}
-        {list.data && filteredRows.length > 0 ? (
+        {ordersQuery.data && filteredRows.length > 0 ? (
           <TableCardFooter>
             <span className="tabular-nums">
               Rows {formatNumber(startIndex + 1)}–
@@ -885,178 +873,363 @@ export function QueuePage() {
         ) : null}
       </TableCard>
 
-      {/* Sticky Bottom Batch Action Bar (visible only when rows are selected) */}
-      {canDecide && selectedRows.length > 0 ? (
-        <div
-          role="region"
-          aria-label="Batch actions"
-          className="sticky bottom-4 z-40 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border border-t-2 border-t-primary bg-card px-5 py-3 shadow-pop"
-        >
-          <div className="flex items-center gap-2 text-sm tabular-nums">
-            <span className="font-semibold text-foreground">
-              {formatNumber(selectedRows.length)} selected
-            </span>
-            <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground">
-              Total estimated gain{" "}
-              <span className="font-semibold text-foreground">
-                {formatMoneyFull(selectedWorth)}
-              </span>
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={batchDecision.isPending}
-              onClick={() => setSelected(new Set())}
-            >
-              Clear
-            </Button>
-            <Button
-              variant="soft-danger"
-              size="sm"
-              disabled={batchDecision.isPending}
-              onClick={() => setRejectTargets(selectedRows)}
-            >
-              <X className="size-3.5" aria-hidden="true" />
-              Reject selected
-            </Button>
-            <Button
-              variant="primary"
-              size="sm"
-              loading={
-                batchDecision.isPending && batchDecision.variables?.decision === "approve"
-              }
-              disabled={batchDecision.isPending}
-              onClick={() =>
-                batchDecision.mutate({
-                  ids: selectedRows.map((r) => r.id),
-                  decision: "approve",
-                })
-              }
-            >
-              <Check className="size-3.5" aria-hidden="true" />
-              Approve selected
-            </Button>
-          </div>
-        </div>
-      ) : null}
-
-      {/* Right-Hand Recommendation Detail Drawer */}
-      <RecommendationDrawer
-        recommendation={openRecommendation}
-        open={openRecommendation !== null}
+      <OrderDrawer
+        order={openOrder}
+        open={openOrder !== null}
         onOpenChange={handleDrawerOpenChange}
-        canDecide={canDecide}
-        isApproving={
-          Boolean(
-            openRecommendation &&
-              singleDecision.isPending &&
-              singleDecision.variables?.id === openRecommendation.id &&
-              singleDecision.variables.decision === "approve",
-          )
+        capabilities={
+          openOrder
+            ? getOrderCapabilities(openOrder, user, filters.tab)
+            : {
+                canCommit: false,
+                canRequestTransfer: false,
+                canRelease: false,
+                canDecline: false,
+                canReroute: false,
+                canCancel: false,
+                canReceive: false,
+              }
         }
-        isRejecting={
-          Boolean(
-            openRecommendation &&
-              singleDecision.isPending &&
-              singleDecision.variables?.id === openRecommendation.id &&
-              singleDecision.variables.decision === "reject",
-          )
-        }
-        onApprove={(row) => singleDecision.mutate({ id: row.id, decision: "approve" })}
-        onRequestReject={(row) => setRejectTargets([row])}
+        isBusy={isAnyMutating}
+        onCommit={handleCommitAction}
+        onRequestTransfer={handleRequestTransferAction}
+        onDecline={(o) => {
+          setDeclineTarget(o);
+          setDeclineComment("");
+        }}
+        onReroute={handleOpenReroute}
+        onCancel={(o) => cancelMutation.mutate({ id: o.id })}
+        onReceive={(o) => receiveMutation.mutate({ id: o.id })}
       />
 
-      {/* Shared Reason-Code Reject Confirmation Dialog */}
+      <RequestStockDialog
+        open={requestDialogOpen}
+        onOpenChange={setRequestDialogOpen}
+        defaultBranchId={effectiveBranch ?? null}
+      />
+
+      {/* Decline Dialog (Comment Required) */}
       <Dialog
-        open={rejectTargets !== null && rejectTargets.length > 0}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setRejectTargets(null);
+        open={declineTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeclineTarget(null);
+            setDeclineComment("");
+          }
         }}
       >
         <DialogContent className="max-w-md rounded-2xl">
           <DialogHeader>
+            <DialogTitle>Decline replenishment order</DialogTitle>
+            <DialogDescription>
+              Provide a reason for declining{" "}
+              <span className="font-medium text-foreground">
+                {declineTarget ? `${declineTarget.sku} · ${declineTarget.targetBranchName}` : ""}
+              </span>
+              . Your comment is recorded in the order audit trail.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="decline-comment" className="text-xs font-medium text-foreground">
+              Decline reason (required)
+            </label>
+            <Input
+              id="decline-comment"
+              placeholder="e.g., Shelf promotion needs surplus at donor store"
+              value={declineComment}
+              onChange={(e) => setDeclineComment(e.target.value)}
+              maxLength={500}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              disabled={declineMutation.isPending}
+              onClick={() => {
+                setDeclineTarget(null);
+                setDeclineComment("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              loading={declineMutation.isPending}
+              disabled={!declineComment.trim()}
+              onClick={() => {
+                if (declineTarget && declineComment.trim()) {
+                  declineMutation.mutate({
+                    id: declineTarget.id,
+                    comment: declineComment.trim(),
+                  });
+                }
+              }}
+            >
+              Confirm decline
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Force-Commit Comment Dialog */}
+      <Dialog
+        open={overrideTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setOverrideTarget(null);
+            setOverrideComment("");
+          }
+        }}
+      >
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Admin override commit</DialogTitle>
+            <DialogDescription>
+              Committing an awaiting-donor or open transfer directly requires a brief override comment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <label htmlFor="override-comment" className="text-xs font-medium text-foreground">
+              Override comment (required)
+            </label>
+            <Input
+              id="override-comment"
+              placeholder="e.g., Urgent weekend allocation approved by ops"
+              value={overrideComment}
+              onChange={(e) => setOverrideComment(e.target.value)}
+              maxLength={500}
+              required
+            />
+          </div>
+          <DialogFooter>
+            <Button
+              variant="secondary"
+              disabled={commitMutation.isPending}
+              onClick={() => {
+                setOverrideTarget(null);
+                setOverrideComment("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              loading={commitMutation.isPending}
+              disabled={!overrideComment.trim()}
+              onClick={() => {
+                if (overrideTarget && overrideComment.trim()) {
+                  commitMutation.mutate({
+                    id: overrideTarget.id,
+                    comment: overrideComment.trim(),
+                    force: true,
+                  });
+                }
+              }}
+            >
+              Confirm override release
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reroute / Select Donor Dialog */}
+      <Dialog
+        open={donorModalTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDonorModalTarget(null);
+            setDonorModalSelection(null);
+            setDonorModalComment("");
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto rounded-2xl">
+          <DialogHeader>
             <DialogTitle>
-              {rejectTargets && rejectTargets.length > 1
-                ? `Reject ${formatNumber(rejectTargets.length)} selected actions?`
-                : `Reject ${rejectTargets?.[0] ? formatProductDisplayName(rejectTargets[0].productName, rejectTargets[0].sku) : "action"}?`}
+              {donorModalTarget?.mode === "reroute"
+                ? "Reroute to another donor branch"
+                : "Select donor branch"}
             </DialogTitle>
             <DialogDescription>
-              Rejection records an audit log entry with the recommendation's reason codes and
-              excludes {rejectTargets && rejectTargets.length > 1 ? "these moves" : "this move"} from
-              execution.
+              Choose an eligible donor branch for{" "}
+              <span className="font-medium text-foreground">
+                {donorModalTarget
+                  ? `${formatNumber(donorModalTarget.order.quantity)} units of ${donorModalTarget.order.sku}`
+                  : ""}
+              </span>
+              .
             </DialogDescription>
           </DialogHeader>
 
-          {rejectTargets && rejectTargets.length > 0 ? (
-            <div className="space-y-3 text-xs">
-              <div className="rounded-xl border border-border bg-secondary/40 p-3">
-                <p className="font-medium text-foreground">
-                  Audit reason codes to record:
-                </p>
-                <div className="mt-2 space-y-1.5">
-                  {Array.from(
-                    new Set(rejectTargets.flatMap((item) => item.reasonCodes)),
-                  ).map((code) => (
-                    <div key={code} className="flex flex-wrap items-baseline gap-2">
-                      <Badge variant="secondary" className="shrink-0 font-mono text-[11px]">
-                        {code}
-                      </Badge>
-                      <span className="text-muted-foreground">{REASON_LABELS[code]}</span>
-                    </div>
-                  ))}
-                </div>
+          {donorModalTarget ? (
+            <div className="space-y-4">
+              <DonorPicker
+                sku={donorModalTarget.order.sku}
+                targetBranchId={donorModalTarget.order.targetBranchId}
+                quantity={donorModalTarget.order.quantity}
+                selectedDonorId={donorModalSelection}
+                onSelectDonor={setDonorModalSelection}
+                excludeBranchId={
+                  donorModalTarget.mode === "reroute"
+                    ? donorModalTarget.order.sourceBranchId
+                    : null
+                }
+              />
+
+              <div className="space-y-1.5">
+                <label htmlFor="donor-modal-comment" className="text-xs font-medium text-foreground">
+                  Note to donor branch (optional)
+                </label>
+                <Input
+                  id="donor-modal-comment"
+                  placeholder="Optional delivery or urgency context..."
+                  value={donorModalComment}
+                  onChange={(e) => setDonorModalComment(e.target.value)}
+                  maxLength={500}
+                />
               </div>
-              <p className="text-muted-foreground tabular-nums">
-                Foregone estimated gain:{" "}
-                <span className="font-semibold text-foreground">
-                  {formatMoneyFull(
-                    rejectTargets.reduce((sum, item) => sum + item.netBenefit, 0),
-                  )}
-                </span>
-              </p>
             </div>
           ) : null}
 
           <DialogFooter>
             <Button
               variant="secondary"
-              size="default"
-              disabled={singleDecision.isPending || batchDecision.isPending}
-              onClick={() => setRejectTargets(null)}
+              disabled={rerouteMutation.isPending || requestTransferMutation.isPending}
+              onClick={() => {
+                setDonorModalTarget(null);
+                setDonorModalSelection(null);
+                setDonorModalComment("");
+              }}
             >
               Cancel
             </Button>
             <Button
-              variant="destructive"
-              size="default"
-              loading={
-                (singleDecision.isPending && singleDecision.variables?.decision === "reject") ||
-                (batchDecision.isPending && batchDecision.variables?.decision === "reject")
-              }
+              variant="primary"
+              loading={rerouteMutation.isPending || requestTransferMutation.isPending}
+              disabled={!donorModalSelection}
               onClick={() => {
-                if (!rejectTargets || rejectTargets.length === 0) return;
-                if (rejectTargets.length === 1 && rejectTargets[0]) {
-                  singleDecision.mutate({ id: rejectTargets[0].id, decision: "reject" });
+                if (!donorModalTarget || !donorModalSelection) return;
+                const cleanComment = donorModalComment.trim() || undefined;
+                if (donorModalTarget.mode === "reroute") {
+                  rerouteMutation.mutate({
+                    id: donorModalTarget.order.id,
+                    sourceBranchId: donorModalSelection,
+                    ...(cleanComment ? { comment: cleanComment } : {}),
+                  });
                 } else {
-                  batchDecision.mutate({
-                    ids: rejectTargets.map((item) => item.id),
-                    decision: "reject",
-                    reasonCode: rejectTargets[0]?.reasonCodes[0] ?? "MANUAL_REVIEW",
+                  requestTransferMutation.mutate({
+                    id: donorModalTarget.order.id,
+                    sourceBranchId: donorModalSelection,
+                    ...(cleanComment ? { comment: cleanComment } : {}),
                   });
                 }
               }}
             >
-              Confirm reject
+              Send request to donor
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
   );
+}
+
+function buildOwnership(order: ReplenishmentOrder, user: User): OrderOwnership {
+  const ownsTarget = user.role === "admin" || user.branchIds.includes(order.targetBranchId);
+  const ownsSource = Boolean(
+    order.sourceBranchId && (user.role === "admin" || user.branchIds.includes(order.sourceBranchId)),
+  );
+  const intraCluster =
+    order.type === "TRANSFER" &&
+    Boolean(order.sourceBranchId) &&
+    (user.role === "admin" ||
+      (user.role === "manager" &&
+        user.branchIds.includes(order.targetBranchId) &&
+        user.branchIds.includes(order.sourceBranchId!)));
+  const isRequester = order.requestedBy?.userId === user.id;
+  return { ownsTarget, ownsSource, intraCluster, isRequester };
+}
+
+function getOrderCapabilities(
+  rawOrder: LifecycleOrder,
+  user: User | null,
+  tab: OrderQueueTab,
+): OrderActionCapabilities {
+  const order: ReplenishmentOrder =
+    rawOrder.status === "REJECTED" && rawOrder.lifecycleState === "pending"
+      ? { ...rawOrder, status: rawOrder.origin === "ENGINE" ? "SUGGESTED" : "OPEN_REQUEST" }
+      : rawOrder;
+
+  if (!user || user.role === "staff") {
+    const canReceiveStaff = Boolean(
+      user &&
+        order.status === "COMMITTED" &&
+        user.branchIds.includes(order.targetBranchId) &&
+        canTransition(order, user, "RECEIVE", {
+          ownsTarget: true,
+          ownsSource: false,
+          intraCluster: false,
+          isRequester: false,
+        }).allowed,
+    );
+    return {
+      canCommit: false,
+      canRequestTransfer: false,
+      canRelease: false,
+      canDecline: false,
+      canReroute: false,
+      canCancel: false,
+      canReceive: canReceiveStaff,
+    };
+  }
+
+  const ownership = buildOwnership(order, user);
+  const canCommitRaw = canTransition(order, user, "COMMIT", { ...ownership, hasComment: true }).allowed;
+  const canRelease =
+    tab === "incoming" && order.status === "AWAITING_DONOR" && canCommitRaw;
+  const canCommit =
+    tab === "suggested" &&
+    canCommitRaw &&
+    (user.role === "admin" || order.type !== "TRANSFER" || ownership.intraCluster);
+
+  const canRequestTransfer =
+    tab === "suggested" &&
+    order.type === "TRANSFER" &&
+    (order.status === "SUGGESTED" || order.status === "OPEN_REQUEST") &&
+    !ownership.intraCluster &&
+    canTransition(order, user, "REQUEST_TRANSFER", {
+      ...ownership,
+      targetDonorBranchId: order.sourceBranchId ?? "DONOR_PICKER",
+    }).allowed;
+
+  const canDecline = canTransition(order, user, "DECLINE", {
+    ...ownership,
+    hasComment: true,
+  }).allowed;
+
+  const canReroute =
+    tab === "outgoing" &&
+    order.type === "TRANSFER" &&
+    (user.role === "admin" || ownership.ownsTarget) &&
+    canTransition(order, user, "REROUTE", {
+      ...ownership,
+      targetDonorBranchId: "REROUTE_DONOR",
+    }).allowed;
+
+  const canCancel = canTransition(order, user, "CANCEL", ownership).allowed;
+  const canReceive =
+    order.status === "COMMITTED" && canTransition(order, user, "RECEIVE", ownership).allowed;
+
+  return {
+    canCommit,
+    canRequestTransfer,
+    canRelease,
+    canDecline,
+    canReroute,
+    canCancel,
+    canReceive,
+  };
 }
 
 function ToolbarSelect({
@@ -1082,38 +1255,57 @@ function ToolbarSelect({
   );
 }
 
-interface Filters {
+interface QueueFilters {
+  tab: OrderQueueTab;
+  view: QueueLifecycleView;
   branch: string;
   category: string;
-  action: string;
+  type: string;
   status: string;
   page: number;
 }
 
-function readFilters(params: URLSearchParams): Filters {
+function readFilters(params: URLSearchParams): QueueFilters {
   const page = Number(params.get("page") ?? "1");
+  const rawTab = params.get("tab") ?? "suggested";
+  const rawView = params.get("view") ?? "pending";
   return {
+    tab: isOrderQueueTab(rawTab) ? rawTab : "suggested",
+    view: isLifecycleView(rawView) ? rawView : "pending",
     branch: params.get("branch") ?? "",
     category: params.get("category") ?? "",
-    action: params.get("action") ?? "",
+    type: params.get("type") ?? "",
     status: params.get("status") ?? "",
     page: Number.isFinite(page) && page > 0 ? Math.floor(page) : 1,
   };
 }
 
-function toQuery(filters: Filters): RecommendationQuery {
-  return {
-    branch: filters.branch || undefined,
-    category: filters.category || undefined,
-    action: isAction(filters.action) ? filters.action : undefined,
-    status: isStatus(filters.status) ? filters.status : undefined,
-  };
+function isLifecycleView(value: string): value is QueueLifecycleView {
+  return value === "pending" || value === "in_progress" || value === "decided";
 }
 
-function isAction(value: string): value is Action {
+function lifecycleViewLabel(view: QueueLifecycleView): string {
+  if (view === "in_progress") return "In progress";
+  if (view === "decided") return "Decided";
+  return "Pending";
+}
+
+function isOrderQueueTab(value: string): value is OrderQueueTab {
+  return value === "suggested" || value === "incoming" || value === "outgoing";
+}
+
+function isOrderType(value: string): value is OrderType {
   return value === "TRANSFER" || value === "REORDER" || value === "MARKDOWN";
 }
 
-function isStatus(value: string): value is RecommendationStatus {
-  return value === "PENDING" || value === "APPROVED" || value === "REJECTED";
+function isOrderStatus(value: string): value is OrderStatus {
+  return (
+    value === "SUGGESTED" ||
+    value === "OPEN_REQUEST" ||
+    value === "AWAITING_DONOR" ||
+    value === "COMMITTED" ||
+    value === "RECEIVED" ||
+    value === "REJECTED" ||
+    value === "CANCELLED"
+  );
 }

@@ -1,7 +1,18 @@
-import { StockAlertSchema, type ActedBy, type StockAlert } from "@stockflow/core";
+import {
+  StockAlertResolutionSchema,
+  StockAlertSchema,
+  type ActedBy,
+  type StockAlert,
+  type StockAlertResolution,
+} from "@stockflow/core";
 
 export type DecideStockAlertResult =
   | { status: "decided"; alert: StockAlert }
+  | { status: "not_found" }
+  | { status: "already_decided"; alert: StockAlert };
+
+export type MemoryResolveStockAlertResult =
+  | { status: "resolved"; alert: StockAlert }
   | { status: "not_found" }
   | { status: "already_decided"; alert: StockAlert };
 
@@ -44,5 +55,31 @@ export class MemoryStockAlertStore {
     });
     this.alerts[idx] = updated;
     return { status: "decided", alert: updated };
+  }
+
+  resolve(id: string, resolution: StockAlertResolution): MemoryResolveStockAlertResult {
+    const idx = this.alerts.findIndex((a) => a.id === id);
+    if (idx < 0) return { status: "not_found" };
+    const existing = this.alerts[idx]!;
+    if (existing.status !== "PENDING") {
+      return { status: "already_decided", alert: { ...existing } };
+    }
+    const parsedResolution = StockAlertResolutionSchema.parse(resolution);
+    const updated = StockAlertSchema.parse({
+      ...existing,
+      status: "RESOLVED",
+      decidedBy: parsedResolution.decidedBy,
+      decidedAt: parsedResolution.decidedAt,
+      resolution: parsedResolution,
+    });
+    this.alerts[idx] = updated;
+    return { status: "resolved", alert: updated };
+  }
+
+  restore(snapshot: StockAlert): void {
+    const idx = this.alerts.findIndex((a) => a.id === snapshot.id);
+    if (idx >= 0) {
+      this.alerts[idx] = StockAlertSchema.parse(snapshot);
+    }
   }
 }

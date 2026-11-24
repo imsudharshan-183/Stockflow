@@ -1,19 +1,21 @@
 import {
-  ActionRecordSchema,
-  AuditEntrySchema,
-  AuditListSchema,
+  OrderEventSchema,
   RecommendationListSchema,
   RecommendationSchema,
+  ReplenishmentOrderSchema,
   can,
-  type ActionRecord,
-  type AuditEntry,
-  type AuditList,
   type BatchDecideItemResult,
   type Recommendation,
   type RecommendationList,
   type RecommendationQuery,
   type User,
 } from "@stockflow/core";
+import type { z } from "zod";
+import type {
+  ActionMetaRecord,
+  ApiAuditEntry,
+  QueueLifecycleView,
+} from "../repositories/types.js";
 import { DecisionConflictError, DecisionForbiddenError } from "./errors.js";
 import {
   adjustCommittedDelta,
@@ -24,7 +26,15 @@ import {
   type ProjectedPosition,
 } from "./projection.js";
 import {
+  ApiAuditListSchema,
+  LifecycleRecommendationListSchema,
+  LifecycleRecommendationSchema,
+  evaluateDecisionLifecycle,
+  type LifecycleRecommendation,
+} from "./queueLifecycle.js";
+import {
   applyDecisionHistoryToState,
+  bumpDecisionVersion,
   ensureInitialized,
   ensureInitializedSyncIfPossible,
   type StockRuntimeState,
@@ -36,6 +46,10 @@ import {
   isRecommendationInScope,
   scopeBranches,
 } from "./scope.js";
+
+const DAY_MS = 86_400_000;
+type ApiAuditList = z.infer<typeof ApiAuditListSchema>;
+type LifecycleRecommendationList = z.infer<typeof LifecycleRecommendationListSchema>;
 
 const DEMO_USER = "Demo Buyer";
 
@@ -63,9 +77,9 @@ export class DecisionService {
       if (seenRecIds.has(entry.recommendationId)) continue;
       seenRecIds.add(entry.recommendationId);
 
-      // Respect actions collection if present (e.g. if an external script cleared decisions).
+      // Respect actions collection if present (e.g. if an external script cleared decisions or an action was reopened).
       if (
-        this.runtime.decisions.size > 0 &&
+        (this.runtime.decisions.size > 0 || this.runtime.actionMeta.size > 0) &&
         this.runtime.decisions.get(entry.recommendationId) !== "APPROVED"
       ) {
         continue;
@@ -89,6 +103,11 @@ export class DecisionService {
         action: rec.action,
         quantity: rec.quantity,
       });
+    }
+
+    for (const adj of this.runtime.alertAdjustments.values()) {
+      if (replayCutoffAt && adj.decidedAt < replayCutoffAt) continue;
+      adjustCommittedDelta(this.runtime.committedDeltas, adj.sku, adj.branchId, 0, 0, adj.delta);
     }
   }
 
@@ -200,36 +219,197 @@ export class DecisionService {
     return true;
   }
 
-  list(query: RecommendationQuery, user?: User): RecommendationList {
+  list(
+    query: RecommendationQuery & { view?: QueueLifecycleView },
+    user?: User,
+  ): RecommendationList | LifecycleRecommendationList {
     ensureInitializedSyncIfPossible(this.runtime);
     const allBranchIds = this.runtime.data.branches.map((b) => b.id);
     const userBranches =
       user && user.role !== "admin" ? new Set(scopeBranches(user, allBranchIds)) : null;
 
     if (query.branch && userBranches && !userBranches.has(query.branch)) {
+      if (query.view) {
+        return LifecycleRecommendationListSchema.parse({
+          recommendations: [],
+          total: 0,
+          totalNetBenefit: 0,
+          view: query.view,
+        });
+      }
       return RecommendationListSchema.parse({ recommendations: [], total: 0 });
     }
 
-    // The engine keeps every positive-benefit draft. The queue only shows moves a buyer would act on.
-    const recommendations = this.runtime.analysis.recommendations
-      .filter(isMaterialRecommendation)
-      .filter((recommendation) => {
-        if (!userBranches) return true;
-        if (recommendation.action === "TRANSFER") {
-          return (
-            userBranches.has(recommendation.branchId) ||
-            (recommendation.donorBranchId ? userBranches.has(recommendation.donorBranchId) : false)
-          );
-        }
-        return userBranches.has(recommendation.branchId);
-      })
-      .filter((recommendation) => this.matches(recommendation, query))
-      .map((recommendation) => applyDecisionOverlay(recommendation, this.runtime.decisions));
+    if (!query.view) {
+      // The engine keeps every positive-benefit draft. The queue only shows moves a buyer would act on.
+      const recommendations = this.runtime.analysis.recommendations
+        .filter(isMaterialRecommendation)
+        .filter((recommendation) => {
+          if (!userBranches) return true;
+          if (recommendation.action === "TRANSFER") {
+            return (
+              userBranches.has(recommendation.branchId) ||
+              (recommendation.donorBranchId ? userBranches.has(recommendation.donorBranchId) : false)
+            );
+          }
+          return userBranches.has(recommendation.branchId);
+        })
+        .filter((recommendation) => this.matches(recommendation, query))
+        .map((recommendation) => applyDecisionOverlay(recommendation, this.runtime.decisions));
 
-    return RecommendationListSchema.parse({ recommendations, total: recommendations.length });
+      return RecommendationListSchema.parse({ recommendations, total: recommendations.length });
+    }
+
+    const nowMs = this.runtime.now();
+    const config = this.runtime.lifecycleConfig;
+    const seenRecIds = new Set<string>();
+    const results: LifecycleRecommendation[] = [];
+
+    const passesQueryNonStatus = (rec: Recommendation): boolean => {
+      if (query.branch) {
+        const matchesBranch =
+          rec.branchId === query.branch ||
+          (rec.action === "TRANSFER" && rec.donorBranchId === query.branch);
+        if (!matchesBranch) return false;
+      }
+      if (query.category && rec.category !== query.category) return false;
+      if (query.action && rec.action !== query.action) return false;
+      return true;
+    };
+
+    const passesUserBranches = (rec: Recommendation): boolean => {
+      if (!userBranches) return true;
+      if (rec.action === "TRANSFER") {
+        return (
+          userBranches.has(rec.branchId) ||
+          (rec.donorBranchId ? userBranches.has(rec.donorBranchId) : false)
+        );
+      }
+      return userBranches.has(rec.branchId);
+    };
+
+    for (const recommendation of this.runtime.analysis.recommendations) {
+      if (!isMaterialRecommendation(recommendation)) continue;
+      seenRecIds.add(recommendation.id);
+      if (!passesUserBranches(recommendation) || !passesQueryNonStatus(recommendation)) continue;
+
+      const evalResult = evaluateDecisionLifecycle({
+        recExists: true,
+        currentNetBenefit: recommendation.netBenefit,
+        currentCoverDays: recommendation.metrics.coverDays ?? null,
+        actionMeta: this.runtime.actionMeta.get(recommendation.id),
+        order: this.runtime.orders.get(recommendation.id),
+        orderMeta: this.runtime.orderLifecycleMeta.get(recommendation.id),
+        nowMs,
+        config,
+      });
+
+      if (evalResult.bucket !== query.view) continue;
+      if (query.status && evalResult.effectiveStatus !== query.status) continue;
+
+      results.push(
+        LifecycleRecommendationSchema.parse({
+          ...recommendation,
+          status: evalResult.effectiveStatus,
+          lifecycleState: evalResult.bucket,
+          reopenBadge: evalResult.reopenBadge,
+          canReopen: evalResult.canReopen,
+          decidedAt: evalResult.decidedAt,
+          rejectedUntil: evalResult.rejectedUntil,
+        }),
+      );
+    }
+
+    // Items whose engine recommendation no longer exists still belong in In progress or Decided if active/historical.
+    if (query.view === "decided" || query.view === "in_progress") {
+      for (const actionMeta of this.runtime.actionMeta.values()) {
+        if (seenRecIds.has(actionMeta.recommendationId)) continue;
+        const latestAudit = [...this.runtime.audit]
+          .reverse()
+          .find((a) => a.recommendationId === actionMeta.recommendationId);
+        if (!latestAudit) continue;
+
+        const branchObj = this.runtime.data.branches.find((b) => b.id === latestAudit.branchId);
+        const donorObj = latestAudit.donorBranchId
+          ? this.runtime.data.branches.find((b) => b.id === latestAudit.donorBranchId)
+          : undefined;
+        const productObj = this.runtime.data.products.find((p) => p.sku === latestAudit.sku);
+
+        const syntheticRec: Recommendation = {
+          id: actionMeta.recommendationId,
+          rank: 9999,
+          sku: latestAudit.sku,
+          productName: latestAudit.productName,
+          category: productObj?.category ?? "General",
+          branchId: latestAudit.branchId,
+          branchName: branchObj?.name ?? latestAudit.branchName,
+          donorBranchId: latestAudit.donorBranchId ?? null,
+          donorBranchName: donorObj?.name ?? null,
+          action: latestAudit.action,
+          quantity: 1,
+          netBenefit: latestAudit.netBenefit,
+          reasonCodes: latestAudit.reasonCodes,
+          reason: actionMeta.comment ?? actionMeta.reasonCode ?? "Historical decision",
+          status: actionMeta.status,
+          metrics: {
+            onHand: 0,
+            velocity: 0,
+            sigmaDemand: 0,
+            coverDays: null,
+            safetyStock: 0,
+            reorderPoint: 0,
+            lostMarginAvoided: 0,
+            carryingCostSaved: 0,
+            transferCost: 0,
+            markdownCost: 0,
+            donorOnHand: null,
+            donorCoverDays: null,
+            lostUnits: 0,
+          },
+        };
+
+        if (!passesUserBranches(syntheticRec) || !passesQueryNonStatus(syntheticRec)) continue;
+
+        const evalResult = evaluateDecisionLifecycle({
+          recExists: false,
+          currentNetBenefit: latestAudit.netBenefit,
+          currentCoverDays: actionMeta.snapshot?.targetCoverDays ?? null,
+          actionMeta,
+          order: this.runtime.orders.get(actionMeta.recommendationId),
+          orderMeta: this.runtime.orderLifecycleMeta.get(actionMeta.recommendationId),
+          nowMs,
+          config,
+        });
+
+        if (evalResult.bucket !== query.view) continue;
+        if (query.status && evalResult.effectiveStatus !== query.status) continue;
+
+        results.push(
+          LifecycleRecommendationSchema.parse({
+            ...syntheticRec,
+            status: evalResult.effectiveStatus,
+            lifecycleState: evalResult.bucket,
+            reopenBadge: evalResult.reopenBadge,
+            canReopen: evalResult.canReopen,
+            decidedAt: evalResult.decidedAt,
+            rejectedUntil: evalResult.rejectedUntil,
+          }),
+        );
+      }
+    }
+
+    const totalNetBenefit =
+      Math.round(results.reduce((acc, item) => acc + item.netBenefit, 0) * 100) / 100;
+
+    return LifecycleRecommendationListSchema.parse({
+      recommendations: results,
+      total: results.length,
+      totalNetBenefit,
+      view: query.view,
+    });
   }
 
-  listAudit(user?: User, branchId?: string): AuditList {
+  listAudit(user?: User, branchId?: string): ApiAuditList {
     ensureInitializedSyncIfPossible(this.runtime);
     if (user && !can(user.role, "audit:read")) {
       throw new DecisionForbiddenError("Staff cannot view audit log");
@@ -250,7 +430,7 @@ export class DecisionService {
     if (branchId) {
       entries = entries.filter((e) => e.branchId === branchId || e.donorBranchId === branchId);
     }
-    return AuditListSchema.parse({ entries });
+    return ApiAuditListSchema.parse({ entries });
   }
 
   private buildDecisionRecords(
@@ -259,14 +439,31 @@ export class DecisionService {
     decidedAt: string,
     user?: User,
     reasonCode?: string,
-  ): { record: ActionRecord; entry: AuditEntry } {
-    const record: ActionRecord = ActionRecordSchema.parse({
+    comment?: string,
+  ): { record: ActionMetaRecord; entry: ApiAuditEntry } {
+    const decidedMs = Date.parse(decidedAt);
+    const snoozeMs = this.runtime.lifecycleConfig.rejectSnoozeDays * DAY_MS;
+    const record: ActionMetaRecord = {
       id: `${existing.id}:${status}:${decidedAt}`,
       recommendationId: existing.id,
       status,
       decidedAt,
-    });
-    const entry = AuditEntrySchema.parse({
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(comment ? { comment } : {}),
+      ...(status === "REJECTED"
+        ? {
+            snapshot: {
+              netBenefit: existing.netBenefit,
+              targetCoverDays: existing.metrics.coverDays ?? null,
+            },
+            rejectedUntil: Number.isFinite(decidedMs)
+              ? new Date(decidedMs + snoozeMs).toISOString()
+              : new Date(this.runtime.now() + snoozeMs).toISOString(),
+          }
+        : {}),
+      reopenedAt: null,
+    };
+    const entry: ApiAuditEntry = {
       id: record.id,
       at: decidedAt,
       user: user ? user.name : DEMO_USER,
@@ -280,22 +477,45 @@ export class DecisionService {
       donorBranchId: existing.donorBranchId,
       netBenefit: existing.netBenefit,
       reasonCodes: existing.reasonCodes,
-      reasonCode,
-      actedBy: user
+      ...(reasonCode ? { reasonCode } : {}),
+      ...(comment ? { comment } : {}),
+      ...(user
         ? {
-            userId: user.id,
-            name: user.name,
-            role: user.role,
+            actedBy: {
+              userId: user.id,
+              name: user.name,
+              role: user.role,
+            },
           }
-        : undefined,
-    });
+        : {}),
+    };
     return { record, entry };
+  }
+
+  private canDecideRecommendation(rec: Recommendation, nowMs: number): boolean {
+    const meta = this.runtime.actionMeta.get(rec.id);
+    const order = this.runtime.orders.get(rec.id);
+    if (!meta && !order && !this.runtime.decisions.has(rec.id) && rec.status === "PENDING") {
+      return true;
+    }
+    const evalResult = evaluateDecisionLifecycle({
+      recExists: true,
+      currentNetBenefit: rec.netBenefit,
+      currentCoverDays: rec.metrics.coverDays ?? null,
+      actionMeta: meta,
+      order,
+      orderMeta: this.runtime.orderLifecycleMeta.get(rec.id),
+      nowMs,
+      config: this.runtime.lifecycleConfig,
+    });
+    return evalResult.bucket === "pending";
   }
 
   async decide(
     id: string,
     status: "APPROVED" | "REJECTED",
     user?: User,
+    opts?: { reasonCode?: string; comment?: string },
   ): Promise<Recommendation | null> {
     await ensureInitialized(this.runtime);
     if (user && !can(user.role, "recommendations:decide")) {
@@ -315,7 +535,10 @@ export class DecisionService {
       throw new DecisionConflictError("Decision already in progress for this recommendation");
     }
 
-    const alreadyDecided = this.runtime.decisions.has(id) || existing.status !== "PENDING";
+    const nowMs = this.runtime.now();
+    const hadPriorAction = this.runtime.actionMeta.has(id) || this.runtime.decisions.has(id);
+    const canDecide = this.canDecideRecommendation(existing, nowMs);
+    const alreadyDecided = !canDecide;
     this.runtime.inflightDecisionIds.add(id);
     let staged: Array<{ sku: string; branchId: string; reserved: number; inTransit: number }> = [];
     try {
@@ -327,18 +550,33 @@ export class DecisionService {
         staged = this.stageApprovedDelta(existing);
       }
 
-      const decidedAt = new Date().toISOString();
-      const { record, entry } = this.buildDecisionRecords(existing, status, decidedAt, user);
-      const { persistedIds } = await this.runtime.repo.saveDecisionBatch([record], [entry]);
+      const decidedAt = new Date(nowMs).toISOString();
+      const { record, entry } = this.buildDecisionRecords(
+        existing,
+        status,
+        decidedAt,
+        user,
+        opts?.reasonCode,
+        opts?.comment,
+      );
+      const saveOptions = !alreadyDecided && hadPriorAction
+        ? { allowOverwriteIds: new Set([id]) }
+        : undefined;
+      const { persistedIds } = await this.runtime.repo.saveDecisionBatch(
+        [record],
+        [entry],
+        saveOptions,
+      );
       if (persistedIds.has(id)) {
         this.runtime.decisions.set(id, status);
+        this.runtime.actionMeta.set(id, record);
         this.runtime.audit.push(entry);
-        this.runtime.scopedKpiCache.clear();
+        bumpDecisionVersion(this.runtime);
       } else {
         this.rollbackStagedDeltas(id, staged);
         // Another instance decided this recommendation first; refresh local overlay.
         applyDecisionHistoryToState(this.runtime, await this.runtime.repo.listActions());
-        this.runtime.scopedKpiCache.clear();
+        bumpDecisionVersion(this.runtime);
       }
       return RecommendationSchema.parse(applyDecisionOverlay(existing, this.runtime.decisions));
     } catch (err) {
@@ -354,6 +592,7 @@ export class DecisionService {
     status: "APPROVED" | "REJECTED",
     user?: User,
     reasonCode?: string,
+    comment?: string,
   ): Promise<BatchDecideItemResult[]> {
     await ensureInitialized(this.runtime);
     if (user && !can(user.role, "recommendations:decide")) {
@@ -361,12 +600,15 @@ export class DecisionService {
     }
 
     const byId = new Map(this.runtime.analysis.recommendations.map((r) => [r.id, r]));
-    const decidedAt = new Date().toISOString();
+    const nowMs = this.runtime.now();
+    const decidedAt = new Date(nowMs).toISOString();
     const seen = new Set<string>();
     const results: BatchDecideItemResult[] = [];
-    const actionsToSave: ActionRecord[] = [];
-    const auditsToSave: AuditEntry[] = [];
+    const actionsToSave: ActionMetaRecord[] = [];
+    const auditsToSave: ApiAuditEntry[] = [];
+    const allowOverwriteIds = new Set<string>();
     const effectiveReasonCode = status === "REJECTED" ? reasonCode : undefined;
+    const effectiveComment = status === "REJECTED" ? comment : undefined;
     const stagedByRecId = new Map<
       string,
       Array<{ sku: string; branchId: string; reserved: number; inTransit: number }>
@@ -385,9 +627,8 @@ export class DecisionService {
         }
         if (
           seen.has(id) ||
-          this.runtime.decisions.has(id) ||
           this.runtime.inflightDecisionIds.has(id) ||
-          existing.status !== "PENDING"
+          !this.canDecideRecommendation(existing, nowMs)
         ) {
           results.push({ id, status: "already_decided" });
           continue;
@@ -407,12 +648,16 @@ export class DecisionService {
 
         seen.add(id);
         this.runtime.inflightDecisionIds.add(id);
+        if (this.runtime.actionMeta.has(id) || this.runtime.decisions.has(id)) {
+          allowOverwriteIds.add(id);
+        }
         const { record, entry } = this.buildDecisionRecords(
           existing,
           status,
           decidedAt,
           user,
           effectiveReasonCode,
+          effectiveComment,
         );
         actionsToSave.push(record);
         auditsToSave.push(entry);
@@ -421,9 +666,11 @@ export class DecisionService {
 
       if (actionsToSave.length > 0) {
         // DECISION: Atomic bulk persist (<= 3 DB ops total with getDataVersion) without bumping dataVersion.
+        const saveOptions = allowOverwriteIds.size > 0 ? { allowOverwriteIds } : undefined;
         const { persistedIds, duplicateIds } = await this.runtime.repo.saveDecisionBatch(
           actionsToSave,
           auditsToSave,
+          saveOptions,
         );
         for (const item of results) {
           if (item.status === "ok" && duplicateIds.has(item.id)) {
@@ -438,6 +685,7 @@ export class DecisionService {
         for (const record of actionsToSave) {
           if (persistedIds.has(record.recommendationId)) {
             this.runtime.decisions.set(record.recommendationId, record.status);
+            this.runtime.actionMeta.set(record.recommendationId, record);
           }
         }
         for (const entry of auditsToSave) {
@@ -446,7 +694,7 @@ export class DecisionService {
           }
         }
         if (persistedIds.size > 0) {
-          this.runtime.scopedKpiCache.clear();
+          bumpDecisionVersion(this.runtime);
         }
         if (duplicateIds.size > 0) {
           applyDecisionHistoryToState(this.runtime, await this.runtime.repo.listActions());
@@ -463,6 +711,248 @@ export class DecisionService {
       for (const id of seen) {
         this.runtime.inflightDecisionIds.delete(id);
       }
+    }
+  }
+
+  async reopen(id: string, user?: User, comment?: string): Promise<LifecycleRecommendation | null> {
+    await ensureInitialized(this.runtime);
+    if (user && !can(user.role, "recommendations:decide")) {
+      throw new DecisionForbiddenError("Staff cannot reopen decisions");
+    }
+
+    const existing = this.runtime.analysis.recommendations.find((r) => r.id === id);
+    const actionMeta = this.runtime.actionMeta.get(id);
+    const existingOrder = this.runtime.orders.get(id);
+    if (!existing && !actionMeta && (!existingOrder || existingOrder.isVirtual)) {
+      return null;
+    }
+
+    const latestAudit = [...this.runtime.audit].reverse().find((a) => a.recommendationId === id);
+    if (existing) {
+      if (!isRecommendationInScope(existing, user)) {
+        throw new DecisionForbiddenError("Cannot reopen decision outside your assigned branches");
+      }
+    } else if (existingOrder) {
+      const inScope =
+        !user ||
+        user.role === "admin" ||
+        isBranchInScope(user, existingOrder.targetBranchId) ||
+        (existingOrder.sourceBranchId ? isBranchInScope(user, existingOrder.sourceBranchId) : false);
+      if (!inScope) {
+        throw new DecisionForbiddenError("Cannot reopen decision outside your assigned branches");
+      }
+    } else if (latestAudit && user && user.role !== "admin") {
+      const inScope =
+        isBranchInScope(user, latestAudit.branchId) ||
+        (latestAudit.donorBranchId ? isBranchInScope(user, latestAudit.donorBranchId) : false);
+      if (!inScope) {
+        throw new DecisionForbiddenError("Cannot reopen decision outside your assigned branches");
+      }
+    }
+
+    if (this.runtime.inflightDecisionIds.has(id)) {
+      throw new DecisionConflictError("Decision operation already in progress");
+    }
+
+    const nowMs = this.runtime.now();
+    const reopenedAt = new Date(nowMs).toISOString();
+    const evalResult = evaluateDecisionLifecycle({
+      recExists: Boolean(existing),
+      currentNetBenefit: existing?.netBenefit ?? existingOrder?.engineSnapshot.netBenefitBhd ?? 0,
+      currentCoverDays:
+        existing?.metrics.coverDays ?? existingOrder?.engineSnapshot.metrics?.coverDays ?? null,
+      actionMeta,
+      order: existingOrder,
+      orderMeta: this.runtime.orderLifecycleMeta.get(id),
+      nowMs,
+      config: this.runtime.lifecycleConfig,
+    });
+
+    if (evalResult.bucket === "pending") {
+      throw new DecisionConflictError("Recommendation is already pending");
+    }
+    if (!evalResult.canReopen) {
+      throw new DecisionConflictError("Reopen window (24 hours) has expired for this decision");
+    }
+
+    this.runtime.inflightDecisionIds.add(id);
+    try {
+      const committed = this.runtime.committedRecommendationIds.get(id);
+      if (committed) {
+        if (committed.action === "TRANSFER") {
+          if (committed.donorBranchId) {
+            adjustCommittedDelta(
+              this.runtime.committedDeltas,
+              committed.sku,
+              committed.donorBranchId,
+              -committed.quantity,
+              0,
+            );
+          }
+          adjustCommittedDelta(
+            this.runtime.committedDeltas,
+            committed.sku,
+            committed.branchId,
+            0,
+            -committed.quantity,
+          );
+        } else if (committed.action === "REORDER") {
+          adjustCommittedDelta(
+            this.runtime.committedDeltas,
+            committed.sku,
+            committed.branchId,
+            0,
+            -committed.quantity,
+          );
+        } else if (committed.action === "MARKDOWN") {
+          adjustCommittedDelta(
+            this.runtime.committedDeltas,
+            committed.sku,
+            committed.branchId,
+            -committed.quantity,
+            0,
+          );
+        }
+        this.runtime.committedRecommendationIds.delete(id);
+      }
+
+      const branchId = existing?.branchId ?? existingOrder?.targetBranchId ?? latestAudit?.branchId ?? "";
+      const branchName = existing?.branchName ?? existingOrder?.targetBranchName ?? latestAudit?.branchName ?? "";
+      const sku = existing?.sku ?? existingOrder?.sku ?? latestAudit?.sku ?? "";
+      const productName =
+        existing?.productName ?? existingOrder?.productName ?? latestAudit?.productName ?? "";
+      const donorBranchId =
+        existing?.donorBranchId ?? existingOrder?.sourceBranchId ?? latestAudit?.donorBranchId ?? null;
+      const action = existing?.action ?? (existingOrder?.type ?? latestAudit?.action ?? "REORDER");
+      const netBenefit =
+        existing?.netBenefit ?? existingOrder?.engineSnapshot.netBenefitBhd ?? latestAudit?.netBenefit ?? 0;
+      const reasonCodes: Recommendation["reasonCodes"] =
+        existing?.reasonCodes ?? latestAudit?.reasonCodes ?? ["BELOW_REORDER_POINT"];
+
+      const auditEntry: ApiAuditEntry = {
+        id: `${id}:REOPENED:${reopenedAt}`,
+        at: reopenedAt,
+        user: user ? user.name : DEMO_USER,
+        recommendationId: id,
+        decision: "REOPENED",
+        action,
+        sku,
+        productName,
+        branchId,
+        branchName,
+        donorBranchId,
+        netBenefit,
+        reasonCodes,
+        ...(comment?.trim() ? { comment: comment.trim() } : {}),
+        ...(user
+          ? {
+              actedBy: {
+                userId: user.id,
+                name: user.name,
+                role: user.role,
+              },
+            }
+          : {}),
+      };
+
+      if (actionMeta) {
+        const updatedAction = await this.runtime.repo.reopenAction(id, reopenedAt, auditEntry);
+        if (!updatedAction) {
+          await this.runtime.repo.saveAudit(auditEntry);
+        }
+        this.runtime.actionMeta.set(id, { ...actionMeta, reopenedAt });
+      } else {
+        await this.runtime.repo.saveAudit(auditEntry);
+      }
+
+      if (existingOrder && !existingOrder.isVirtual) {
+        const resetStatus = existingOrder.origin === "ENGINE" ? "SUGGESTED" : "OPEN_REQUEST";
+        const updatedOrder = ReplenishmentOrderSchema.parse({
+          ...existingOrder,
+          status: resetStatus,
+          updatedAt: reopenedAt,
+          committedAt: null,
+          awaitingDonorSince: null,
+          escalatedAt: null,
+          isVirtual: false,
+        });
+        const orderEvent = OrderEventSchema.parse({
+          id: `evt_reopen_${id}_${nowMs}`,
+          orderId: id,
+          at: reopenedAt,
+          actor: user
+            ? { userId: user.id, name: user.name, role: user.role }
+            : { userId: "usr_system", name: DEMO_USER, role: "admin" },
+          action: "MIGRATED",
+          fromStatus: existingOrder.status,
+          toStatus: resetStatus,
+          dispositionCode: "REOPENED",
+          comment: comment?.trim() || "Reopened within 24h window",
+          sourceBranchId: existingOrder.sourceBranchId,
+          quantity: existingOrder.quantity,
+        });
+        const prevMeta = this.runtime.orderLifecycleMeta.get(id) ?? {};
+        const nextMeta = { ...prevMeta, reopenedAt };
+        const savedOrder = await this.runtime.repo.saveOrderWithEvent(
+          updatedOrder,
+          orderEvent,
+          existingOrder.status,
+          nextMeta,
+        );
+        if (savedOrder.status === "saved") {
+          this.runtime.orders.set(id, savedOrder.order);
+        }
+        this.runtime.orderLifecycleMeta.set(id, nextMeta);
+      }
+
+      this.runtime.decisions.delete(id);
+      this.runtime.audit.push(auditEntry);
+      bumpDecisionVersion(this.runtime);
+
+      const fallbackRec: Recommendation = existing ?? {
+        id,
+        rank: 9999,
+        sku,
+        productName,
+        category: "General",
+        branchId,
+        branchName,
+        donorBranchId,
+        donorBranchName: existingOrder?.sourceBranchName ?? null,
+        action,
+        quantity: existingOrder?.quantity ?? 1,
+        netBenefit,
+        reasonCodes,
+        reason: comment?.trim() || "Reopened decision",
+        status: "PENDING",
+        metrics: {
+          onHand: 0,
+          velocity: 0,
+          sigmaDemand: 0,
+          coverDays: null,
+          safetyStock: 0,
+          reorderPoint: 0,
+          lostMarginAvoided: 0,
+          carryingCostSaved: 0,
+          transferCost: 0,
+          markdownCost: 0,
+          donorOnHand: null,
+          donorCoverDays: null,
+          lostUnits: 0,
+        },
+      };
+
+      return LifecycleRecommendationSchema.parse({
+        ...fallbackRec,
+        status: "PENDING",
+        lifecycleState: "pending",
+        reopenBadge: null,
+        canReopen: false,
+        decidedAt: null,
+        rejectedUntil: null,
+      });
+    } finally {
+      this.runtime.inflightDecisionIds.delete(id);
     }
   }
 }

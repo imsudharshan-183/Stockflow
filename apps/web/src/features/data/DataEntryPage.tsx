@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { CheckCircle2, Download, Pencil, Plus, Trash2, Upload } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -35,10 +35,10 @@ import {
   TableToolbar,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { queryKeys } from "@/hooks/queryKeys";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { useLocationScope } from "@/hooks/useLocationScope";
 import { api } from "@/lib/api";
-import { formatDate, formatNumber } from "@/lib/format";
+import { formatBahrainDateTime, formatDate, formatNumber, getBahrainToday } from "@/lib/format";
 
 interface SalesEntryRow {
   id: string;
@@ -48,6 +48,40 @@ interface SalesEntryRow {
   unitsSold: number;
   onHand: number;
   updatedAt: string;
+}
+
+function extractCsvPreviewMeta(csvText: string): {
+  headerLine: string;
+  dataLines: string[];
+  minDate: string | null;
+  maxDate: string | null;
+} {
+  const cleaned = csvText.replace(/^\uFEFF/, "");
+  const nonEmptyLines = cleaned
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (nonEmptyLines.length === 0) {
+    return { headerLine: "", dataLines: [], minDate: null, maxDate: null };
+  }
+  const headerLine = nonEmptyLines[0] ?? "";
+  const dataLines = nonEmptyLines.slice(1);
+  const headers = headerLine.split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
+  const dateColIdx = headers.indexOf("date");
+  let minDate: string | null = null;
+  let maxDate: string | null = null;
+  const isoRe = /^\d{4}-\d{2}-\d{2}$/;
+
+  for (const line of dataLines) {
+    const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
+    const candidate =
+      dateColIdx >= 0 ? (cells[dateColIdx] ?? "") : (cells.find((c) => isoRe.test(c)) ?? "");
+    if (!isoRe.test(candidate)) continue;
+    if (!minDate || candidate < minDate) minDate = candidate;
+    if (!maxDate || candidate > maxDate) maxDate = candidate;
+  }
+
+  return { headerLine, dataLines, minDate, maxDate };
 }
 
 export function DataEntryPage() {
@@ -74,7 +108,7 @@ export function DataEntryPage() {
   });
 
   const locations = useMemo(() => locationsQuery.data?.locations ?? [], [locationsQuery.data]);
-  const todayIso = new Date().toISOString().slice(0, 10);
+  const todayIso = getBahrainToday().isoDate;
 
   // Add entry form state
   const [branchId, setBranchId] = useState(selectedLocation ?? "");
@@ -139,20 +173,27 @@ export function DataEntryPage() {
   const [deletingEntry, setDeletingEntry] = useState<SalesEntryRow | null>(null);
 
   // Import CSV state
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<{
     inserted: number;
     updated: number;
     errors: Array<{ row: number; message: string }>;
+    fileName: string;
+    importedAt: string;
+    minDate: string | null;
+    maxDate: string | null;
+    headerLine: string;
+    dataLines: string[];
   } | null>(null);
 
+  const importsQuery = useQuery({
+    queryKey: queryKeys.salesImports,
+    queryFn: () => api.listSalesImports(10),
+  });
+
   const invalidateAll = () => {
-    void queryClient.invalidateQueries({ queryKey: ["salesEntries"] });
-    void queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-    void queryClient.invalidateQueries({ queryKey: ["kpis"] });
-    void queryClient.invalidateQueries({ queryKey: ["locations"] });
-    void queryClient.invalidateQueries({ queryKey: ["locationSummary"] });
-    void queryClient.invalidateQueries({ queryKey: ["locationInventory"] });
+    void invalidateOperationalQueries(queryClient);
   };
 
   const createMutation = useMutation({
@@ -206,13 +247,36 @@ export function DataEntryPage() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (file: File) => api.importSalesCsv(file),
-    onSuccess: (res) => {
+    mutationFn: async (file: File) => {
+      const text = typeof file.text === "function" ? await file.text().catch(() => "") : "";
+      const meta = extractCsvPreviewMeta(text);
+      const res = await api.importSalesCsv(file);
+      return { res, file, meta };
+    },
+    onSuccess: ({ res, file, meta }) => {
       invalidateAll();
-      setImportResult(res);
-      toast.success(
-        `Import complete: ${formatNumber(res.inserted)} inserted, ${formatNumber(res.updated)} updated`,
-      );
+      setImportResult({
+        ...res,
+        fileName: file.name,
+        importedAt: new Date().toISOString(),
+        minDate: meta.minDate,
+        maxDate: meta.maxDate,
+        headerLine: meta.headerLine,
+        dataLines: meta.dataLines,
+      });
+      if (res.errors.length === 0) {
+        setCsvFile(null);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        toast.success(
+          `Import complete: ${formatNumber(res.inserted)} inserted, ${formatNumber(res.updated)} updated, 0 errors`,
+        );
+      } else {
+        toast.error(
+          `Import finished with ${formatNumber(res.errors.length)} error(s); review offending rows below`,
+        );
+      }
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "CSV import failed");
@@ -246,10 +310,19 @@ export function DataEntryPage() {
 
   const downloadErrorsCsv = () => {
     if (!importResult || importResult.errors.length === 0) return;
-    const header = "row,message";
-    const rows = importResult.errors.map(
-      (e) => `${e.row},"${e.message.replace(/"/g, '""')}"`,
-    );
+    const hasSourceLines =
+      importResult.headerLine.length > 0 && importResult.dataLines.length > 0;
+    const header = hasSourceLines ? `${importResult.headerLine},error` : "row,message";
+    const rows = importResult.errors.map((e) => {
+      const escapedMsg = `"${e.message.replace(/"/g, '""')}"`;
+      if (hasSourceLines) {
+        const original = importResult.dataLines[e.row - 1];
+        if (original !== undefined) {
+          return `${original},${escapedMsg}`;
+        }
+      }
+      return `${e.row},${escapedMsg}`;
+    });
     const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -549,91 +622,212 @@ export function DataEntryPage() {
 
         {/* Tab 3: Import CSV */}
         <TabsContent value="import" className="mt-4">
-          <Card className="max-w-xl rounded-2xl border border-border shadow-card">
-            <CardHeader>
-              <CardTitle className="text-base">Import daily entries CSV</CardTitle>
-              <CardDescription>
-                Upload a CSV (max 5MB) with header: branchId,sku,date,unitsSold,onHand.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  onClick={downloadTemplate}
-                  className="gap-1.5"
-                >
-                  <Download className="size-3.5" aria-hidden="true" />
-                  Download template.csv
-                </Button>
-              </div>
+          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:items-start">
+            <Card className="rounded-2xl border border-border shadow-card">
+              <CardHeader>
+                <CardTitle className="text-base">Import daily entries CSV</CardTitle>
+                <CardDescription>
+                  Upload a CSV (max 5MB) with header: branchId,sku,date,unitsSold,onHand.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    onClick={downloadTemplate}
+                    className="gap-1.5"
+                  >
+                    <Download className="size-3.5" aria-hidden="true" />
+                    Download template.csv
+                  </Button>
+                </div>
 
-              <div className="space-y-1.5">
-                <label htmlFor="csv-upload" className="text-xs font-medium text-foreground">
-                  CSV file
-                </label>
-                <Input
-                  id="csv-upload"
-                  type="file"
-                  accept=".csv,text/csv"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setCsvFile(f);
-                    setImportResult(null);
-                  }}
-                />
-              </div>
-
-              <Button
-                type="button"
-                variant="primary"
-                disabled={!csvFile}
-                loading={importMutation.isPending}
-                onClick={() => {
-                  if (csvFile) importMutation.mutate(csvFile);
-                }}
-                className="gap-1.5"
-              >
-                <Upload className="size-4" aria-hidden="true" />
-                Upload & import
-              </Button>
-
-              {importResult ? (
-                <div className="space-y-3 rounded-xl border border-border bg-secondary/40 p-4 text-xs">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Badge tone="ok">Inserted: {formatNumber(importResult.inserted)}</Badge>
-                    <Badge tone="reorder">Updated: {formatNumber(importResult.updated)}</Badge>
-                    <Badge tone={importResult.errors.length > 0 ? "risk" : "ok"}>
-                      Errors: {formatNumber(importResult.errors.length)}
-                    </Badge>
-                  </div>
-                  {importResult.errors.length > 0 ? (
-                    <div className="space-y-2">
-                      <ul className="max-h-36 space-y-1 overflow-y-auto text-risk-text">
-                        {importResult.errors.slice(0, 20).map((err) => (
-                          <li key={`${err.row}-${err.message}`}>
-                            Row {err.row}: {err.message}
-                          </li>
-                        ))}
-                      </ul>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="sm"
-                        onClick={downloadErrorsCsv}
-                        className="gap-1.5"
-                      >
-                        <Download className="size-3.5" aria-hidden="true" />
-                        Download error rows CSV
-                      </Button>
-                    </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="csv-upload" className="text-xs font-medium text-foreground">
+                    CSV file
+                  </label>
+                  <Input
+                    ref={fileInputRef}
+                    id="csv-upload"
+                    type="file"
+                    accept=".csv,text/csv"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0] ?? null;
+                      setCsvFile(f);
+                      setImportResult(null);
+                    }}
+                  />
+                  {csvFile ? (
+                    <p className="text-xs text-muted-foreground">
+                      Selected: <span className="font-mono text-foreground">{csvFile.name}</span>
+                    </p>
                   ) : null}
                 </div>
-              ) : null}
-            </CardContent>
-          </Card>
+
+                <Button
+                  type="button"
+                  variant="primary"
+                  disabled={!csvFile}
+                  loading={importMutation.isPending}
+                  onClick={() => {
+                    if (csvFile) importMutation.mutate(csvFile);
+                  }}
+                  className="gap-1.5"
+                >
+                  <Upload className="size-4" aria-hidden="true" />
+                  Upload &amp; import
+                </Button>
+
+                {importResult ? (
+                  <div className="space-y-3 rounded-xl border border-border bg-secondary/40 p-4 text-xs">
+                    {importResult.errors.length === 0 ? (
+                      <div
+                        role="status"
+                        className="rounded-lg border border-gain-ring bg-gain-bg/70 px-3 py-2.5 text-gain-text"
+                      >
+                        <div className="flex items-start gap-2">
+                          <CheckCircle2 className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                          <div className="space-y-0.5">
+                            <p className="font-semibold">
+                              Import complete: {formatNumber(importResult.inserted)} inserted,{" "}
+                              {formatNumber(importResult.updated)} updated, 0 errors
+                            </p>
+                            <p className="text-[11px] opacity-90">
+                              <span className="font-mono">{importResult.fileName}</span> ·{" "}
+                              {formatBahrainDateTime(importResult.importedAt)} (Bahrain)
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-risk-ring bg-risk-bg/70 px-3 py-2 text-risk-text">
+                        <p className="font-semibold">
+                          Import finished with {formatNumber(importResult.errors.length)} error(s)
+                        </p>
+                        <p className="text-[11px] opacity-90">
+                          <span className="font-mono">{importResult.fileName}</span> ·{" "}
+                          {formatBahrainDateTime(importResult.importedAt)} (Bahrain)
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Badge tone="ok">Inserted: {formatNumber(importResult.inserted)}</Badge>
+                      <Badge tone="reorder">Updated: {formatNumber(importResult.updated)}</Badge>
+                      <Badge tone={importResult.errors.length > 0 ? "risk" : "ok"}>
+                        Errors: {formatNumber(importResult.errors.length)}
+                      </Badge>
+                    </div>
+
+                    {importResult.errors.length === 0 ? (
+                      <div>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={() =>
+                            updateFilterParam({
+                              tab: "recent",
+                              from: importResult.minDate ?? undefined,
+                              to: importResult.maxDate ?? undefined,
+                              page: "1",
+                            })
+                          }
+                        >
+                          View in Recent entries
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <ul className="max-h-36 space-y-1 overflow-y-auto text-risk-text">
+                          {importResult.errors.slice(0, 20).map((err) => (
+                            <li key={`${err.row}-${err.message}`}>
+                              Row {err.row}: {err.message}
+                            </li>
+                          ))}
+                        </ul>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          onClick={downloadErrorsCsv}
+                          className="gap-1.5"
+                        >
+                          <Download className="size-3.5" aria-hidden="true" />
+                          Download error rows as CSV
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-2xl border border-border shadow-card">
+              <CardHeader>
+                <CardTitle className="text-base">Recent imports</CardTitle>
+                <CardDescription>
+                  Last 10 CSV uploads in your permission scope (timestamps in Asia/Bahrain).
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                {importsQuery.isPending ? (
+                  <LoadingBlock />
+                ) : importsQuery.isError ? (
+                  <ErrorBlock
+                    message={importsQuery.error.message}
+                    onRetry={() => void importsQuery.refetch()}
+                  />
+                ) : importsQuery.data.imports.length === 0 ? (
+                  <EmptyBlock
+                    title="No CSV imports recorded yet"
+                    body="Uploaded CSV batches will appear here with row counts and uploader identity."
+                  />
+                ) : (
+                  <div className="overflow-x-auto">
+                    <Table className="min-w-[520px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Time</TableHead>
+                          <TableHead>File</TableHead>
+                          <TableHead>User</TableHead>
+                          <TableHead className="text-right">Ins</TableHead>
+                          <TableHead className="text-right">Upd</TableHead>
+                          <TableHead className="text-right">Err</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {importsQuery.data.imports.map((imp) => (
+                          <TableRow key={imp.id}>
+                            <TableCell className="text-xs whitespace-nowrap tabular-nums">
+                              {formatBahrainDateTime(imp.importedAt)}
+                            </TableCell>
+                            <TableCell className="max-w-[160px] truncate font-mono text-xs">
+                              {imp.fileName}
+                            </TableCell>
+                            <TableCell className="text-xs">{imp.user.name}</TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {formatNumber(imp.inserted)}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              {formatNumber(imp.updated)}
+                            </TableCell>
+                            <TableCell className="text-right text-xs tabular-nums">
+                              <Badge tone={imp.errorCount > 0 ? "risk" : "ok"}>
+                                {formatNumber(imp.errorCount)}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
         </TabsContent>
       </Tabs>
 

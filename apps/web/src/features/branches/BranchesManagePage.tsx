@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus, RotateCcw, Search, X } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { Archive, ExternalLink, MapPin, Pencil, Plus, RotateCcw, Search, X } from "lucide-react";
+import { useMemo, useState, type ClipboardEvent, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -28,8 +28,16 @@ import {
   TableRow,
   TableToolbar,
 } from "@/components/ui/table";
-import { queryKeys } from "@/hooks/queryKeys";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
+import {
+  CLUSTER_REGIONS,
+  formatParsedCoordinates,
+  googleMapsPinUrl,
+  parseCoordinatesInput,
+  suggestRegionForCity,
+  type CoordinateValidationResult,
+} from "@/lib/coordinates";
 import { formatCoordinates, formatNumber } from "@/lib/format";
 import type { Branch, BranchStatus, CreateBranch, UpdateBranch } from "@stockflow/core";
 
@@ -40,12 +48,14 @@ export function BranchesManagePage() {
   const [search, setSearch] = useState("");
   const [editTarget, setEditTarget] = useState<Branch | null>(null);
 
-  // Add branch form state (lat/lng required in the create form)
+  // Add branch form state (single coordinates paste/parse field + cluster/region selector)
   const [name, setName] = useState("");
   const [city, setCity] = useState("");
-  const [region, setRegion] = useState("");
-  const [lat, setLat] = useState("");
-  const [lng, setLng] = useState("");
+  const [region, setRegion] = useState<string>("Capital");
+  const [regionManuallySet, setRegionManuallySet] = useState(false);
+  const [coordsInput, setCoordsInput] = useState("");
+  const [parsedCoords, setParsedCoords] = useState<CoordinateValidationResult | null>(null);
+  const [outsideConfirmed, setOutsideConfirmed] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   const queryStatus = statusFilter === "all" ? undefined : statusFilter;
@@ -55,14 +65,7 @@ export function BranchesManagePage() {
     queryFn: () => api.listBranches(queryStatus ? { status: queryStatus } : undefined),
   });
 
-  const invalidateBranchQueries = async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["adminBranches"] }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.locations }),
-      queryClient.invalidateQueries({ queryKey: ["kpis"] }),
-      queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
-    ]);
-  };
+  const invalidateBranchQueries = () => invalidateOperationalQueries(queryClient);
 
   const createMutation = useMutation({
     mutationFn: (payload: CreateBranch) => api.createBranch(payload),
@@ -70,9 +73,11 @@ export function BranchesManagePage() {
       toast.success(`Created branch ${created.id} (${created.name})`);
       setName("");
       setCity("");
-      setRegion("");
-      setLat("");
-      setLng("");
+      setRegion("Capital");
+      setRegionManuallySet(false);
+      setCoordsInput("");
+      setParsedCoords(null);
+      setOutsideConfirmed(false);
       setFormError(null);
       await invalidateBranchQueries();
     },
@@ -112,20 +117,27 @@ export function BranchesManagePage() {
     );
   }, [branches, search]);
 
+  const handleCityChange = (nextCity: string) => {
+    setCity(nextCity);
+    if (!regionManuallySet) {
+      setRegion(suggestRegionForCity(nextCity));
+    }
+  };
+
   const handleCreateSubmit = (event: FormEvent) => {
     event.preventDefault();
-    const parsedLat = Number(lat);
-    const parsedLng = Number(lng);
     if (!name.trim() || !city.trim() || !region.trim()) {
-      setFormError("Name, city, and region are required.");
+      setFormError("Name, city, and cluster / region are required.");
       return;
     }
-    if (lat.trim() === "" || !Number.isFinite(parsedLat) || parsedLat < -90 || parsedLat > 90) {
-      setFormError("Latitude must be a valid number between -90 and 90.");
+    const result = parseCoordinatesInput(coordsInput);
+    setParsedCoords(result);
+    if (!result.ok) {
+      setFormError(result.error);
       return;
     }
-    if (lng.trim() === "" || !Number.isFinite(parsedLng) || parsedLng < -180 || parsedLng > 180) {
-      setFormError("Longitude must be a valid number between -180 and 180.");
+    if (result.outsideBahrain && !outsideConfirmed) {
+      setFormError("Please confirm the coordinates outside Bahrain before saving.");
       return;
     }
     setFormError(null);
@@ -133,9 +145,15 @@ export function BranchesManagePage() {
       name: name.trim(),
       city: city.trim(),
       region: region.trim(),
-      coordinates: [parsedLat, parsedLng],
+      coordinates: [result.lat, result.lng],
     });
   };
+
+  const regionOptions = useMemo(() => {
+    const set = new Set<string>(CLUSTER_REGIONS);
+    if (region) set.add(region);
+    return Array.from(set);
+  }, [region]);
 
   return (
     <div className="space-y-6">
@@ -160,7 +178,7 @@ export function BranchesManagePage() {
               </div>
             ) : null}
 
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1">
                 <label htmlFor="branch-name" className="text-xs font-medium text-muted-foreground">
                   Branch name
@@ -182,57 +200,58 @@ export function BranchesManagePage() {
                   id="branch-city"
                   required
                   value={city}
-                  onChange={(e) => setCity(e.target.value)}
+                  onChange={(e) => handleCityChange(e.target.value)}
                   placeholder="e.g. Muharraq"
                 />
               </div>
 
               <div className="space-y-1">
                 <label htmlFor="branch-region" className="text-xs font-medium text-muted-foreground">
-                  Region
+                  Cluster / Region
                 </label>
-                <Input
+                <select
                   id="branch-region"
                   required
                   value={region}
-                  onChange={(e) => setRegion(e.target.value)}
-                  placeholder="e.g. Muharraq"
-                />
+                  onChange={(e) => {
+                    setRegion(e.target.value);
+                    setRegionManuallySet(true);
+                  }}
+                  className="h-9 w-full rounded-xl border border-border bg-card px-3 text-sm text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
+                >
+                  {regionOptions.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="space-y-1">
-                <label htmlFor="branch-lat" className="text-xs font-medium text-muted-foreground">
-                  Latitude
-                </label>
-                <Input
-                  id="branch-lat"
-                  type="number"
-                  step="any"
-                  required
-                  min={-90}
-                  max={90}
-                  value={lat}
-                  onChange={(e) => setLat(e.target.value)}
-                  placeholder="26.2845"
-                />
-              </div>
-
-              <div className="space-y-1">
-                <label htmlFor="branch-lng" className="text-xs font-medium text-muted-foreground">
-                  Longitude
-                </label>
-                <Input
-                  id="branch-lng"
-                  type="number"
-                  step="any"
-                  required
-                  min={-180}
-                  max={180}
-                  value={lng}
-                  onChange={(e) => setLng(e.target.value)}
-                  placeholder="50.6612"
-                />
-              </div>
+              <CoordinatesField
+                id="branch-coordinates"
+                required
+                value={coordsInput}
+                parsed={parsedCoords}
+                outsideConfirmed={outsideConfirmed}
+                onChangeText={(next) => {
+                  setCoordsInput(next);
+                  setOutsideConfirmed(false);
+                  if (parsedCoords) setParsedCoords(null);
+                  if (formError) setFormError(null);
+                }}
+                onParsed={(result) => {
+                  setParsedCoords(result);
+                  setOutsideConfirmed(false);
+                }}
+                onConfirmOutsideChange={setOutsideConfirmed}
+                onApplySwap={(swapLat, swapLng) => {
+                  const swapped = `${swapLat}, ${swapLng}`;
+                  setCoordsInput(swapped);
+                  setOutsideConfirmed(false);
+                  setFormError(null);
+                  setParsedCoords(parseCoordinatesInput(swapped));
+                }}
+              />
             </div>
 
             <div className="flex justify-end">
@@ -469,6 +488,109 @@ export function BranchesManagePage() {
   );
 }
 
+function CoordinatesField({
+  id,
+  required,
+  value,
+  parsed,
+  outsideConfirmed,
+  onChangeText,
+  onParsed,
+  onConfirmOutsideChange,
+  onApplySwap,
+}: {
+  id: string;
+  required?: boolean;
+  value: string;
+  parsed: CoordinateValidationResult | null;
+  outsideConfirmed: boolean;
+  onChangeText: (value: string) => void;
+  onParsed: (result: CoordinateValidationResult) => void;
+  onConfirmOutsideChange: (confirmed: boolean) => void;
+  onApplySwap: (lat: number, lng: number) => void;
+}) {
+  const handlePaste = (event: ClipboardEvent<HTMLInputElement>) => {
+    const pasted = event.clipboardData?.getData("text");
+    if (!pasted) return;
+    event.preventDefault();
+    const start = event.currentTarget.selectionStart ?? value.length;
+    const end = event.currentTarget.selectionEnd ?? value.length;
+    const nextValue = value.slice(0, start) + pasted + value.slice(end);
+    onChangeText(nextValue);
+    onParsed(parseCoordinatesInput(nextValue));
+  };
+
+  const handleBlur = () => {
+    if (!required && value.trim() === "") return;
+    onParsed(parseCoordinatesInput(value));
+  };
+
+  return (
+    <div className="space-y-1.5">
+      <label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        Coordinates (paste from Google Maps)
+      </label>
+      <Input
+        id={id}
+        type="text"
+        required={required}
+        value={value}
+        onChange={(e) => onChangeText(e.target.value)}
+        onPaste={handlePaste}
+        onBlur={handleBlur}
+        placeholder="e.g. 26.2285, 50.5860"
+      />
+      {parsed?.ok ? (
+        <div className="space-y-1.5 pt-0.5 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-muted-foreground">
+            <span className="inline-flex items-center gap-1 font-mono text-foreground">
+              <MapPin className="size-3.5 text-primary" aria-hidden="true" />
+              {formatParsedCoordinates(parsed.lat, parsed.lng)}
+            </span>
+            <a
+              href={googleMapsPinUrl(parsed.lat, parsed.lng)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+            >
+              Open in map
+              <ExternalLink className="size-3" aria-hidden="true" />
+            </a>
+          </div>
+          {parsed.outsideBahrain ? (
+            <div className="space-y-1.5 rounded-lg border border-warn-ring bg-warn-bg/60 px-2.5 py-2 text-warn-text">
+              <p>{parsed.warning}</p>
+              <label className="flex cursor-pointer items-center gap-2 font-medium text-foreground">
+                <input
+                  type="checkbox"
+                  checked={outsideConfirmed}
+                  onChange={(e) => onConfirmOutsideChange(e.target.checked)}
+                  className="size-3.5 rounded border-border accent-primary"
+                />
+                Confirm coordinates outside Bahrain
+              </label>
+            </div>
+          ) : null}
+        </div>
+      ) : parsed && !parsed.ok ? (
+        <div className="space-y-1.5 pt-0.5 text-xs text-risk-text">
+          <p>{parsed.error}</p>
+          {parsed.code === "swapped" && parsed.suggestedSwap ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="xs"
+              onClick={() => onApplySwap(parsed.suggestedSwap![0], parsed.suggestedSwap![1])}
+            >
+              Swap to {formatParsedCoordinates(parsed.suggestedSwap[0], parsed.suggestedSwap[1])}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function EditBranchForm({
   branch,
   isSubmitting,
@@ -482,17 +604,31 @@ function EditBranchForm({
   onCancel: () => void;
   onSubmit: (data: UpdateBranch) => void;
 }) {
+  const initialCoordsText = branch.coordinates
+    ? `${branch.coordinates[0]}, ${branch.coordinates[1]}`
+    : "";
   const [name, setName] = useState(branch.name);
   const [city, setCity] = useState(branch.city);
   const [region, setRegion] = useState(branch.region);
-  const [lat, setLat] = useState(branch.coordinates ? String(branch.coordinates[0]) : "");
-  const [lng, setLng] = useState(branch.coordinates ? String(branch.coordinates[1]) : "");
+  const [coordsInput, setCoordsInput] = useState(initialCoordsText);
+  const [parsedCoords, setParsedCoords] = useState<CoordinateValidationResult | null>(() =>
+    initialCoordsText ? parseCoordinatesInput(initialCoordsText) : null,
+  );
+  const [outsideConfirmed, setOutsideConfirmed] = useState(() =>
+    Boolean(parsedCoords?.ok && parsedCoords.outsideBahrain),
+  );
   const [localError, setLocalError] = useState<string | null>(null);
+
+  const regionOptions = useMemo(() => {
+    const set = new Set<string>(CLUSTER_REGIONS);
+    if (region) set.add(region);
+    return Array.from(set);
+  }, [region]);
 
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     if (!name.trim() || !city.trim() || !region.trim()) {
-      setLocalError("Name, city, and region cannot be empty.");
+      setLocalError("Name, city, and cluster / region cannot be empty.");
       return;
     }
     const payload: UpdateBranch = {
@@ -500,18 +636,18 @@ function EditBranchForm({
       city: city.trim(),
       region: region.trim(),
     };
-    if (lat.trim() !== "" || lng.trim() !== "") {
-      const parsedLat = Number(lat);
-      const parsedLng = Number(lng);
-      if (lat.trim() === "" || !Number.isFinite(parsedLat) || parsedLat < -90 || parsedLat > 90) {
-        setLocalError("Latitude must be between -90 and 90.");
+    if (coordsInput.trim() !== "") {
+      const result = parseCoordinatesInput(coordsInput);
+      setParsedCoords(result);
+      if (!result.ok) {
+        setLocalError(result.error);
         return;
       }
-      if (lng.trim() === "" || !Number.isFinite(parsedLng) || parsedLng < -180 || parsedLng > 180) {
-        setLocalError("Longitude must be between -180 and 180.");
+      if (result.outsideBahrain && !outsideConfirmed) {
+        setLocalError("Please confirm the coordinates outside Bahrain before saving.");
         return;
       }
-      payload.coordinates = [parsedLat, parsedLng];
+      payload.coordinates = [result.lat, result.lng];
     }
     setLocalError(null);
     onSubmit(payload);
@@ -538,35 +674,46 @@ function EditBranchForm({
           <Input required value={city} onChange={(e) => setCity(e.target.value)} />
         </div>
         <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Region</label>
-          <Input required value={region} onChange={(e) => setRegion(e.target.value)} />
+          <label className="text-xs font-medium text-muted-foreground">Cluster / Region</label>
+          <select
+            required
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            className="h-9 w-full rounded-xl border border-border bg-card px-3 text-sm text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
+          >
+            {regionOptions.map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Latitude</label>
-          <Input
-            type="number"
-            step="any"
-            min={-90}
-            max={90}
-            value={lat}
-            onChange={(e) => setLat(e.target.value)}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-muted-foreground">Longitude</label>
-          <Input
-            type="number"
-            step="any"
-            min={-180}
-            max={180}
-            value={lng}
-            onChange={(e) => setLng(e.target.value)}
-          />
-        </div>
-      </div>
+      <CoordinatesField
+        id="edit-branch-coordinates"
+        value={coordsInput}
+        parsed={parsedCoords}
+        outsideConfirmed={outsideConfirmed}
+        onChangeText={(next) => {
+          setCoordsInput(next);
+          setOutsideConfirmed(false);
+          if (parsedCoords) setParsedCoords(null);
+          if (localError) setLocalError(null);
+        }}
+        onParsed={(result) => {
+          setParsedCoords(result);
+          setOutsideConfirmed(false);
+        }}
+        onConfirmOutsideChange={setOutsideConfirmed}
+        onApplySwap={(swapLat, swapLng) => {
+          const swapped = `${swapLat}, ${swapLng}`;
+          setCoordsInput(swapped);
+          setOutsideConfirmed(false);
+          setLocalError(null);
+          setParsedCoords(parseCoordinatesInput(swapped));
+        }}
+      />
 
       <DialogFooter>
         <Button type="button" variant="secondary" disabled={isSubmitting} onClick={onCancel}>

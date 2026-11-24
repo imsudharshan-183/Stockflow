@@ -1,4 +1,4 @@
-import { ArrowRight, Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
+import { ArrowRight, Boxes, CircleDollarSign, RefreshCw, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
@@ -21,7 +21,11 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
 import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
+import { useBahrainToday } from "@/hooks/useBahrainToday";
+import type { LiveOverviewResponse } from "@/lib/api";
 import {
+  diffCalendarDays,
+  formatBahrainTimeHm,
   formatDate,
   formatMoney,
   formatMoneyFull,
@@ -190,6 +194,9 @@ interface AdminOverviewProps {
   recommendations: readonly Recommendation[];
   selectedLocation?: string | null;
   totalActions: number;
+  live?: LiveOverviewResponse;
+  isRefreshing?: boolean;
+  onRefresh?: () => void;
   recommendationsLoading?: boolean;
   recommendationsError?: string | null;
   onRetryRecommendations?: () => void;
@@ -200,33 +207,76 @@ export function AdminOverview({
   recommendations,
   selectedLocation = null,
   totalActions,
+  live,
+  isRefreshing = false,
+  onRefresh,
   recommendationsLoading = false,
   recommendationsError = null,
   onRetryRecommendations,
 }: AdminOverviewProps) {
   const weeks = weeklyPoints(report.trend);
   const projected = recommendations.reduce((sum, row) => sum + row.netBenefit, 0);
+  const today = useBahrainToday();
+  const asOfDataDate = live?.meta.asOfDataDate ?? report.asOf;
+  const staleDataDays = Math.max(0, diffCalendarDays(today.isoDate, asOfDataDate));
+  const lastUpdatedHm = live ? formatBahrainTimeHm(live.meta.computedAt) : undefined;
+  const pendingCount = live?.metrics.pendingActionsCount.value ?? totalActions;
+  const pendingGain = live?.metrics.pendingEstimatedGain.value ?? projected;
+  const stockoutRateValue = live?.metrics.stockoutRate.value ?? report.stockoutRate;
+  const stockoutSparkline = live?.stockoutSparkline ?? report.trend.map((point) => point.stockoutRate);
+  const stockoutDeltaOverride = live?.metrics.stockoutRateDelta28d.value;
+  const overstockValue = live?.metrics.overstockValue.value ?? report.cashReleasable;
+  const deadStockValue = live?.metrics.deadStockValue.value ?? report.deadStockValue;
+  const salesAtRisk = live?.metrics.salesAtRisk.value ?? report.lostSalesAtRisk;
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Network overview"
-        subtitle={`As of ${formatDate(report.asOf)} · ${formatNumber(report.branches.length)} branches monitored`}
+        lastUpdated={lastUpdatedHm}
+        subtitle={`Today: ${today.displayDate} · Data through: ${formatDate(asOfDataDate)} · ${formatNumber(report.branches.length)} branches monitored`}
+        actions={
+          staleDataDays > 1 || onRefresh ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {staleDataDays > 1 ? (
+                <Link to="/data?tab=import">
+                  <Badge tone="risk">
+                    Data is {formatNumber(staleDataDays)}{" "}
+                    {staleDataDays === 1 ? "day" : "days"} old - import latest sales
+                  </Badge>
+                </Link>
+              ) : null}
+              {onRefresh ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  loading={isRefreshing}
+                  onClick={onRefresh}
+                  className="gap-1.5"
+                >
+                  <RefreshCw className="size-3.5" aria-hidden="true" />
+                  Refresh
+                </Button>
+              ) : null}
+            </div>
+          ) : undefined
+        }
       />
 
       {/* Hero Panel */}
       <section className="hero-surface flex flex-col justify-between gap-4 rounded-2xl border border-border p-6 shadow-card lg:flex-row lg:items-center">
         <div className="space-y-2">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="transfer">Backtest verified</Badge>
+            <Badge tone="ok">Live queue</Badge>
             <span className="text-xs font-medium text-muted-foreground">
-              {report.backtest.windowDays}-day replay window
+              Data through {formatDate(asOfDataDate)}
             </span>
           </div>
           <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
-            {totalActions > 0
-              ? `${formatNumber(totalActions)} ranked actions worth ${formatMoney(projected)} in estimated gain`
-              : "Evaluating today's network recommendations..."}
+            {pendingCount > 0
+              ? `${formatNumber(pendingCount)} ranked actions worth ${formatMoney(pendingGain)} in estimated gain`
+              : "All pending recommendations reviewed"}
           </h2>
         </div>
 
@@ -239,7 +289,7 @@ export function AdminOverview({
                 "rounded-xl px-5 font-semibold",
               )}
             >
-              Review {formatNumber(totalActions)} actions
+              Review {formatNumber(pendingCount)} actions
               <ArrowRight className="size-4" aria-hidden="true" />
             </Link>
           </span>
@@ -250,19 +300,20 @@ export function AdminOverview({
       <section className="grid gap-5 sm:grid-cols-3">
         <KpiCard
           label="Stockout rate"
-          value={formatPct(report.stockoutRate)}
+          value={formatPct(stockoutRateValue)}
           note="Share of recent selling days with demand and an empty shelf."
           formula="Stockout branch-SKU days ÷ (branches × SKUs × 28)"
           icon={TriangleAlert}
           tone="risk"
-          series={report.trend.map((point) => point.stockoutRate)}
+          series={stockoutSparkline}
+          deltaOverride={stockoutDeltaOverride}
           money={false}
           invertDelta
         />
         <KpiCard
           label="Overstock value"
-          value={formatMoney(report.cashReleasable)}
-          note={`Includes ${formatMoney(report.deadStockValue)} dead stock (<1 unit/wk)`}
+          value={formatMoney(overstockValue)}
+          note={`Includes ${formatMoney(deadStockValue)} dead stock (<1 unit/wk)`}
           formula="Stock above the 30-day donor floor × unit cost. Dead stock is the portion selling under one unit per week."
           icon={Boxes}
           tone="warn"
@@ -270,7 +321,7 @@ export function AdminOverview({
         />
         <KpiCard
           label="Sales at risk"
-          value={formatMoney(report.lostSalesAtRisk)}
+          value={formatMoney(salesAtRisk)}
           note="Shelf revenue a short branch may miss before next delivery."
           formula="Expected lost units × retail price for positions below their reorder level."
           icon={CircleDollarSign}

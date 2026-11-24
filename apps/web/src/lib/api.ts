@@ -1,5 +1,5 @@
 import {
-  AuditListSchema,
+  AuditEntrySchema,
   BatchDecideResponseSchema,
   BranchDetailSchema,
   BranchListResponseSchema,
@@ -7,6 +7,7 @@ import {
   CreateBranchSchema,
   CreateProductSchema,
   CreateUserSchema,
+  DonorCandidatesResponseSchema,
   ErrorBodySchema,
   KpiSummarySchema,
   LocationInventoryResponseSchema,
@@ -18,8 +19,9 @@ import {
   ProductDetailWithHistorySchema,
   ProductListResponseSchema,
   ProductSchema,
-  RecommendationListSchema,
   RecommendationSchema,
+  ReplenishmentOrderSchema,
+  ResolveStockAlertResponseSchema,
   StockAlertListSchema,
   StockAlertSchema,
   UpdateBranchSchema,
@@ -27,15 +29,17 @@ import {
   UpdateUserSchema,
   UserListSchema,
   UserSchema,
-  type AuditList,
+  type AuditEntry,
   type Branch,
   type BranchDetail,
   type BranchListQuery,
   type BranchListResponse,
   type CreateBranch,
+  type CreateOrderRequest,
   type CreateProduct,
   type CreateStockAlert,
   type CreateUser,
+  type DonorCandidatesResponse,
   type KpiSummary,
   type LocationInventoryQuery,
   type LocationInventoryResponse,
@@ -45,14 +49,23 @@ import {
   type LocationTrendResponse,
   type LoginRequest,
   type LoginResponse,
+  type OrderCancelBody,
+  type OrderCommitBody,
+  type OrderDeclineBody,
+  type OrderListQuery,
+  type OrderReceiveBody,
+  type OrderRequestTransferBody,
+  type OrderRerouteBody,
   type Product,
   type ProductDetail,
   type ProductDetailWithHistory,
   type ProductListQuery,
   type ProductListResponse,
   type Recommendation,
-  type RecommendationList,
   type RecommendationQuery,
+  type ReplenishmentOrder,
+  type ResolveStockAlert,
+  type ResolveStockAlertResponse,
   type StockAlert,
   type StockAlertList,
   type UpdateBranch,
@@ -62,6 +75,103 @@ import {
   type UserList,
 } from "@stockflow/core";
 import { z, type ZodType } from "zod";
+
+export type QueueLifecycleView = "pending" | "in_progress" | "decided";
+
+export const QueueLifecycleViewSchema = z.enum(["pending", "in_progress", "decided"]);
+
+export const ReopenBadgeSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("snooze_expired"),
+    daysAgo: z.number().int().positive(),
+    reason: z.string(),
+    label: z.string(),
+  }),
+  z.object({
+    kind: z.literal("worsened"),
+    label: z.string(),
+  }),
+]);
+export type ReopenBadge = z.infer<typeof ReopenBadgeSchema>;
+
+const LifecycleFieldsSchema = z.object({
+  lifecycleState: QueueLifecycleViewSchema.optional(),
+  reopenBadge: ReopenBadgeSchema.nullable().optional(),
+  canReopen: z.boolean().optional(),
+  decidedAt: z.string().nullable().optional(),
+  rejectedUntil: z.string().nullable().optional(),
+});
+
+export const LifecycleRecommendationSchema = RecommendationSchema.merge(LifecycleFieldsSchema);
+export type LifecycleRecommendation = z.infer<typeof LifecycleRecommendationSchema>;
+
+export const LifecycleRecommendationListSchema = z.object({
+  recommendations: z.array(LifecycleRecommendationSchema),
+  total: z.number().int().nonnegative(),
+  totalNetBenefit: z.number().optional(),
+  view: QueueLifecycleViewSchema.optional(),
+});
+export type LifecycleRecommendationList = z.infer<typeof LifecycleRecommendationListSchema>;
+
+export const LifecycleOrderSchema = ReplenishmentOrderSchema.merge(LifecycleFieldsSchema);
+export type LifecycleOrder = z.infer<typeof LifecycleOrderSchema>;
+
+export const LifecycleOrderListResponseSchema = z.object({
+  orders: z.array(LifecycleOrderSchema),
+  total: z.number().int().nonnegative(),
+  totalNetBenefit: z.number().optional(),
+  view: QueueLifecycleViewSchema.optional(),
+});
+export type LifecycleOrderListResponse = z.infer<typeof LifecycleOrderListResponseSchema>;
+
+export const ApiAuditEntrySchema = AuditEntrySchema.extend({
+  decision: z.enum(["APPROVED", "REJECTED", "REOPENED"]),
+  comment: z.string().optional(),
+});
+export type ApiAuditEntry = Omit<AuditEntry, "decision"> & {
+  decision: "APPROVED" | "REJECTED" | "REOPENED";
+  comment?: string;
+};
+
+export const ApiAuditListSchema = z.object({
+  entries: z.array(ApiAuditEntrySchema),
+});
+export type ApiAuditList = { entries: ApiAuditEntry[] };
+
+export const LiveKpiMetricSchema = z.object({
+  value: z.number(),
+  computedAt: z.string().min(1),
+  dataVersion: z.number().int().nonnegative(),
+  decisionVersion: z.number().int().nonnegative(),
+});
+
+export const OverviewFreshnessMetaSchema = z.object({
+  computedAt: z.string().min(1),
+  dataVersion: z.number().int().nonnegative(),
+  decisionVersion: z.number().int().nonnegative(),
+  todayBahrain: z.string().min(1),
+  asOfDataDate: z.string().min(1),
+  staleDataDays: z.number().int().nonnegative(),
+});
+
+export const LiveOverviewMetricsSchema = z.object({
+  stockoutRate: LiveKpiMetricSchema,
+  stockoutRateDelta28d: LiveKpiMetricSchema,
+  overstockValue: LiveKpiMetricSchema,
+  deadStockValue: LiveKpiMetricSchema,
+  salesAtRisk: LiveKpiMetricSchema,
+  pendingActionsCount: LiveKpiMetricSchema,
+  pendingEstimatedGain: LiveKpiMetricSchema,
+});
+
+export const LiveOverviewResponseSchema = z.object({
+  report: KpiSummarySchema,
+  meta: OverviewFreshnessMetaSchema,
+  metrics: LiveOverviewMetricsSchema,
+  stockoutSparkline: z.array(z.number()),
+  pendingRecommendations: z.array(LifecycleRecommendationSchema),
+});
+export type LiveOverviewResponse = z.infer<typeof LiveOverviewResponseSchema>;
 
 const TOKEN_STORAGE_KEY = "stockflow_access_token";
 
@@ -201,10 +311,23 @@ export const api = {
   // Stock
   kpis: (branch?: string): Promise<KpiSummary> =>
     request(withQuery("/api/kpis", branch ? { branch } : {}), KpiSummarySchema),
-  audit: (branch?: string): Promise<AuditList> =>
-    request(withQuery("/api/audit", branch ? { branch } : {}), AuditListSchema),
-  recommendations: (query: RecommendationQuery): Promise<RecommendationList> =>
-    request(withQuery("/api/recommendations", query as Record<string, unknown>), RecommendationListSchema),
+  kpisLive: (branch?: string): Promise<LiveOverviewResponse> =>
+    request(withQuery("/api/kpis/live", branch ? { branch } : {}), LiveOverviewResponseSchema),
+  audit: (branch?: string): Promise<ApiAuditList> =>
+    request(withQuery("/api/audit", branch ? { branch } : {}), ApiAuditListSchema),
+  recommendations: (
+    query: RecommendationQuery & { view?: QueueLifecycleView },
+  ): Promise<LifecycleRecommendationList> =>
+    request(
+      withQuery("/api/recommendations", query as Record<string, unknown>),
+      LifecycleRecommendationListSchema,
+    ),
+  reopenRecommendation: (id: string, comment?: string): Promise<LifecycleRecommendation> =>
+    request(`/api/recommendations/${encodeURIComponent(id)}/reopen`, LifecycleRecommendationSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(comment ? { comment } : {}),
+    }),
   branch: (id: string): Promise<BranchDetail> =>
     request(`/api/branches/${encodeURIComponent(id)}`, BranchDetailSchema),
   locations: (): Promise<LocationListResponse> =>
@@ -353,12 +476,60 @@ export const api = {
       },
     );
   },
+  listSalesImports: (
+    limit = 10,
+  ): Promise<{
+    imports: Array<{
+      id: string;
+      importedAt: string;
+      fileName: string;
+      user: { userId: string; name: string; role: "admin" | "manager" | "staff" };
+      inserted: number;
+      updated: number;
+      errorCount: number;
+      minDate: string | null;
+      maxDate: string | null;
+      branchIds: string[];
+    }>;
+  }> =>
+    request(
+      withQuery("/api/sales/imports", { limit }),
+      z.object({
+        imports: z.array(
+          z.object({
+            id: z.string(),
+            importedAt: z.string(),
+            fileName: z.string(),
+            user: z.object({
+              userId: z.string(),
+              name: z.string(),
+              role: z.enum(["admin", "manager", "staff"]),
+            }),
+            inserted: z.number(),
+            updated: z.number(),
+            errorCount: z.number(),
+            minDate: z.string().nullable(),
+            maxDate: z.string().nullable(),
+            branchIds: z.array(z.string()),
+          }),
+        ),
+      }),
+    ),
 
   // Stock alerts
   listStockAlerts: (branchId?: string): Promise<StockAlertList> =>
     request(withQuery("/api/stock-alerts", branchId ? { branchId } : {}), StockAlertListSchema),
   createStockAlert: (payload: CreateStockAlert): Promise<StockAlert> =>
     request("/api/stock-alerts", StockAlertSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  resolveStockAlert: (
+    id: string,
+    payload: ResolveStockAlert,
+  ): Promise<ResolveStockAlertResponse> =>
+    request(`/api/stock-alerts/${encodeURIComponent(id)}/resolve`, ResolveStockAlertResponseSchema, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -371,4 +542,77 @@ export const api = {
     request(`/api/stock-alerts/${encodeURIComponent(id)}/reject`, StockAlertSchema, {
       method: "PATCH",
     }),
+
+  // Replenishment Orders
+  listOrders: (
+    query: OrderListQuery & { view?: QueueLifecycleView } = {},
+  ): Promise<LifecycleOrderListResponse> =>
+    request(
+      withQuery("/api/orders", query as Record<string, unknown>),
+      LifecycleOrderListResponseSchema,
+    ),
+  reopenOrder: (id: string, comment?: string): Promise<LifecycleOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/reopen`, LifecycleOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(comment ? { comment } : {}),
+    }),
+  getOrder: (id: string): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}`, ReplenishmentOrderSchema),
+  createOrder: (payload: CreateOrderRequest): Promise<ReplenishmentOrder> =>
+    request("/api/orders", ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
+  requestOrderTransfer: (
+    id: string,
+    body: OrderRequestTransferBody = {},
+  ): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/request`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  commitOrder: (id: string, body: OrderCommitBody = {}): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/commit`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  declineOrder: (id: string, body: OrderDeclineBody): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/decline`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  rerouteOrder: (id: string, body: OrderRerouteBody): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/reroute`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  cancelOrder: (id: string, body: OrderCancelBody = {}): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/cancel`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  receiveOrder: (id: string, body: OrderReceiveBody = {}): Promise<ReplenishmentOrder> =>
+    request(`/api/orders/${encodeURIComponent(id)}/receive`, ReplenishmentOrderSchema, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+  donorCandidates: (params: {
+    sku: string;
+    target: string;
+    qty: number;
+    includeIneligible?: boolean;
+    limit?: number;
+  }): Promise<DonorCandidatesResponse> =>
+    request(
+      withQuery("/api/orders/donor-candidates", params as Record<string, unknown>),
+      DonorCandidatesResponseSchema,
+    ),
 };

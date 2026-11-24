@@ -1,4 +1,12 @@
-import type { Action, ReasonCode, RecommendationStatus } from "@stockflow/core";
+import type {
+  Action,
+  OrderEventAction,
+  OrderOrigin,
+  OrderStatus,
+  ReasonCode,
+  RecommendationStatus,
+  StockAlertResolutionAction,
+} from "@stockflow/core";
 
 const moneyBhd = new Intl.NumberFormat("en-US", {
   minimumFractionDigits: 3,
@@ -201,9 +209,85 @@ export function statusLabel(status: RecommendationStatus): string {
   return "Pending";
 }
 
+export function orderStatusLabel(status: OrderStatus): string {
+  switch (status) {
+    case "SUGGESTED":
+      return "Suggested";
+    case "OPEN_REQUEST":
+      return "Open Request";
+    case "AWAITING_DONOR":
+      return "Awaiting Donor";
+    case "COMMITTED":
+      return "Committed";
+    case "RECEIVED":
+      return "Received";
+    case "REJECTED":
+      return "Declined";
+    case "CANCELLED":
+      return "Cancelled";
+  }
+}
+
+export function orderOriginLabel(origin: OrderOrigin): string {
+  switch (origin) {
+    case "ENGINE":
+      return "Engine";
+    case "MANAGER_REQUEST":
+      return "Manager Request";
+    case "ALERT_ESCALATION":
+      return "Alert Escalation";
+  }
+}
+
+export function orderEventActionLabel(action: OrderEventAction): string {
+  switch (action) {
+    case "CREATED":
+      return "Created";
+    case "REQUEST_TRANSFER":
+      return "Requested transfer";
+    case "COMMIT":
+      return "Committed";
+    case "DECLINE":
+      return "Declined";
+    case "REROUTE":
+      return "Rerouted";
+    case "CANCEL":
+      return "Cancelled";
+    case "RECEIVE":
+      return "Received";
+    case "ESCALATE":
+      return "Escalated";
+    case "MIGRATED":
+      return "Migrated";
+  }
+}
+
+export function alertResolutionLabel(action: StockAlertResolutionAction): string {
+  switch (action) {
+    case "CONVERTED_TO_REQUEST":
+      return "Requested Replenishment";
+    case "LOGGED_ADJUSTMENT":
+      return "Logged Adjustment";
+    case "ACKNOWLEDGED":
+      return "Acknowledged";
+    case "DISMISSED":
+      return "Dismissed";
+  }
+}
+
 export function formatCoordinates(coordinates?: readonly [number, number]): string {
   if (!coordinates) return "—";
   const lat = (Math.round(coordinates[0] * 10_000) / 10_000).toFixed(4);
   const lng = (Math.round(coordinates[1] * 10_000) / 10_000).toFixed(4);
   return `${lat}, ${lng}`;
 }
+
+export {
+  BAHRAIN_TIME_ZONE,
+  diffCalendarDays,
+  formatBahrainDate,
+  formatBahrainDateTime,
+  formatBahrainTimeHm,
+  getBahrainToday,
+  type BahrainToday,
+} from "./bahrainDate";

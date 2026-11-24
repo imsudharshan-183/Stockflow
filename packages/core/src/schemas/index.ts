@@ -606,8 +606,22 @@ export const LocationTrendResponseSchema = z.object({
 });
 export type LocationTrendResponse = z.infer<typeof LocationTrendResponseSchema>;
 
-export const StockAlertStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED"]);
+export const StockAlertStatusSchema = z.enum(["PENDING", "APPROVED", "REJECTED", "RESOLVED"]);
 export type StockAlertStatus = z.infer<typeof StockAlertStatusSchema>;
+
+export const OrderTypeSchema = z.enum(["TRANSFER", "REORDER", "MARKDOWN"]);
+export type OrderType = z.infer<typeof OrderTypeSchema>;
+
+export const OrderStatusSchema = z.enum([
+  "SUGGESTED",
+  "OPEN_REQUEST",
+  "AWAITING_DONOR",
+  "COMMITTED",
+  "RECEIVED",
+  "REJECTED",
+  "CANCELLED",
+]);
+export type OrderStatus = z.infer<typeof OrderStatusSchema>;
 
 export const StockAlertCategorySchema = z.enum([
   "CRITICAL_LOW",
@@ -617,6 +631,25 @@ export const StockAlertCategorySchema = z.enum([
 ]);
 export type StockAlertCategory = z.infer<typeof StockAlertCategorySchema>;
 
+export const StockAlertResolutionActionSchema = z.enum([
+  "CONVERTED_TO_REQUEST",
+  "LOGGED_ADJUSTMENT",
+  "ACKNOWLEDGED",
+  "DISMISSED",
+]);
+export type StockAlertResolutionAction = z.infer<typeof StockAlertResolutionActionSchema>;
+
+export const StockAlertResolutionSchema = z.object({
+  action: StockAlertResolutionActionSchema,
+  linkedOrderId: z.string().min(1).nullable().optional(),
+  adjustedOnHand: z.number().int().nonnegative().optional(),
+  adjustmentDelta: z.number().int().optional(),
+  comment: z.string().trim().max(500).optional(),
+  decidedBy: ActedBySchema,
+  decidedAt: z.string().min(1),
+});
+export type StockAlertResolution = z.infer<typeof StockAlertResolutionSchema>;
+
 export const StockAlertSchema = z.object({
   id: z.string().min(1),
   branchId: z.string().min(1),
@@ -624,12 +657,15 @@ export const StockAlertSchema = z.object({
   sku: z.string().min(1),
   productName: z.string().min(1).optional(),
   category: StockAlertCategorySchema.default("CRITICAL_LOW"),
+  reportedQty: z.number().int().nonnegative().optional(),
   flaggedBy: ActedBySchema,
   flaggedAt: z.string().min(1),
   note: z.string().min(1).max(500),
   status: StockAlertStatusSchema,
   decidedBy: ActedBySchema.nullable(),
   decidedAt: z.string().nullable(),
+  resolution: StockAlertResolutionSchema.nullable().default(null),
+  linkedOrderStatus: OrderStatusSchema.nullable().optional(),
 });
 export type StockAlert = z.infer<typeof StockAlertSchema>;
 
@@ -637,9 +673,33 @@ export const CreateStockAlertSchema = z.object({
   branchId: z.string().min(1),
   sku: z.string().min(1),
   category: StockAlertCategorySchema.default("CRITICAL_LOW"),
+  reportedQty: z.coerce.number().int().nonnegative().optional(),
   note: z.string().trim().min(1, "Note is required").max(500),
 });
-export type CreateStockAlert = z.input<typeof CreateStockAlertSchema>;
+export type CreateStockAlert = Omit<z.infer<typeof CreateStockAlertSchema>, "category"> & {
+  category?: StockAlertCategory;
+};
+
+export const ResolveStockAlertSchema = z
+  .object({
+    action: StockAlertResolutionActionSchema,
+    comment: z.string().trim().max(500).optional(),
+    orderType: z.enum(["TRANSFER", "REORDER"]).optional(),
+    sourceBranchId: z.string().trim().min(1).nullable().optional(),
+    quantity: z.coerce.number().int().positive().optional(),
+    adjustedOnHand: z.coerce.number().int().nonnegative().optional(),
+    adjustmentDelta: z.coerce.number().int().optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.action === "DISMISSED" && !val.comment?.trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["comment"],
+        message: "Comment is required when dismissing a stock alert",
+      });
+    }
+  });
+export type ResolveStockAlert = z.infer<typeof ResolveStockAlertSchema>;
 
 export const StockAlertQuerySchema = z.object({
   branchId: z.string().trim().min(1).optional(),
@@ -650,6 +710,31 @@ export const StockAlertListSchema = z.object({
   alerts: z.array(StockAlertSchema),
 });
 export type StockAlertList = z.infer<typeof StockAlertListSchema>;
+
+export const DonorIneligibleReasonSchema = z.enum([
+  "ARCHIVED_BRANCH",
+  "NO_HISTORY",
+  "INSUFFICIENT_SURPLUS",
+]);
+export type DonorIneligibleReason = z.infer<typeof DonorIneligibleReasonSchema>;
+
+export const DonorCandidateSchema = z.object({
+  branchId: z.string().min(1),
+  branchName: z.string().min(1),
+  distanceKm: z.number().nonnegative(),
+  freightCostBhd: z.number().nonnegative(),
+  availableSurplusUnits: z.number().int().nonnegative(),
+  requestedQty: z.number().int().positive(),
+  offeredQty: z.number().int().nonnegative(),
+  isPartial: z.boolean(),
+  donorCoverDaysAfter: z.number().nullable(),
+  targetCoverDaysBefore: z.number().nullable(),
+  targetCoverDaysAfter: z.number().nullable(),
+  netBenefitBhd: z.number(),
+  eligible: z.boolean(),
+  ineligibleReason: DonorIneligibleReasonSchema.optional(),
+});
+export type DonorCandidate = z.infer<typeof DonorCandidateSchema>;
 
 export type Branch = z.input<typeof BranchSchema>;
 export type CreateBranch = z.infer<typeof CreateBranchSchema>;

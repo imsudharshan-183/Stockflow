@@ -74,3 +74,24 @@ export class BranchValidationError extends Error {
     this.name = "BranchValidationError";
   }
 }
+
+export class OrderNotFoundError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderNotFoundError";
+  }
+}
+
+export class OrderConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderConflictError";
+  }
+}
+
+export class OrderValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "OrderValidationError";
+  }
+}

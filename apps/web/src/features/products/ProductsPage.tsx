@@ -44,7 +44,7 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/features/auth/AuthContext";
 import { StaffProductStats } from "@/features/products/StaffProductStats";
-import { queryKeys } from "@/hooks/queryKeys";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
   formatDateTime,
@@ -129,7 +129,7 @@ function CatalogProductsPage() {
     onSuccess: async (created) => {
       toast.success(`Created product ${created.sku} (${created.name})`);
       setAddOpen(false);
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -140,11 +140,8 @@ function CatalogProductsPage() {
     onSuccess: async (updated) => {
       toast.success(`Updated ${updated.sku}`);
       setEditTarget(null);
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
       await queryClient.invalidateQueries({ queryKey: ["catalogProduct", updated.sku] });
-      await queryClient.invalidateQueries({ queryKey: ["product", updated.sku] });
-      await queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-      await queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -156,9 +153,7 @@ function CatalogProductsPage() {
         `Archived ${result.product.sku}. ${result.removedPendingActionsCount} pending actions cleared from queue.`,
       );
       setArchiveTarget(null);
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
-      await queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-      await queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -168,9 +163,7 @@ function CatalogProductsPage() {
     onSuccess: async (restored) => {
       toast.success(`Restored ${restored.sku} (${restored.name}) to ${restored.status}`);
       setRestoreTarget(null);
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
-      await queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-      await queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -180,7 +173,7 @@ function CatalogProductsPage() {
     onSuccess: async () => {
       toast.success("Product permanently deleted");
       setDeleteTarget(null);
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -191,9 +184,7 @@ function CatalogProductsPage() {
       toast.success(
         `Generated ${res.salesEntriesCount} sample sales records. Product activated with updated recommendations!`,
       );
-      await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
-      await queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-      await queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      await invalidateOperationalQueries(queryClient);
     },
     onError: (err: Error) => toast.error(err.message),
   });
@@ -822,9 +813,7 @@ function CatalogProductsPage() {
           open={csvOpen}
           onOpenChange={setCsvOpen}
           onSuccess={async () => {
-            await queryClient.invalidateQueries({ queryKey: ["catalogProducts"] });
-            await queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-            await queryClient.invalidateQueries({ queryKey: ["kpis"] });
+            await invalidateOperationalQueries(queryClient);
           }}
         />
       </div>

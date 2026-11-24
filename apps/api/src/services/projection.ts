@@ -1,17 +1,26 @@
 import {
-  DEFAULT_POLICY,
-  coverDaysOf,
+  ZERO_DELTA,
+  deltaKey,
+  getCommittedDelta,
+  projectPosition,
   type Action,
   type Analysis,
+  type CommittedDelta,
+  type CommittedDeltaStore,
   type Dataset,
   type Position,
-  type PositionStatus,
+  type ProjectedPosition,
 } from "@stockflow/core";
 
-export interface CommittedDelta {
-  reserved: number;
-  inTransit: number;
-}
+export {
+  ZERO_DELTA,
+  deltaKey,
+  getCommittedDelta,
+  projectPosition,
+  type CommittedDelta,
+  type CommittedDeltaStore,
+  type ProjectedPosition,
+};
 
 export interface CommittedAllocation {
   sku: string;
@@ -21,95 +30,25 @@ export interface CommittedAllocation {
   quantity: number;
 }
 
-export interface ProjectedPosition extends Position {
-  reserved: number;
-  inTransit: number;
-}
-
-export const ZERO_DELTA: CommittedDelta = { reserved: 0, inTransit: 0 };
-
-/**
- * Pure projection applying committed outgoing reservations and inbound stock
- * on top of an immutable engine Position snapshot.
- *
- * DECISION: `StockRuntimeState.analysis` is treated as an immutable baseline per `dataVersion` (`ADR-001`)
- * so golden snapshots, engine math, and cross-instance plan caching stay deterministic; approvals write
- * to `actions`/`audit` and project live `reserved`/`inTransit` adjustments at read time instead.
- */
-export function projectPosition(
-  rawPosition: Position,
-  deltas: CommittedDelta = ZERO_DELTA,
-): ProjectedPosition {
-  const reserved = Math.max(0, deltas.reserved);
-  const inTransit = Math.max(0, deltas.inTransit);
-  if (reserved === 0 && inTransit === 0) {
-    return { ...rawPosition, reserved: 0, inTransit: 0 };
-  }
-
-  const onHand = Math.max(0, rawPosition.onHand - reserved);
-  const surplus = Math.max(0, rawPosition.surplus - reserved);
-  const effectiveStock = onHand + inTransit;
-  const coverDays = coverDaysOf(effectiveStock, rawPosition.velocity);
-  const onHandCoverDays = coverDaysOf(onHand, rawPosition.velocity);
-
-  let status: PositionStatus = rawPosition.status;
-  if (rawPosition.inStockDays === 0) {
-    status = "NEW";
-  } else {
-    const overstock =
-      onHandCoverDays === null ? onHand > 0 : onHandCoverDays > DEFAULT_POLICY.overstockCoverDays;
-    if (overstock) {
-      status = "OVERSTOCK";
-    } else if (effectiveStock < rawPosition.reorderPoint) {
-      status = "AT_RISK";
-    } else {
-      status = "HEALTHY";
-    }
-  }
-
-  const need = status === "AT_RISK" ? Math.max(0, rawPosition.need - inTransit) : 0;
-  const lostUnits = status === "AT_RISK" ? Math.max(0, rawPosition.lostUnits - inTransit) : 0;
-
-  return {
-    ...rawPosition,
-    onHand,
-    coverDays,
-    status,
-    surplus,
-    need,
-    lostUnits,
-    reserved,
-    inTransit,
-  };
-}
-
-export function deltaKey(sku: string, branchId: string): string {
-  return `${sku}::${branchId}`;
-}
-
-export function getCommittedDelta(
-  committedDeltas: ReadonlyMap<string, CommittedDelta>,
-  sku: string,
-  branchId: string,
-): CommittedDelta {
-  return committedDeltas.get(deltaKey(sku, branchId)) ?? ZERO_DELTA;
-}
-
 export function adjustCommittedDelta(
   committedDeltas: Map<string, CommittedDelta>,
   sku: string,
   branchId: string,
   dReserved: number,
   dInTransit: number,
+  dAdjustment = 0,
 ): void {
   const key = deltaKey(sku, branchId);
   const current = committedDeltas.get(key) ?? ZERO_DELTA;
   const reserved = Math.max(0, current.reserved + dReserved);
   const inTransit = Math.max(0, current.inTransit + dInTransit);
-  if (reserved === 0 && inTransit === 0) {
+  const adjustment = (current.adjustment ?? 0) + dAdjustment;
+  if (reserved === 0 && inTransit === 0 && adjustment === 0) {
     committedDeltas.delete(key);
-  } else {
+  } else if (adjustment === 0) {
     committedDeltas.set(key, { reserved, inTransit });
+  } else {
+    committedDeltas.set(key, { reserved, inTransit, adjustment });
   }
 }
 

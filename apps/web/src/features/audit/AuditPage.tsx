@@ -2,22 +2,14 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
+import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCard,
-  TableCardFooter,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-  TableToolbar,
-} from "@/components/ui/table";
+import { TableCard, TableCardFooter, TableToolbar } from "@/components/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { queryKeys } from "@/hooks/queryKeys";
 import { useLocationScope } from "@/hooks/useLocationScope";
@@ -28,45 +20,65 @@ import {
   formatDateTime,
   formatMoneyFull,
   formatNumber,
-  statusLabel,
+  formatReasonSentence,
+  orderEventActionLabel,
+  orderOriginLabel,
+  orderStatusLabel,
 } from "@/lib/format";
 import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
 
 export function AuditPage() {
   const { selectedLocation } = useLocationScope();
   const branchParam = selectedLocation ?? undefined;
-  const audit = useQuery({
-    queryKey: queryKeys.audit(branchParam),
-    queryFn: () => api.audit(branchParam),
+  const ordersQuery = useQuery({
+    queryKey: queryKeys.orders({ branch: branchParam }),
+    queryFn: () => api.listOrders({ branch: branchParam }),
   });
-  const [search, setSearch] = useState("");
-  const [decisionFilter, setDecisionFilter] = useState<string>("");
 
-  const entries = useMemo(() => audit.data?.entries ?? [], [audit.data]);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState("");
+  const [typeFilter, setTypeFilter] = useState("");
+
+  const threads = useMemo(() => {
+    const all = ordersQuery.data?.orders ?? [];
+    return all
+      .filter((order) => !order.isVirtual && order.events.length > 0)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }, [ordersQuery.data]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return entries.filter((entry) => {
-      if (decisionFilter && entry.decision !== decisionFilter) return false;
+    return threads.filter((order) => {
+      if (statusFilter && order.status !== statusFilter) return false;
+      if (typeFilter && order.type !== typeFilter) return false;
       if (!q) return true;
+      const eventMatch = order.events.some(
+        (ev) =>
+          ev.actor.name.toLowerCase().includes(q) ||
+          (ev.comment?.toLowerCase().includes(q) ?? false),
+      );
       return (
-        matchesProductQuery(entry, q) ||
-        entry.branchName.toLowerCase().includes(q) ||
-        entry.branchId.toLowerCase().includes(q) ||
-        (entry.donorBranchId?.toLowerCase().includes(q) ?? false) ||
-        entry.user.toLowerCase().includes(q)
+        matchesProductQuery(order, q) ||
+        order.id.toLowerCase().includes(q) ||
+        order.targetBranchName.toLowerCase().includes(q) ||
+        order.targetBranchId.toLowerCase().includes(q) ||
+        (order.sourceBranchName?.toLowerCase().includes(q) ?? false) ||
+        (order.sourceBranchId?.toLowerCase().includes(q) ?? false) ||
+        eventMatch
       );
     });
-  }, [entries, search, decisionFilter]);
+  }, [threads, search, statusFilter, typeFilter]);
+
+  const hasFilters = Boolean(search.trim() || statusFilter || typeFilter);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Audit log"
         subtitle={
-          audit.data
-            ? `${formatNumber(entries.length)} recorded decisions · newest first`
-            : "Every approve and reject decision, newest first."
+          ordersQuery.data
+            ? `${formatNumber(threads.length)} audited order threads · newest update first`
+            : "One chronological event thread per replenishment order."
         }
       />
 
@@ -82,7 +94,7 @@ export function AuditPage() {
                 type="search"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search product, SKU, branch, or user..."
+                placeholder="Search SKU, branch, actor, or comment..."
                 aria-label="Search audit log"
                 className="h-9 rounded-xl border-border bg-card pr-8 pl-8 text-xs shadow-xs"
               />
@@ -101,33 +113,50 @@ export function AuditPage() {
             </div>
 
             <select
-              aria-label="Filter by decision"
-              value={decisionFilter}
-              onChange={(event) => setDecisionFilter(event.target.value)}
+              aria-label="Filter by order type"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
               className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
             >
-              <option value="">All decisions</option>
-              <option value="APPROVED">Approved</option>
-              <option value="REJECTED">Rejected</option>
+              <option value="">All types</option>
+              <option value="TRANSFER">Transfer</option>
+              <option value="REORDER">Reorder</option>
+              <option value="MARKDOWN">Markdown</option>
+            </select>
+
+            <select
+              aria-label="Filter by status"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+              className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
+            >
+              <option value="">All statuses</option>
+              <option value="OPEN_REQUEST">Open Request</option>
+              <option value="AWAITING_DONOR">Awaiting Donor</option>
+              <option value="COMMITTED">Committed</option>
+              <option value="RECEIVED">Received</option>
+              <option value="REJECTED">Declined</option>
+              <option value="CANCELLED">Cancelled</option>
             </select>
           </div>
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground tabular-nums">
-            {audit.data ? (
+            {ordersQuery.data ? (
               <span>
                 Showing <span className="font-medium text-foreground">{formatNumber(filtered.length)}</span>{" "}
-                of <span className="font-medium text-foreground">{formatNumber(entries.length)}</span>
+                of <span className="font-medium text-foreground">{formatNumber(threads.length)}</span>
               </span>
             ) : (
               <span>Loading audit log...</span>
             )}
-            {search || decisionFilter ? (
+            {hasFilters ? (
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => {
                   setSearch("");
-                  setDecisionFilter("");
+                  setStatusFilter("");
+                  setTypeFilter("");
                 }}
               >
                 Clear filters
@@ -136,19 +165,22 @@ export function AuditPage() {
           </div>
         </TableToolbar>
 
-        {audit.isPending ? (
+        {ordersQuery.isPending ? (
           <div className="p-4">
             <TableSkeleton rows={6} />
           </div>
-        ) : audit.isError ? (
+        ) : ordersQuery.isError ? (
           <div className="p-4">
-            <ErrorBlock message={audit.error.message} onRetry={() => void audit.refetch()} />
+            <ErrorBlock
+              message={ordersQuery.error.message}
+              onRetry={() => void ordersQuery.refetch()}
+            />
           </div>
-        ) : entries.length === 0 ? (
+        ) : threads.length === 0 ? (
           <div className="p-4">
             <EmptyBlock
-              title="No decisions yet"
-              body="Approve or reject an action in the queue and it will appear here with its reason codes."
+              title="No audited orders yet"
+              body="Submit, release, decline, or confirm receipt on an order in the queue to record its immutable event thread here."
               action={
                 <Link to="/queue">
                   <Button variant="secondary" size="sm">
@@ -161,15 +193,16 @@ export function AuditPage() {
         ) : filtered.length === 0 ? (
           <div className="p-4">
             <EmptyBlock
-              title="No matching audit entries"
-              body="No recorded decisions match your current search or filter."
+              title="No matching order threads"
+              body="No audited replenishment orders match your current search or filter."
               action={
                 <Button
                   variant="secondary"
                   size="sm"
                   onClick={() => {
                     setSearch("");
-                    setDecisionFilter("");
+                    setStatusFilter("");
+                    setTypeFilter("");
                   }}
                 >
                   Clear filters
@@ -178,143 +211,167 @@ export function AuditPage() {
             />
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <Table className="min-w-[880px]">
-              <TableHeader>
-                <tr className="border-b border-border">
-                  <TableHead className="w-[156px]">Time</TableHead>
-                  <TableHead className="w-[148px]">User</TableHead>
-                  <TableHead className="w-[108px]">Decision</TableHead>
-                  <TableHead className="w-[104px]">Action</TableHead>
-                  <TableHead className="w-[22%]">Product</TableHead>
-                  <TableHead className="w-[160px]">Branch</TableHead>
-                  <TableHead className="w-[125px] text-right">Estimated gain</TableHead>
-                  <TableHead className="w-auto">Reason codes</TableHead>
-                </tr>
-              </TableHeader>
-              <TableBody>
-                {filtered.map((entry) => (
-                  <TableRow key={entry.id}>
-                    <TableCell className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
-                      {formatDateTime(entry.at)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="truncate font-medium text-foreground">{entry.user}</div>
-                      {entry.actedBy ? (
-                        <div className="mt-0.5">
-                          <Badge tone={entry.actedBy.role} className="px-2 py-0 text-[10px]">
-                            {entry.actedBy.role}
-                          </Badge>
-                        </div>
-                      ) : null}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        tone={entry.decision === "APPROVED" ? "approved" : "rejected"}
-                        dot
-                      >
-                        {statusLabel(entry.decision)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
+          <div className="space-y-4 p-4">
+            {filtered.map((order) => (
+              <Card
+                key={order.id}
+                data-thread-id={order.id}
+                className="rounded-xl border border-border bg-card shadow-xs"
+              >
+                <CardHeader className="flex flex-col gap-2 border-b border-border/70 pb-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
                       <Badge
                         tone={
-                          entry.action === "TRANSFER"
+                          order.type === "TRANSFER"
                             ? "transfer"
-                            : entry.action === "REORDER"
+                            : order.type === "REORDER"
                               ? "reorder"
                               : "markdown"
                         }
                       >
-                        {actionLabel(entry.action)}
+                        {actionLabel(order.type)}
                       </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <Link
-                              to={`/products/${entry.sku}`}
-                              className="block truncate font-semibold text-foreground hover:text-primary hover:underline"
-                            >
-                              {formatProductDisplayName(entry.productName, entry.sku)}
-                            </Link>
-                          }
-                        />
-                        <TooltipContent side="top">
-                          {formatProductDisplayName(entry.productName, entry.sku)}
-                        </TooltipContent>
-                      </Tooltip>
-                      <div className="truncate font-mono text-xs text-muted-foreground">
-                        {entry.sku}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {entry.action === "TRANSFER" && entry.donorBranchId ? (
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1 truncate text-xs text-muted-foreground">
-                            <span>From {entry.donorBranchId}</span>
-                            <ArrowRight className="size-3 shrink-0" aria-hidden="true" />
-                          </div>
+                      <OrderStatusBadge status={order.status} />
+                      <Badge variant="outline">{orderOriginLabel(order.origin)}</Badge>
+                      {order.linkedAlertId ? (
+                        <Badge variant="secondary" className="font-mono text-[11px]">
+                          Alert {order.linkedAlertId}
+                        </Badge>
+                      ) : null}
+                      <span className="font-mono text-[11px] text-muted-foreground">{order.id}</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <Link
+                        to={`/products/${order.sku}`}
+                        className="font-semibold text-foreground hover:text-primary hover:underline"
+                      >
+                        {formatProductDisplayName(order.productName, order.sku)}
+                      </Link>
+                      <span className="font-mono text-xs text-muted-foreground">{order.sku}</span>
+                      <span className="text-muted-foreground">·</span>
+                      {order.sourceBranchName ? (
+                        <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                           <Link
-                            to={`/branches/${entry.branchId}`}
-                            className="block truncate font-medium text-foreground hover:text-primary hover:underline"
+                            to={`/branches/${order.sourceBranchId}`}
+                            className="hover:text-foreground hover:underline"
                           >
-                            {entry.branchName}
+                            {order.sourceBranchName}
                           </Link>
-                        </div>
+                          <ArrowRight className="size-3" aria-hidden="true" />
+                          <Link
+                            to={`/branches/${order.targetBranchId}`}
+                            className="font-medium text-foreground hover:text-primary hover:underline"
+                          >
+                            {order.targetBranchName}
+                          </Link>
+                        </span>
                       ) : (
-                        <>
-                          <Link
-                            to={`/branches/${entry.branchId}`}
-                            className="block truncate font-medium text-foreground hover:text-primary hover:underline"
-                          >
-                            {entry.branchName}
-                          </Link>
-                          <div className="truncate text-xs text-muted-foreground">
-                            {entry.branchId}
-                          </div>
-                        </>
+                        <Link
+                          to={`/branches/${order.targetBranchId}`}
+                          className="text-xs font-medium text-foreground hover:text-primary hover:underline"
+                        >
+                          {order.targetBranchName}
+                        </Link>
                       )}
-                    </TableCell>
-                    <TableCell className="text-right font-semibold text-foreground tabular-nums">
-                      {formatMoneyFull(entry.netBenefit)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex flex-wrap gap-1">
-                        {entry.reasonCodes.map((code) => (
-                          <Tooltip key={code}>
-                            <TooltipTrigger
-                              render={
-                                <span tabIndex={0} className="inline-flex">
-                                  <Badge
-                                    variant="secondary"
-                                    className="font-mono text-[10px] tracking-tight"
-                                  >
-                                    {code}
-                                  </Badge>
-                                </span>
-                              }
-                            />
-                            <TooltipContent side="top">
-                              {REASON_LABELS[code]}
-                            </TooltipContent>
-                          </Tooltip>
-                        ))}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                    </div>
+                  </div>
+
+                  <div className="flex shrink-0 flex-wrap items-baseline gap-3 text-xs tabular-nums sm:flex-col sm:items-end sm:gap-0.5">
+                    <span className="font-semibold text-foreground">
+                      {formatNumber(order.quantity)} units
+                    </span>
+                    <span className="text-muted-foreground">
+                      Estimated gain {formatMoneyFull(order.engineSnapshot.netBenefitBhd)}
+                    </span>
+                  </div>
+                </CardHeader>
+
+                <CardContent className="space-y-3 pt-3">
+                  {/* Read-only System Rationale Chips */}
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        System rationale:
+                      </span>
+                      {order.engineSnapshot.reasonCodes.map((code) => (
+                        <Tooltip key={code}>
+                          <TooltipTrigger
+                            render={
+                              <span tabIndex={0} className="inline-flex">
+                                <Badge
+                                  variant="secondary"
+                                  className="font-mono text-[10px] tracking-tight"
+                                >
+                                  {code}
+                                </Badge>
+                              </span>
+                            }
+                          />
+                          <TooltipContent side="top">{REASON_LABELS[code]}</TooltipContent>
+                        </Tooltip>
+                      ))}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {formatReasonSentence(order.engineSnapshot.reason)}
+                    </p>
+                  </div>
+
+                  {/* Chronological Event Status Chain */}
+                  <ol className="space-y-2 border-l-2 border-border pl-4" aria-label="Order event history">
+                    {order.events.map((ev) => (
+                      <li key={ev.id} className="space-y-1 text-xs">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-semibold text-foreground">
+                              {ev.dispositionCode === "REOPENED"
+                                ? "Reopened"
+                                : orderEventActionLabel(ev.action)}
+                            </span>
+                            <span className="inline-flex items-center gap-1 text-muted-foreground">
+                              {ev.fromStatus ? (
+                                <>
+                                  <span>{orderStatusLabel(ev.fromStatus)}</span>
+                                  <ArrowRight className="size-3" aria-hidden="true" />
+                                </>
+                              ) : null}
+                              <span className="font-medium text-foreground">
+                                {orderStatusLabel(ev.toStatus)}
+                              </span>
+                            </span>
+                            <span aria-hidden="true" className="text-muted-foreground">
+                              ·
+                            </span>
+                            <span className="text-muted-foreground">{ev.actor.name}</span>
+                            <Badge tone={ev.actor.role} className="px-1.5 py-0 text-[10px]">
+                              {ev.actor.role}
+                            </Badge>
+                            {ev.isAdminOverride ? <Badge tone="over">Override</Badge> : null}
+                          </div>
+                          <span className="text-muted-foreground tabular-nums">
+                            {formatDateTime(ev.at)}
+                          </span>
+                        </div>
+                        {ev.comment ? (
+                          <blockquote className="border-l-2 border-border pl-3 text-xs italic text-foreground">
+                            {ev.comment}
+                          </blockquote>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </CardContent>
+              </Card>
+            ))}
           </div>
         )}
 
-        {audit.data && filtered.length > 0 ? (
+        {ordersQuery.data && filtered.length > 0 ? (
           <TableCardFooter>
             <span className="tabular-nums">
-              {formatNumber(filtered.length)} audit{" "}
-              {filtered.length === 1 ? "entry" : "entries"}
+              {formatNumber(filtered.length)} order{" "}
+              {filtered.length === 1 ? "thread" : "threads"}
             </span>
           </TableCardFooter>
         ) : null}

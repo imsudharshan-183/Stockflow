@@ -1,12 +1,20 @@
 import type {
-  ActionRecord,
   Analysis,
-  AuditEntry,
   Dataset,
   KpiSummary,
   RecommendationStatus,
+  ReplenishmentOrder,
 } from "@stockflow/core";
-import type { StockRepository } from "../repositories/types.js";
+import {
+  readQueueLifecycleConfig,
+  type QueueLifecycleConfig,
+} from "../config/queueLifecycle.js";
+import type {
+  ActionMetaRecord,
+  ApiAuditEntry,
+  OrderLifecycleMeta,
+  StockRepository,
+} from "../repositories/types.js";
 import {
   adjustCommittedDelta,
   clearAllCommittedDeltas,
@@ -17,29 +25,53 @@ import { computeActivePlan } from "./scope.js";
 
 export interface StockRuntimeState {
   readonly repo: StockRepository;
+  now: () => number;
+  lifecycleConfig: QueueLifecycleConfig;
+  decisionVersion: number;
   readonly decisions: Map<string, Extract<RecommendationStatus, "APPROVED" | "REJECTED">>;
+  readonly actionMeta: Map<string, ActionMetaRecord>;
+  readonly orderLifecycleMeta: Map<string, OrderLifecycleMeta>;
   // In-memory projection ledger keyed by `${sku}::${branchId}`; rebuilt from post-plan audits on boot
   // and cleared per SKU (or network-wide) whenever base dataVersion advances.
   readonly committedDeltas: Map<string, CommittedDelta>;
   readonly committedRecommendationIds: Map<string, CommittedAllocation>;
+  readonly alertAdjustments: Map<
+    string,
+    { sku: string; branchId: string; delta: number; decidedAt: string }
+  >;
   readonly inflightDecisionIds: Set<string>;
+  readonly orders: Map<string, ReplenishmentOrder>;
+  readonly inflightOrderIds: Set<string>;
   readonly scopedKpiCache: Map<string, KpiSummary>;
-  audit: AuditEntry[];
+  audit: ApiAuditEntry[];
   planVersion: number;
+  planComputedAt?: string;
   initialized: boolean;
   inflightRefresh: Promise<void> | null;
   data: Dataset;
   analysis: Analysis;
   onReplayAudit?: (replayCutoffAt?: string) => void;
+  onAfterInit?: (replayCutoffAt?: string) => Promise<void>;
 }
 
-export function createStockRuntimeState(repo: StockRepository): StockRuntimeState {
+export function createStockRuntimeState(
+  repo: StockRepository,
+  options?: { now?: () => number; lifecycleConfig?: Partial<QueueLifecycleConfig> },
+): StockRuntimeState {
   return {
     repo,
+    now: options?.now ?? (() => Date.now()),
+    lifecycleConfig: readQueueLifecycleConfig(process.env, options?.lifecycleConfig),
+    decisionVersion: 1,
     decisions: new Map(),
+    actionMeta: new Map(),
+    orderLifecycleMeta: new Map(),
     committedDeltas: new Map(),
     committedRecommendationIds: new Map(),
+    alertAdjustments: new Map(),
     inflightDecisionIds: new Set(),
+    orders: new Map(),
+    inflightOrderIds: new Set(),
     scopedKpiCache: new Map(),
     audit: [],
     planVersion: 0,
@@ -50,14 +82,25 @@ export function createStockRuntimeState(repo: StockRepository): StockRuntimeStat
   };
 }
 
+export function bumpDecisionVersion(state: StockRuntimeState): number {
+  state.decisionVersion += 1;
+  state.scopedKpiCache.clear();
+  return state.decisionVersion;
+}
+
 export function applyDecisionHistoryToState(
   state: StockRuntimeState,
-  history: ActionRecord[],
+  history: ActionMetaRecord[],
 ): void {
   state.decisions.clear();
+  state.actionMeta.clear();
   const sorted = [...history].sort((a, b) => a.decidedAt.localeCompare(b.decidedAt));
   for (const action of sorted) {
-    state.decisions.set(action.recommendationId, action.status);
+    state.actionMeta.set(action.recommendationId, action);
+    const isReopened = Boolean(action.reopenedAt && action.reopenedAt >= action.decidedAt);
+    if (!isReopened) {
+      state.decisions.set(action.recommendationId, action.status);
+    }
   }
 }
 
@@ -147,9 +190,13 @@ export async function ensureInitialized(state: StockRuntimeState): Promise<void>
       state.data = data;
       state.analysis = analysis;
       state.planVersion = currentVersion;
+      state.planComputedAt = cached?.computedAt;
       state.scopedKpiCache.clear();
       const replayCutoff = currentVersion > 1 ? cached?.computedAt : undefined;
       await syncDecisionsAndAudit(state, replayCutoff);
+      if (state.onAfterInit) {
+        await state.onAfterInit(replayCutoff);
+      }
       state.initialized = true;
     })().finally(() => {
       state.inflightRefresh = null;
@@ -166,8 +213,8 @@ export function ensureInitializedSyncIfPossible(state: StockRuntimeState): void 
     peekDataVersionSync?: () => number;
     peekCachedPlanSync?: (v: number) => { plan: Analysis } | null;
     saveCachedPlanSync?: (v: number, plan: Analysis) => void;
-    peekActionsSync?: () => ActionRecord[];
-    peekAuditSync?: () => AuditEntry[];
+    peekActionsSync?: () => ActionMetaRecord[];
+    peekAuditSync?: () => ApiAuditEntry[];
   };
   if (typeof syncRepo.peekDatasetSync === "function") {
     const tDataset = performance.now();
@@ -255,10 +302,17 @@ export async function ensureFreshPlan(
       state.data = freshData;
       state.analysis = nextPlan;
       state.planVersion = currentVersion;
+      state.planComputedAt = cached?.computedAt;
       clearAllCommittedDeltas(state.committedDeltas, state.committedRecommendationIds);
+      state.alertAdjustments.clear();
+      state.orders.clear();
+      state.orderLifecycleMeta.clear();
       state.scopedKpiCache.clear();
       if (!actions) applyDecisionHistoryToState(state, await state.repo.listActions());
       if (!audit) state.audit = await state.repo.listAudit();
+      if (state.onAfterInit) {
+        await state.onAfterInit(cached?.computedAt);
+      }
     })().finally(() => {
       state.inflightRefresh = null;
     });
@@ -270,6 +324,8 @@ export async function ensureFreshPlan(
 export async function commitPlanVersion(state: StockRuntimeState): Promise<number> {
   const nextVersion = await state.repo.bumpDataVersion();
   state.planVersion = nextVersion;
+  state.planComputedAt = new Date(state.now()).toISOString();
+  state.scopedKpiCache.clear();
   try {
     await state.repo.saveCachedPlan(nextVersion, state.analysis);
   } catch {

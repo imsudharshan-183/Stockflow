@@ -131,13 +131,13 @@ export function Shell() {
   });
 
   const pendingQueueQuery = useQuery({
-    queryKey: queryKeys.recommendations({
-      status: "PENDING",
+    queryKey: queryKeys.orders({
+      queue: "suggested",
       branch: selectedLocation ?? undefined,
     }),
     queryFn: () =>
-      api.recommendations({
-        status: "PENDING",
+      api.listOrders({
+        queue: "suggested",
         branch: selectedLocation ?? undefined,
       }),
     enabled: Boolean(user) && user?.role !== "staff",

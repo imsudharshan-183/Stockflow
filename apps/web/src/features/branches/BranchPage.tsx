@@ -37,7 +37,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/features/auth/AuthContext";
 import { RecommendationDrawer } from "@/features/queue/RecommendationDrawer";
-import { queryKeys } from "@/hooks/queryKeys";
+import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
   actionLabel,
@@ -212,10 +212,7 @@ export function BranchPage({
     onSuccess: (updated, vars) => {
       toast.success(vars.decision === "approve" ? "Action approved" : "Action rejected");
       setDrawerRec(updated);
-      void queryClient.invalidateQueries({ queryKey: queryKeys.locationSummary(id) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.locations });
-      void queryClient.invalidateQueries({ queryKey: ["recommendations"] });
-      void queryClient.invalidateQueries({ queryKey: ["kpis"] });
+      void invalidateOperationalQueries(queryClient);
     },
     onError: (err) => {
       toast.error(err instanceof Error ? err.message : "Could not update decision");
