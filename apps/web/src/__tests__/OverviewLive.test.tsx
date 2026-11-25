@@ -171,7 +171,7 @@ describe("OverviewPage live Bahrain dates, stale data banner, and refresh", () =
     await screen.findByText(/Today: Tue, 24 Nov 2026/i);
     expect(screen.getAllByText(/Data through/i).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/Updated 10:30/i)).toBeInTheDocument();
-    expect(screen.getByText(/3 ranked actions worth BD 420 in estimated gain/i)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "3 actions need review" })).toBeInTheDocument();
 
     // Static replay copy must be absent
     expect(screen.queryByText(/Backtest verified/i)).not.toBeInTheDocument();
@@ -198,7 +198,7 @@ describe("OverviewPage live Bahrain dates, stale data banner, and refresh", () =
       screen.queryByRole("link", { name: /Data is .* old - import latest sales/i }),
     ).not.toBeInTheDocument();
     expect(
-      screen.getByText(/5 ranked actions worth BD 800 in estimated gain/i),
+      screen.getByText("BD 800 estimated gain across pending actions"),
     ).toBeInTheDocument();
   });
 });

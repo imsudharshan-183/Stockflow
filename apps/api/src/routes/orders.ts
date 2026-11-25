@@ -15,6 +15,8 @@ import {
   OrderRerouteBodySchema,
   QueueLifecycleViewSchema,
   ReplenishmentOrderSchema,
+  StoreOrderSchema,
+  isBranchInScope,
   type User,
 } from "@stockflow/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
@@ -72,7 +74,7 @@ async function runOrderAction<TBody, TResult>(
   }
   try {
     const updated = await handler(pathParsed.data.id, bodyParsed.data, request.currentUser);
-    return responseSchema.parse(updated);
+    return request.currentUser.role === "staff" ? StoreOrderSchema.parse(updated) : responseSchema.parse(updated);
   } catch (err) {
     return sendOrderError(err, reply);
   }
@@ -129,7 +131,19 @@ export function registerOrderRoutes(
         );
       }
       try {
+        const query = parsed.data;
+        if (request.currentUser.role === "staff" && query.queue === "outgoing" &&
+            query.status === "COMMITTED" && query.branch && !query.type && !query.sku &&
+            !query.category && !query.view && services.runtime.repo.listStoreDeliveries) {
+          if (!isBranchInScope(request.currentUser, query.branch)) return { orders: [], total: 0 };
+          const orders = await services.runtime.repo.listStoreDeliveries(query.branch);
+          return { orders, total: orders.length };
+        }
         const res = await services.orders.list(parsed.data, request.currentUser);
+        if (request.currentUser.role === "staff") {
+          const orders = res.orders.filter((o) => query.status !== "COMMITTED" || o.type !== "MARKDOWN");
+          return { orders: orders.map((order) => StoreOrderSchema.parse(order)), total: orders.length };
+        }
         if (parsed.data.view) {
           return LifecycleOrderListResponseSchema.parse(res);
         }
@@ -173,7 +187,7 @@ export function registerOrderRoutes(
       }
       try {
         const order = await services.orders.get(pathParsed.data.id, request.currentUser);
-        return ReplenishmentOrderSchema.parse(order);
+        return request.currentUser.role === "staff" ? StoreOrderSchema.parse(order) : ReplenishmentOrderSchema.parse(order);
       } catch (err) {
         return sendOrderError(err, reply);
       }

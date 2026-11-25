@@ -1,4 +1,4 @@
-import { ProductListResponseSchema, StockAlertListSchema, StockAlertSchema, UserSchema } from "@stockflow/core";
+import { StoreProductListSchema, StockAlertListSchema, StockAlertSchema, UserSchema } from "@stockflow/core";
 import { describe, expect, it } from "vitest";
 import { resolveStaffActiveBranch } from "../../../web/src/hooks/staffBranchScope.js";
 import { InMemoryRepository } from "../repositories/memory.js";
@@ -73,7 +73,9 @@ describe("Multi-branch staff assignment, switching, and scoping", () => {
         headers: multiAuth,
       });
       expect(defaultInvRes.statusCode).toBe(200);
-      const defaultInv = ProductListResponseSchema.parse(JSON.parse(defaultInvRes.payload));
+      expect(defaultInvRes.json().products[0]).not.toHaveProperty("cost");
+      expect(defaultInvRes.json().products[0]).not.toHaveProperty("price");
+      const defaultInv = StoreProductListSchema.parse(JSON.parse(defaultInvRes.payload));
       expect(defaultInv.branchSummary?.branch.id).toBe("BR-001");
 
       // Switching to the second assigned branch (BR-002) returns BR-002 inventory
@@ -83,7 +85,7 @@ describe("Multi-branch staff assignment, switching, and scoping", () => {
         headers: multiAuth,
       });
       expect(br2InvRes.statusCode).toBe(200);
-      const br2Inv = ProductListResponseSchema.parse(JSON.parse(br2InvRes.payload));
+      const br2Inv = StoreProductListSchema.parse(JSON.parse(br2InvRes.payload));
       expect(br2Inv.branchSummary?.branch.id).toBe("BR-002");
 
       // Viewing inventory for an unassigned branch (BR-005) is forbidden (403)

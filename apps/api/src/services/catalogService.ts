@@ -1,3 +1,4 @@
+import { latestStockCounts } from "../db.js";
 import {
   BranchDetailSchema,
   BranchListResponseSchema,
@@ -112,11 +113,13 @@ export class CatalogService {
     const product = this.runtime.data.products[sIdx]!;
     if (product.status === "archived") return { dateAdded: false };
 
+    this.runtime.data.baselineThrough ??= this.runtime.data.asOf;
     let dateAdded = false;
     let dIdx = this.runtime.data.dates.indexOf(date);
     if (dIdx < 0) {
       let insertAt = this.runtime.data.dates.findIndex((d) => d > date);
       if (insertAt < 0) insertAt = this.runtime.data.dates.length;
+      (this.runtime.data.submissions ??= {})[date] = new Set();
       this.runtime.data.dates.splice(insertAt, 0, date);
       for (let p = 0; p < this.runtime.data.products.length; p += 1) {
         const salesByBranch = this.runtime.data.sales[p];
@@ -147,6 +150,13 @@ export class CatalogService {
     if (salesRow && onHandRow && demandRow) {
       salesRow[dIdx] = unitsSold;
       onHandRow[dIdx] = onHand;
+      const key = `${sku}::${branchId}`;
+      this.runtime.data.submissions?.[date]?.add(key);
+      for (let i = dIdx + 1; i < onHandRow.length; i++) {
+        const submissions = this.runtime.data.submissions?.[this.runtime.data.dates[i]!];
+        if (!submissions || submissions.has(key)) break;
+        onHandRow[i] = onHand;
+      }
       demandRow[dIdx] = unitsSold;
     }
     return { dateAdded };
@@ -169,6 +179,10 @@ export class CatalogService {
     );
     for (const [alertId, adj] of this.runtime.alertAdjustments.entries()) {
       if (adj.sku === sku) this.runtime.alertAdjustments.delete(alertId);
+    }
+    if (this.runtime.repo.kind === "mongo" && options.bumpVersion !== false) {
+      await commitPlanVersion(this.runtime);
+      return;
     }
     if (options.fullPlanRecompute) {
       this.runtime.analysis = computeActivePlan(this.runtime.data);
@@ -719,6 +733,7 @@ export class CatalogService {
     }
 
     let list = [...this.runtime.data.products];
+    if (user && user.role !== "admin") list = list.filter((p) => p.status !== "archived");
     if (query.status) {
       list = list.filter((p) => (p.status ?? "active") === query.status);
     }
@@ -779,6 +794,13 @@ export class CatalogService {
       };
     });
 
+    if (targetBranchId && user?.role === "staff") {
+      const counts = await latestStockCounts(products.map((p) => ({ sku: p.sku, branchId: targetBranchId })), this.runtime.repo.kind === "mongo");
+      for (const item of products) {
+        const count = counts.get(`${item.sku}::${targetBranchId}`);
+        if (item.stats) item.stats.lastSubmission = count ? { date: count.date, unitsSold: count.unitsSold } : null;
+      }
+    }
     return ProductListResponseSchema.parse({
       products,
       total,
@@ -1087,6 +1109,7 @@ export class CatalogService {
         const date = this.runtime.data.dates[d]!;
         const unitsSold = 2 + ((d + branch.id.charCodeAt(3)) % 5);
         const onHand = 15 + ((d + branch.id.charCodeAt(3)) % 25);
+        this.runtime.data.submissions?.[date]?.add(`${sku}::${branch.id}`);
         this.runtime.data.sales[skuIndex]![b]![d] = unitsSold;
         this.runtime.data.onHand[skuIndex]![b]![d] = onHand;
         this.runtime.data.demand[skuIndex]![b]![d] = unitsSold;
@@ -1097,7 +1120,7 @@ export class CatalogService {
           date,
           unitsSold,
           onHand,
-        });
+        }, this.runtime.repo.kind === "mongo", "sample");
         entriesCount++;
       }
     }
@@ -1131,6 +1154,7 @@ export class CatalogService {
     }
 
     let list = [...this.runtime.data.branches];
+    if (user && user.role !== "admin") list = list.filter((p) => p.status !== "archived");
     if (query.status) {
       list = list.filter((b) => (b.status ?? "active") === query.status);
     }
@@ -1292,9 +1316,8 @@ export class CatalogService {
       );
       this.runtime.alertAdjustments.clear();
     }
-    this.runtime.analysis = computeActivePlan(this.runtime.data);
+    if (this.runtime.repo.kind !== "mongo") this.runtime.analysis = computeActivePlan(this.runtime.data);
     this.runtime.scopedKpiCache.clear();
-    await this.runtime.repo.saveAnalysis(this.runtime.analysis);
     await commitPlanVersion(this.runtime);
     if (sku) {
       for (const b of this.runtime.data.branches) {

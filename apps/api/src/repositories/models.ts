@@ -156,6 +156,8 @@ const dataVersionSchema = new Schema(
   {
     _id: { type: String, required: true },
     version: { type: Number, required: true, default: 1 },
+    changedAt: { type: String },
+    allocationRevision: { type: Number, default: 0 },
   },
   { collection: "data_version" },
 );
@@ -206,12 +208,15 @@ const salesEntrySchema = new Schema(
     branchId: { type: String, required: true, trim: true },
     sku: { type: String, required: true, trim: true },
     date: { type: String, required: true, trim: true },
+    source: { type: String, enum: ["sample", "reported"] },
     unitsSold: { type: Number, required: true, min: 0 },
     onHand: { type: Number, required: true, min: 0 },
     updatedAt: { type: Date, required: true, default: () => new Date() },
   },
   { collection: "sales_entries" },
 );
+salesEntrySchema.index({ date: 1 });
+salesEntrySchema.index({ branchId: 1, date: -1 });
 salesEntrySchema.index({ branchId: 1, sku: 1, date: 1 }, { unique: true });
 
 export const SalesEntryModel = mongoose.model("SalesEntry", salesEntrySchema);

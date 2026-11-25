@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Search, X } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { OrderEventRow } from "@/components/shared/OrderEventRow";
 import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
@@ -24,50 +24,24 @@ import {
   orderOriginLabel,
 } from "@/lib/format";
 import { ORDER_STATUS_LABELS } from "@/lib/labels";
-import { formatProductDisplayName, matchesProductQuery } from "@stockflow/core";
+import { formatProductDisplayName, type OrderStatus, type OrderType } from "@stockflow/core";
 
 export function AuditPage() {
   const { selectedLocation } = useLocationScope();
   const branchParam = selectedLocation ?? undefined;
-  const ordersQuery = useQuery({
-    queryKey: queryKeys.orders({ branch: branchParam }),
-    queryFn: () => api.listOrders({ branch: branchParam }),
-  });
-
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
-
-  const threads = useMemo(() => {
-    const all = ordersQuery.data?.orders ?? [];
-    return all
-      .filter((order) => !order.isVirtual && order.events.length > 0)
-      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [ordersQuery.data]);
-
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return threads.filter((order) => {
-      if (statusFilter && order.status !== statusFilter) return false;
-      if (typeFilter && order.type !== typeFilter) return false;
-      if (!q) return true;
-      const eventMatch = order.events.some(
-        (ev) =>
-          ev.actor.name.toLowerCase().includes(q) ||
-          (ev.comment?.toLowerCase().includes(q) ?? false),
-      );
-      return (
-        matchesProductQuery(order, q) ||
-        order.id.toLowerCase().includes(q) ||
-        order.targetBranchName.toLowerCase().includes(q) ||
-        order.targetBranchId.toLowerCase().includes(q) ||
-        (order.sourceBranchName?.toLowerCase().includes(q) ?? false) ||
-        (order.sourceBranchId?.toLowerCase().includes(q) ?? false) ||
-        eventMatch
-      );
-    });
-  }, [threads, search, statusFilter, typeFilter]);
-
+  const [page, setPage] = useState(1);
+  const query = { branch: branchParam, historyPage: page, search: search.trim() || undefined,
+    status: (statusFilter || undefined) as OrderStatus | undefined,
+    type: (typeFilter || undefined) as OrderType | undefined };
+  const ordersQuery = useQuery({
+    queryKey: queryKeys.orders(query),
+    queryFn: () => api.listOrders(query),
+  });
+  const filtered = ordersQuery.data?.orders ?? [];
+  const total = ordersQuery.data?.total ?? 0;
   const hasFilters = Boolean(search.trim() || statusFilter || typeFilter);
 
   return (
@@ -76,7 +50,7 @@ export function AuditPage() {
         title="Audit log"
         subtitle={
           ordersQuery.data
-            ? `${formatNumber(threads.length)} audited order threads · newest update first`
+            ? `${formatNumber(total)} audited order threads · newest update first`
             : "One chronological event thread per replenishment order."
         }
       />
@@ -92,7 +66,7 @@ export function AuditPage() {
               <Input
                 type="search"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setPage(1); setSearch(e.target.value); }}
                 placeholder="Search SKU, branch, actor, or comment..."
                 aria-label="Search audit log"
                 className="h-9 rounded-xl border-border bg-card pr-8 pl-8 text-xs shadow-xs"
@@ -114,7 +88,7 @@ export function AuditPage() {
             <select
               aria-label="Filter by order type"
               value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
+              onChange={(event) => { setPage(1); setTypeFilter(event.target.value); }}
               className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <option value="">All types</option>
@@ -126,7 +100,7 @@ export function AuditPage() {
             <select
               aria-label="Filter by status"
               value={statusFilter}
-              onChange={(event) => setStatusFilter(event.target.value)}
+              onChange={(event) => { setPage(1); setStatusFilter(event.target.value); }}
               className="h-9 rounded-xl border border-border bg-card px-3 text-xs font-medium text-foreground shadow-xs transition-colors outline-none hover:border-input focus-visible:ring-2 focus-visible:ring-primary/40"
             >
               <option value="">All statuses</option>
@@ -143,7 +117,7 @@ export function AuditPage() {
             {ordersQuery.data ? (
               <span>
                 Showing <span className="font-medium text-foreground">{formatNumber(filtered.length)}</span>{" "}
-                of <span className="font-medium text-foreground">{formatNumber(threads.length)}</span>
+                of <span className="font-medium text-foreground">{formatNumber(total)}</span>
               </span>
             ) : (
               <span>Loading audit log...</span>
@@ -175,7 +149,7 @@ export function AuditPage() {
               onRetry={() => void ordersQuery.refetch()}
             />
           </div>
-        ) : threads.length === 0 ? (
+        ) : total === 0 && !hasFilters ? (
           <div className="p-4">
             <EmptyBlock
               title="No audited orders yet"
@@ -332,12 +306,14 @@ export function AuditPage() {
           </div>
         )}
 
-        {ordersQuery.data && filtered.length > 0 ? (
+        {ordersQuery.data && (filtered.length > 0 || page > 1) ? (
           <TableCardFooter>
             <span className="tabular-nums">
               {formatNumber(filtered.length)} order{" "}
               {filtered.length === 1 ? "thread" : "threads"}
             </span>
+            <Button variant="secondary" size="sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>Previous</Button>
+            <Button variant="secondary" size="sm" disabled={page * 25 >= total} onClick={() => setPage(page + 1)}>Next</Button>
           </TableCardFooter>
         ) : null}
       </TableCard>

@@ -420,7 +420,9 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
           payload: { comment: "Checked off at Hidd receiving bay" },
         });
         expect(recRes.statusCode).toBe(200);
-        const receivedOrder = ReplenishmentOrderSchema.parse(json(recRes.payload));
+        const receivedOrder = ReplenishmentOrderSchema.parse(await repo.getOrder(crossOrder.id));
+        expect(recRes.json()).not.toHaveProperty("engineSnapshot");
+        expect(recRes.json().status).toBe("RECEIVED");
         expect(receivedOrder.status).toBe("RECEIVED");
         expect(receivedOrder.receivedAt).toBeTruthy();
         expect(receivedOrder.events.map((e) => e.action)).toEqual([

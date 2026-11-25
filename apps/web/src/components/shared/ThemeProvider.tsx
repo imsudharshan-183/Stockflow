@@ -42,14 +42,18 @@ export function ThemeProvider({
     root.classList.remove("light", "dark");
 
     if (theme === "system") {
-      const systemTheme = window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light";
-      root.classList.add(systemTheme);
-      return;
+      const preference = window.matchMedia("(prefers-color-scheme: dark)");
+      const applyPreference = () => {
+        root.classList.toggle("dark", preference.matches);
+        root.classList.toggle("light", !preference.matches);
+      };
+      applyPreference();
+      preference.addEventListener("change", applyPreference);
+      return () => preference.removeEventListener("change", applyPreference);
     }
 
     root.classList.add(theme);
+    return undefined;
   }, [theme]);
 
   const value: ThemeProviderState = {

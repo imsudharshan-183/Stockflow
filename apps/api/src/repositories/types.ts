@@ -7,6 +7,7 @@ import type {
   Dataset,
   DecisionSnapshot,
   OrderEvent,
+  OrderListQuery,
   OrderStatus,
   Product,
   ProductChangeRecord,
@@ -14,6 +15,7 @@ import type {
   ReplenishmentOrder,
   StockAlert,
   StockAlertResolution,
+  StoreOrder,
 } from "@stockflow/core";
 import type { UserRepository } from "./userTypes.js";
 
@@ -53,12 +55,15 @@ export type ResolveStockAlertResult =
   | { status: "not_found" }
   | { status: "already_decided"; alert: StockAlert };
 
+export interface AllocationGuard { revision: number; dataVersion: number }
+
 export interface StockRepository {
   readonly kind: "memory" | "mongo";
   readonly users: UserRepository;
   loadDataset(): Promise<Dataset>;
   loadAnalysis(): Promise<Analysis | null>;
   saveAnalysis(analysis: Analysis): Promise<void>;
+  getPhysicalChangeTime?(version: number): Promise<string | undefined>;
   getDataVersion(): Promise<number>;
   bumpDataVersion(): Promise<number>;
   loadCachedPlan(dataVersion: number): Promise<CachedPlanRecord | null>;
@@ -72,7 +77,7 @@ export interface StockRepository {
   saveDecisionBatch(
     records: ActionMetaRecord[],
     entries: ApiAuditEntry[],
-    options?: { allowOverwriteIds?: ReadonlySet<string> },
+    options?: { allowOverwriteIds?: ReadonlySet<string>; allocationGuard?: AllocationGuard },
   ): Promise<SaveDecisionBatchResult>;
   reopenAction(
     recommendationId: string,
@@ -104,6 +109,10 @@ export interface StockRepository {
     resolution: StockAlertResolution,
     linkedOrder?: ResolveStockAlertOrderPayload,
   ): Promise<ResolveStockAlertResult>;
+  listOrderHistory?(query: OrderListQuery, branches: readonly string[] | null): Promise<{ orders: ReplenishmentOrder[]; total: number }>;
+  listStoreDeliveries?(branchId: string): Promise<StoreOrder[]>;
+  getOrderEventCount?(): Promise<number>;
+  getAllocationRevision?(): Promise<number>;
   listOrders(): Promise<ReplenishmentOrder[]>;
   getOrder(id: string): Promise<ReplenishmentOrder | null>;
   listOrderEvents(orderId?: string): Promise<OrderEvent[]>;
@@ -113,6 +122,7 @@ export interface StockRepository {
     event: OrderEvent,
     expectedStatus: OrderStatus | null,
     lifecycleMeta?: OrderLifecycleMeta,
+    allocationGuard?: AllocationGuard,
   ): Promise<SaveOrderWithEventResult>;
   ping?(): Promise<void>;
   close(): Promise<void>;

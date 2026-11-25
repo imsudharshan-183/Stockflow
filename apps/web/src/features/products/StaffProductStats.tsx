@@ -12,7 +12,7 @@ import {
 import { StockDeltaBadges } from "@/components/shared/StockDeltaBadges";
 import { EmptyBlock, ErrorBlock, TableSkeleton } from "@/components/shared/states";
 import { Badge, type BadgeTone } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -41,6 +41,7 @@ import {
   actionLabel,
   alertResolutionLabel,
   formatCover,
+  getBahrainTodayIso,
   formatDateTime,
   formatNumber,
 } from "@/lib/format";
@@ -78,7 +79,17 @@ export function StaffProductStats() {
   const [search, setSearch] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All categories");
   const [page, setPage] = useState(1);
-  const [flagTarget, setFlagTarget] = useState<Product | null>(null);
+  const [flagTarget, setFlagTarget] = useState<Pick<Product, "sku" | "name"> | null>(null);
+  const [entry, setEntry] = useState<{ branchId: string; sku: string; date: string } | null>(null);
+  const saveEntry = useMutation({
+    mutationFn: api.createSalesEntry,
+    onSuccess: async () => {
+      setEntry(null);
+      toast.success("Store count saved");
+      await invalidateOperationalQueries(queryClient);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
   const [flagCategory, setFlagCategory] = useState<StockAlertCategory>("CRITICAL_LOW");
   const [flagReportedQty, setFlagReportedQty] = useState("");
   const [flagNote, setFlagNote] = useState("");
@@ -111,7 +122,7 @@ export function StaffProductStats() {
 
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: queryKeys.catalogProducts(queryParams as unknown as Record<string, unknown>),
-    queryFn: () => api.listCatalogProducts(queryParams),
+    queryFn: () => api.storeProducts(queryParams),
   });
 
   const staffBranchParam = staffBranchId !== "Store" ? staffBranchId : undefined;
@@ -138,13 +149,13 @@ export function StaffProductStats() {
   const incomingDeliveriesQuery = useQuery({
     queryKey: queryKeys.orders({ queue: "outgoing", status: "COMMITTED", branch: staffBranchId }),
     queryFn: () =>
-      api.listOrders({ queue: "outgoing", status: "COMMITTED", branch: staffBranchId }),
+      api.storeDeliveries(staffBranchId),
     enabled: Boolean(staffBranchId),
   });
 
   const receiveMutation = useMutation({
     mutationFn: (orderId: string) =>
-      api.receiveOrder(orderId, { comment: "Confirmed received on store floor" }),
+      api.receiveDelivery(orderId, { comment: "Confirmed received on store floor" }),
     onSuccess: async (updated) => {
       toast.success(`Marked ${formatNumber(updated.quantity)} units as received (${updated.sku})`);
       await invalidateOperationalQueries(queryClient);
@@ -181,7 +192,7 @@ export function StaffProductStats() {
   const branchMeta = branchSummary?.branch ?? fallbackBranch;
   const headerTitle = branchMeta ? `${branchMeta.name} (${branchMeta.id})` : `Store Inventory (${staffBranchId})`;
   const headerSubtitle = branchMeta
-    ? `Store inventory · ${branchMeta.city}, ${branchMeta.region} region · Shelf stock, cover days & critical-stock escalations`
+    ? `Store inventory · ${branchMeta.city}, ${branchMeta.region} region · Record stock, report issues and confirm deliveries`
     : `Branch ${staffBranchId} · Live shelf stock & cover days`;
 
   const handleSearchChange = (val: string) => {
@@ -213,6 +224,22 @@ export function StaffProductStats() {
 
   return (
     <div className="space-y-6">
+      <Dialog open={entry !== null} onOpenChange={(open) => { if (!open && !saveEntry.isPending) setEntry(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Record daily stock</DialogTitle><DialogDescription>{entry?.branchId} · {entry?.sku} · {entry?.date}</DialogDescription></DialogHeader>
+          <form className="space-y-3" onSubmit={(event) => {
+            event.preventDefault();
+            if (!entry) return;
+            const fields = new FormData(event.currentTarget);
+            saveEntry.mutate({ ...entry, unitsSold: Number(fields.get("sold")), onHand: Number(fields.get("stock")) });
+          }}>
+            <label>Units sold today<Input required name="sold" type="number" min="0" step="1" /></label>
+            <label>End-of-day stock<Input required name="stock" type="number" min="0" step="1" /></label>
+            <p className="text-xs text-muted-foreground">Saving updates this product’s daily entry for your store.</p>
+            <Button type="submit" loading={saveEntry.isPending}>Save daily entry</Button>
+          </form>
+        </DialogContent>
+      </Dialog>
       <PageHeader
         title={headerTitle}
         subtitle={headerSubtitle}
@@ -246,6 +273,18 @@ export function StaffProductStats() {
         }
       />
 
+      <nav aria-label="Store tasks" className="flex flex-wrap gap-2">
+        <a href="#weekly-stock-check-title" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+          Check shelf stock
+        </a>
+        <a href="#store-deliveries" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+          <PackageCheck aria-hidden="true" /> Receive deliveries{incomingDeliveriesQuery.isSuccess && ` (${formatNumber(incomingDeliveries.length)})`}
+        </a>
+        <a href="#store-alerts" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+          <AlertTriangle aria-hidden="true" /> Track alerts{alertsQuery.isSuccess && ` (${formatNumber(branchAlerts.length)})`}
+        </a>
+      </nav>
+
       {branchSummary ? (
         <div
           aria-label="Store inventory status summary"
@@ -274,7 +313,7 @@ export function StaffProductStats() {
       <section aria-labelledby="weekly-stock-check-title" className="space-y-3">
         <div className="flex flex-wrap items-baseline justify-between gap-2 px-1">
           <div>
-            <h2 id="weekly-stock-check-title" className="text-base font-semibold text-foreground">
+            <h2 id="weekly-stock-check-title" tabIndex={-1} className="scroll-mt-20 text-base font-semibold text-foreground">
               Weekly Stock Check
             </h2>
             <p className="text-sm text-muted-foreground">
@@ -287,7 +326,7 @@ export function StaffProductStats() {
         <TableCard>
         <TableToolbar>
           <div className="flex flex-wrap items-center gap-2.5">
-            <div className="relative w-64">
+            <div className="relative w-full sm:w-64">
               <Search className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 placeholder="Search SKU or name..."
@@ -397,6 +436,11 @@ export function StaffProductStats() {
                     <TableCell className="px-2.5 text-muted-foreground">{p.category}</TableCell>
                     <TableCell className="px-2.5 text-right font-medium tabular-nums text-foreground">
                       {formatNumber(p.stats?.onHand ?? 0)}
+                      <p className="text-xs text-muted-foreground">{p.stats?.lastSubmission
+                        ? p.stats.lastSubmission.date === getBahrainTodayIso()
+                          ? `Reported · ${formatNumber(p.stats.lastSubmission.unitsSold)} sold`
+                          : `Last reported ${p.stats.lastSubmission.date}`
+                        : "No store entry"}</p>
                     </TableCell>
                     <TableCell className="px-2.5">
                       <StockDeltaBadges
@@ -414,6 +458,7 @@ export function StaffProductStats() {
                       <Badge tone={badge.tone}>{badge.label}</Badge>
                     </TableCell>
                     <TableCell className="px-2.5 text-right">
+                      <Button size="sm" variant="secondary" onClick={() => setEntry({ branchId: staffBranchId, sku: p.sku, date: getBahrainTodayIso() })}>Record count</Button>
                       {!canFlag ? (
                         <span className="text-xs text-muted-foreground">—</span>
                       ) : alert?.status === "PENDING" ? (
@@ -478,7 +523,7 @@ export function StaffProductStats() {
       <TableCard>
         <TableToolbar>
           <div>
-            <h2 className="text-sm font-semibold text-foreground">Incoming Deliveries</h2>
+            <h2 id="store-deliveries" tabIndex={-1} className="scroll-mt-20 text-sm font-semibold text-foreground">Incoming Deliveries</h2>
             <p className="text-xs text-muted-foreground">
               Committed shipments in transit to {staffBranchId} awaiting floor receipt confirmation
             </p>
@@ -556,7 +601,7 @@ export function StaffProductStats() {
       <TableCard>
         <TableToolbar>
           <div>
-            <h2 className="text-sm font-semibold text-foreground">Recent Branch Stock Alerts</h2>
+            <h2 id="store-alerts" tabIndex={-1} className="scroll-mt-20 text-sm font-semibold text-foreground">Recent Branch Stock Alerts</h2>
             <p className="text-xs text-muted-foreground">
               Alerts submitted at {staffBranchId} and manager resolution outcomes
             </p>

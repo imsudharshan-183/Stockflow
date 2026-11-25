@@ -201,12 +201,21 @@ export function DataEntryPage() {
   );
 
   const skuListQuery = useQuery({
-    queryKey: queryKeys.catalogProducts({ limit: 200, page: 1 }),
-    queryFn: () =>
-      api.listCatalogProducts({
-        limit: 200,
-        page: 1,
-      }),
+    queryKey: queryKeys.catalogProducts({ scope: "all-active", limit: 100 }),
+    queryFn: async () => {
+      const first = await api.listCatalogProducts({ limit: 100, page: 1 });
+      const totalPages = first.totalPages ?? Math.max(1, Math.ceil(first.total / 100));
+      if (totalPages <= 1) return first;
+      const rest = await Promise.all(
+        Array.from({ length: totalPages - 1 }, (_, i) =>
+          api.listCatalogProducts({ limit: 100, page: i + 2 }),
+        ),
+      );
+      return {
+        ...first,
+        products: [first, ...rest].flatMap((res) => res.products),
+      };
+    },
   });
 
   const activeProducts = useMemo(
@@ -342,6 +351,7 @@ export function DataEntryPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [importResult, setImportResult] = useState<{
+    planRefreshPending?: boolean;
     inserted: number;
     updated: number;
     errors: Array<{ row: number; message: string }>;
@@ -459,6 +469,11 @@ export function DataEntryPage() {
     },
   });
 
+  const previewMutation = useMutation({
+    mutationFn: (file: File) => api.importSalesCsv(file, true),
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   const importMutation = useMutation({
     mutationFn: async (file: File) => {
       const text = typeof file.text === "function" ? await file.text().catch(() => "") : "";
@@ -477,7 +492,10 @@ export function DataEntryPage() {
         headerLine: meta.headerLine,
         dataLines: meta.dataLines,
       });
-      if (res.errors.length === 0) {
+      if (res.planRefreshPending) {
+        setCsvFile(null);
+        toast.info("Entries saved. The stock plan will refresh on the next read.");
+      } else if (res.errors.length === 0) {
         setCsvFile(null);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
@@ -1118,6 +1136,7 @@ export function DataEntryPage() {
                     accept=".csv,text/csv"
                     onChange={(e) => {
                       const f = e.target.files?.[0] ?? null;
+                      previewMutation.reset();
                       setCsvFile(f);
                       setImportResult(null);
                     }}
@@ -1129,6 +1148,14 @@ export function DataEntryPage() {
                   ) : null}
                 </div>
 
+                <Button variant="secondary" disabled={!csvFile || previewMutation.isPending}
+                  onClick={() => csvFile && previewMutation.mutate(csvFile)}>Preview changes</Button>
+                {csvFile && previewMutation.data && (
+                  <div role="status" className="text-sm">
+                    {formatNumber(previewMutation.data.inserted)} new · {formatNumber(previewMutation.data.updated)} updates · {formatNumber(previewMutation.data.errors.length)} invalid
+                    <ul>{previewMutation.data.errors.slice(0, 20).map((err) => <li key={err.row}>Row {formatNumber(err.row)} · {err.message}</li>)}</ul>
+                  </div>
+                )}
                 <Button
                   type="button"
                   variant="primary"
@@ -1145,6 +1172,7 @@ export function DataEntryPage() {
 
                 {importResult ? (
                   <div className="space-y-3 rounded-xl border border-border bg-secondary/40 p-4 text-xs">
+                    {importResult.planRefreshPending && <p role="status">Entries saved. Stock plan refresh pending.</p>}
                     {importResult.errors.length === 0 ? (
                       <div
                         role="status"

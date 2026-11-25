@@ -59,6 +59,7 @@ const ROLE_PERMISSIONS: Record<Role, ReadonlySet<PermissionAction>> = {
     "stock:flag:decide",
   ]),
   staff: new Set([
+    "sales:enter",
     "recommendations:read",
     "catalog:view",
     "orders:receive",

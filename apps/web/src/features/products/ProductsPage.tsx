@@ -284,7 +284,7 @@ function CatalogProductsPage() {
               </select>
 
               {/* Status Filter */}
-              <div className="inline-flex rounded-md border border-border bg-muted/40 p-0.5 text-xs">
+              <div className="inline-flex flex-wrap rounded-md border border-border bg-muted/40 p-0.5 text-xs">
                 {[
                   { value: "all", label: "All" },
                   { value: "active", label: "Active" },

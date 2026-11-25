@@ -56,6 +56,7 @@ export const PositionStatusSchema = z.enum(["AT_RISK", "OVERSTOCK", "HEALTHY", "
 export type PositionStatus = z.infer<typeof PositionStatusSchema>;
 
 export const ProductStatsSchema = z.object({
+  lastSubmission: z.object({ date: z.string(), unitsSold: z.number() }).nullable().optional(),
   onHand: z.number(),
   velocity: z.number(),
   coverDays: z.number().nullable(),
@@ -158,6 +159,9 @@ export const ProductListResponseSchema = z.object({
   totalPages: z.number().int().positive(),
   branchSummary: ProductBranchSummarySchema.optional(),
 });
+
+export const StoreProductSchema = ProductSchema.omit({ price: true, cost: true });
+export const StoreProductListSchema = ProductListResponseSchema.extend({ products: z.array(StoreProductSchema) });
 
 export const ProductDetailWithHistorySchema = z.object({
   product: ProductSchema,
@@ -754,6 +758,11 @@ export type BranchTrendPoint = z.infer<typeof BranchTrendPointSchema>;
 export type KpiReport = z.infer<typeof KpiSchema>;
 export type KpiSummary = KpiReport;
 export type BranchDetail = z.infer<typeof BranchDetailSchema>;
+export const StoreProductDetailSchema = ProductDetailSchema.pick({ product: true, positions: true, series: true }).extend({
+  product: StoreProductSchema,
+  positions: z.array(PositionViewSchema.omit({ recommendation: true })),
+});
+
 export type ProductDetail = z.infer<typeof ProductDetailSchema>;
 export type PositionView = z.infer<typeof PositionViewSchema>;
 export type SalesDaily = z.infer<typeof SalesDailySchema>;

@@ -115,6 +115,7 @@ export const OverviewFreshnessMetaSchema = z.object({
   dataVersion: z.number().int().nonnegative(),
   decisionVersion: z.number().int().nonnegative(),
   todayBahrain: z.string().min(1),
+  reportingBranches: z.array(z.object({ branchId: z.string(), lastSubmitted: z.string().nullable() })).optional(),
   asOfDataDate: z.string().min(1),
   staleDataDays: z.number().int().nonnegative(),
 });
@@ -136,6 +137,13 @@ export const LiveOverviewResponseSchema = z.object({
   meta: OverviewFreshnessMetaSchema,
   metrics: LiveOverviewMetricsSchema,
   stockoutSparkline: z.array(z.number()),
+  handoffs: z.array(z.object({
+    id: z.string(), sku: z.string(), productName: z.string(), units: z.number(),
+    source: z.string(), destination: z.string(), needsRelease: z.boolean(), overdue: z.boolean(),
+  })).optional(),
+  shortages: z.array(z.object({
+    branchId: z.string(), branchName: z.string(), sku: z.string(), name: z.string(), coverDays: z.number(),
+  })).optional(),
   pendingRecommendations: z.array(LifecycleRecommendationSchema),
 });
 export type LiveOverviewResponse = z.infer<typeof LiveOverviewResponseSchema>;

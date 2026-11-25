@@ -54,6 +54,7 @@ export function createStockServices(
   const orders = new OrderService(runtime);
 
   // Wire startup audit replay deterministically: dataset load -> analyze() -> replayApprovedTransfersFromAudit().
+  runtime.onPhysicalRefresh = (at) => orders.reconcileStockCounts(at);
   runtime.onReplayAudit = (replayCutoffAt) => {
     decisions.replayApprovedTransfersFromAudit(replayCutoffAt);
   };
@@ -81,7 +82,10 @@ export function createStockServices(
     },
     ensureInitialized: () => ensureInitialized(runtime),
     ensureInitializedSyncIfPossible: () => ensureInitializedSyncIfPossible(runtime),
-    ensureFreshPlan: (optionsArg) => ensureFreshPlan(runtime, optionsArg),
+    ensureFreshPlan: async (optionsArg) => {
+      await ensureFreshPlan(runtime, optionsArg);
+      if (runtime.repo.kind === "mongo") await orders.syncPersistedOrders(false);
+    },
     commitPlanVersion: () => commitPlanVersion(runtime),
     setClock: (nowFn) => {
       runtime.now = nowFn;

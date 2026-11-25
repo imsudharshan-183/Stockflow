@@ -116,12 +116,20 @@ export const ReplenishmentOrderSchema = z.object({
   donorAvailableSurplus: z.number().int().nonnegative().optional(),
   donorCoverDaysAfter: z.number().nullable().optional(),
 });
+export const StoreOrderSchema = ReplenishmentOrderSchema.pick({
+  id: true, sku: true, productName: true, type: true, status: true, quantity: true,
+  sourceBranchName: true, sourceBranchId: true, targetBranchId: true, targetBranchName: true,
+  updatedAt: true, receivedAt: true,
+});
+export type StoreOrder = z.infer<typeof StoreOrderSchema>;
 export type ReplenishmentOrder = z.infer<typeof ReplenishmentOrderSchema>;
 
 export const OrderQueueTabSchema = z.enum(["suggested", "incoming", "outgoing"]);
 export type OrderQueueTab = z.infer<typeof OrderQueueTabSchema>;
 
 export const OrderListQuerySchema = z.object({
+  historyPage: z.coerce.number().int().min(1).max(100000).optional(),
+  search: z.string().trim().max(160).optional(),
   queue: OrderQueueTabSchema.optional(),
   status: OrderStatusSchema.optional(),
   type: OrderTypeSchema.optional(),

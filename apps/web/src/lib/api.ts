@@ -23,6 +23,9 @@ import {
   ProductDetailSchema,
   ProductDetailWithHistorySchema,
   ProductListResponseSchema,
+  StoreProductListSchema,
+  StoreOrderSchema,
+  StoreProductDetailSchema,
   ProductSchema,
   RecommendationSchema,
   ReplenishmentOrderSchema,
@@ -289,6 +292,10 @@ export const api = {
       body: JSON.stringify(UpdateBranchSchema.parse(data)),
     }),
 
+  storeProducts: (query: ProductListQuery) =>
+    request(withQuery("/api/catalog/products", query), StoreProductListSchema),
+  storeProduct: (sku: string) =>
+    request(`/api/products/${encodeURIComponent(sku)}`, StoreProductDetailSchema),
   // Catalog Products
   listCatalogProducts: (query?: ProductListQuery): Promise<ProductListResponse> =>
     request(withQuery("/api/catalog/products", (query ?? {}) as Record<string, unknown>), ProductListResponseSchema),
@@ -372,12 +379,13 @@ export const api = {
     request(`/api/sales-entries/${encodeURIComponent(id)}`, z.object({ ok: z.boolean() }), {
       method: "DELETE",
     }),
-  importSalesCsv: (file: File): Promise<{ inserted: number; updated: number; errors: Array<{ row: number; message: string }> }> => {
+  importSalesCsv: (file: File, preview = false): Promise<{ planRefreshPending?: boolean; inserted: number; updated: number; errors: Array<{ row: number; message: string }> }> => {
     const formData = new FormData();
     formData.append("file", file);
     return request(
-      "/api/sales-entries/import",
+      preview ? "/api/sales-entries/import?preview=1" : "/api/sales-entries/import",
       z.object({
+        planRefreshPending: z.boolean().optional(),
         inserted: z.number(),
         updated: z.number(),
         errors: z.array(z.object({ row: z.number(), message: z.string() })),
@@ -455,6 +463,13 @@ export const api = {
       method: "PATCH",
     }),
 
+  storeDeliveries: (branch: string) => request(withQuery("/api/orders", {
+    queue: "outgoing", status: "COMMITTED", branch,
+  }), z.object({ orders: z.array(StoreOrderSchema), total: z.number() })),
+  receiveDelivery: (id: string, body: OrderReceiveBody) => request(
+    `/api/orders/${encodeURIComponent(id)}/receive`, StoreOrderSchema,
+    { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+  ),
   // Replenishment Orders
   listOrders: (
     query: OrderListQuery & { view?: QueueLifecycleView } = {},

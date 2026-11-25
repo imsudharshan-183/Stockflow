@@ -42,14 +42,14 @@ const apiMocks = vi.hoisted(() => ({
   listStockAlerts: vi.fn(),
   createStockAlert: vi.fn(),
   resolveStockAlert: vi.fn(),
-  listCatalogProducts: vi.fn(),
+  storeProducts: vi.fn(),
   listOrders: vi.fn(),
   receiveOrder: vi.fn(),
   donorCandidates: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: apiMocks,
+  api: { ...apiMocks, storeDeliveries: apiMocks.listOrders, receiveDelivery: apiMocks.receiveOrder },
 }));
 
 const pendingAlert: StockAlert = {
@@ -181,7 +181,7 @@ describe("Alert Triage, Staff Receipt, and Order-Threaded Audit", () => {
       orders: [staffDeliveryOrder],
       total: 1,
     } satisfies OrderListResponse);
-    apiMocks.listCatalogProducts.mockResolvedValue({
+    apiMocks.storeProducts.mockResolvedValue({
       products: [
         {
           sku: "SKU-00012",

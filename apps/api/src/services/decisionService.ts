@@ -36,6 +36,7 @@ import {
   applyDecisionHistoryToState,
   bumpDecisionVersion,
   ensureInitialized,
+  ensureFreshPlan,
   ensureInitializedSyncIfPossible,
   type StockRuntimeState,
 } from "./runtimeState.js";
@@ -504,6 +505,17 @@ export class DecisionService {
     return evalResult.bucket === "pending";
   }
 
+  private async prepareApproval(status: "APPROVED" | "REJECTED") {
+    if (status !== "APPROVED" || !this.runtime.repo.getAllocationRevision) return undefined;
+    const revision = await this.runtime.repo.getAllocationRevision();
+    if (revision !== this.runtime.allocationRevision) {
+      await ensureFreshPlan(this.runtime, { syncDecisions: true, syncAudit: true });
+      await this.runtime.onAfterInit?.(this.runtime.planVersion > 1 ? this.runtime.planComputedAt : undefined);
+      this.runtime.allocationRevision = revision;
+    }
+    return { revision, dataVersion: this.runtime.planVersion };
+  }
+
   async decide(
     id: string,
     status: "APPROVED" | "REJECTED",
@@ -514,6 +526,7 @@ export class DecisionService {
     if (user && !can(user.role, "recommendations:decide")) {
       throw new DecisionForbiddenError("Staff cannot approve or reject actions");
     }
+    const allocationGuard = await this.prepareApproval(status);
 
     const existing = this.runtime.analysis.recommendations.find(
       (recommendation) => recommendation.id === id,
@@ -558,9 +571,10 @@ export class DecisionService {
       const { persistedIds } = await this.runtime.repo.saveDecisionBatch(
         [record],
         [entry],
-        saveOptions,
+        { ...saveOptions, allocationGuard },
       );
       if (persistedIds.has(id)) {
+        if (allocationGuard) this.runtime.allocationRevision = allocationGuard.revision + 1;
         this.runtime.decisions.set(id, status);
         this.runtime.actionMeta.set(id, record);
         this.runtime.audit.push(entry);
@@ -591,6 +605,7 @@ export class DecisionService {
     if (user && !can(user.role, "recommendations:decide")) {
       throw new DecisionForbiddenError("Staff cannot approve or reject actions");
     }
+    const allocationGuard = await this.prepareApproval(status);
 
     const byId = new Map(this.runtime.analysis.recommendations.map((r) => [r.id, r]));
     const nowMs = this.runtime.now();
@@ -663,7 +678,7 @@ export class DecisionService {
         const { persistedIds, duplicateIds } = await this.runtime.repo.saveDecisionBatch(
           actionsToSave,
           auditsToSave,
-          saveOptions,
+          { ...saveOptions, allocationGuard },
         );
         for (const item of results) {
           if (item.status === "ok" && duplicateIds.has(item.id)) {
@@ -687,6 +702,7 @@ export class DecisionService {
           }
         }
         if (persistedIds.size > 0) {
+          if (allocationGuard) this.runtime.allocationRevision = allocationGuard.revision + 1;
           bumpDecisionVersion(this.runtime);
         }
         if (duplicateIds.size > 0) {

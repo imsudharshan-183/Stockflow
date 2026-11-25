@@ -8,6 +8,8 @@ import {
   listSalesEntries,
   recomputeForSku,
   recordImportLog,
+  previewSalesImport,
+  persistMongoSalesImport,
   recordSalesEntryAudit,
   updateSalesEntryById,
   upsertSalesEntry,
@@ -340,6 +342,7 @@ export function registerSalesEntriesRoutes(
     },
   );
 
+  const mongo = services.repositoryKind() === "mongo";
   const validateDomainRefs = (data: ValidatedSalesEntryInput): string | null => {
     if (!services.catalog.hasBranch(data.branchId)) {
       return `Field 'branchId' references unknown branch '${data.branchId}'`;
@@ -385,7 +388,7 @@ export function registerSalesEntriesRoutes(
       const limit = Math.min(50, Math.max(1, Number(q.limit ?? 10) || 10));
       const userId =
         request.currentUser.role === "admin" ? undefined : request.currentUser.id;
-      const imports = await listImportLogs({ userId, limit });
+      const imports = await listImportLogs({ userId, limit }, mongo);
       return { imports };
     },
   );
@@ -425,7 +428,7 @@ export function registerSalesEntriesRoutes(
         to,
         page,
         limit,
-      });
+      }, mongo);
     },
   );
 
@@ -456,7 +459,7 @@ export function registerSalesEntriesRoutes(
         return reply.code(403).send({ error: "Access to branch forbidden" });
       }
 
-      const { entry, created } = await upsertSalesEntry(validation.data);
+      const { entry, created } = await upsertSalesEntry(validation.data, mongo);
       const { dateAdded } = services.catalog.applySalesEntryToDataset(
         entry.branchId,
         entry.sku,
@@ -467,8 +470,8 @@ export function registerSalesEntriesRoutes(
       await recomputeForSku(entry.branchId, entry.sku);
       await services.catalog.recomputeSingleSku(entry.sku, { fullPlanRecompute: dateAdded });
 
-      recordSalesEntryAudit({
-        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      await recordSalesEntryAudit({
+        id: `sea_${randomUUID()}`,
         entryId: entry.id,
         branchId: entry.branchId,
         sku: entry.sku,
@@ -482,7 +485,7 @@ export function registerSalesEntriesRoutes(
         },
         before: null,
         after: { unitsSold: entry.unitsSold, onHand: entry.onHand },
-      });
+      }, mongo);
 
       return reply.code(201).send(entry);
     },
@@ -499,7 +502,7 @@ export function registerSalesEntriesRoutes(
     async (request, reply) => {
       await services.ensureInitialized();
       const { id } = request.params as { id: string };
-      const existing = await getSalesEntryById(decodeURIComponent(id));
+      const existing = await getSalesEntryById(decodeURIComponent(id), mongo);
       if (!existing) {
         return reply.code(404).send({ error: "Sales entry not found" });
       }
@@ -524,7 +527,7 @@ export function registerSalesEntriesRoutes(
         return reply.code(400).send({ error: "Field 'onHand' must be a non-negative number (>= 0)" });
       }
 
-      const updated = await updateSalesEntryById(existing.id, { unitsSold, onHand });
+      const updated = await updateSalesEntryById(existing.id, { unitsSold, onHand }, mongo);
       if (!updated) {
         return reply.code(404).send({ error: "Sales entry not found" });
       }
@@ -539,8 +542,8 @@ export function registerSalesEntriesRoutes(
       await recomputeForSku(updated.branchId, updated.sku);
       await services.catalog.recomputeSingleSku(updated.sku);
 
-      recordSalesEntryAudit({
-        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      await recordSalesEntryAudit({
+        id: `sea_${randomUUID()}`,
         entryId: updated.id,
         branchId: updated.branchId,
         sku: updated.sku,
@@ -554,7 +557,7 @@ export function registerSalesEntriesRoutes(
         },
         before: { unitsSold: existing.unitsSold, onHand: existing.onHand },
         after: { unitsSold: updated.unitsSold, onHand: updated.onHand },
-      });
+      }, mongo);
 
       return updated;
     },
@@ -570,7 +573,7 @@ export function registerSalesEntriesRoutes(
     async (request, reply) => {
       await services.ensureInitialized();
       const { id } = request.params as { id: string };
-      const existing = await getSalesEntryById(decodeURIComponent(id));
+      const existing = await getSalesEntryById(decodeURIComponent(id), mongo);
       if (!existing) {
         return reply.code(404).send({ error: "Sales entry not found" });
       }
@@ -578,7 +581,7 @@ export function registerSalesEntriesRoutes(
         return reply.code(403).send({ error: "Access to branch forbidden" });
       }
 
-      const deleted = await deleteSalesEntryById(existing.id);
+      const deleted = await deleteSalesEntryById(existing.id, mongo);
       if (!deleted) {
         return reply.code(404).send({ error: "Sales entry not found" });
       }
@@ -586,8 +589,8 @@ export function registerSalesEntriesRoutes(
       await recomputeForSku(deleted.branchId, deleted.sku);
       await services.catalog.recomputeSingleSku(deleted.sku);
 
-      recordSalesEntryAudit({
-        id: `sea_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      await recordSalesEntryAudit({
+        id: `sea_${randomUUID()}`,
         entryId: deleted.id,
         branchId: deleted.branchId,
         sku: deleted.sku,
@@ -601,7 +604,7 @@ export function registerSalesEntriesRoutes(
         },
         before: { unitsSold: deleted.unitsSold, onHand: deleted.onHand },
         after: null,
-      });
+      }, mongo);
 
       return { ok: true };
     },
@@ -662,9 +665,29 @@ export function registerSalesEntriesRoutes(
         validatedRows.push({ ok: true, rowNumber: item.rowNumber, data: validation.data });
       }
 
+      const rows = validatedRows.flatMap((item) => item.ok ? [item.data] : []);
+      const errors = validatedRows.flatMap((item) => item.ok ? [] : [{ row: item.rowNumber, message: item.message }]);
+      if ((request.query as { preview?: string }).preview === "1") {
+        return { ...await previewSalesImport(rows, mongo), errors };
+      }
+      if (mongo) {
+        const dates = rows.map((row) => row.date).sort();
+        const saved = await persistMongoSalesImport(rows, {
+          id: `imp_${randomUUID()}`, importedAt: new Date(services.runtime.now()).toISOString(),
+          fileName: extracted.filename || "upload.csv",
+          user: { userId: request.currentUser.id, name: request.currentUser.name, role: request.currentUser.role },
+          inserted: 0, updated: 0, errorCount: errors.length, minDate: dates[0] ?? null,
+          maxDate: dates.at(-1) ?? null, branchIds: [...new Set(rows.map((row) => row.branchId))],
+        });
+        try {
+          await services.ensureFreshPlan();
+        } catch {
+          return reply.code(202).send({ ...saved, errors, planRefreshPending: true });
+        }
+        return { ...saved, errors };
+      }
       let inserted = 0;
       let updated = 0;
-      const errors: Array<{ row: number; message: string }> = [];
       const touchedPairs = new Map<string, { branchId: string; sku: string }>();
       const touchedSkus = new Set<string>();
       const touchedBranches = new Set<string>();
@@ -674,11 +697,10 @@ export function registerSalesEntriesRoutes(
 
       for (const item of validatedRows) {
         if (!item.ok) {
-          errors.push({ row: item.rowNumber, message: item.message });
           continue;
         }
 
-        const result = await upsertSalesEntry(item.data);
+        const result = await upsertSalesEntry(item.data, false);
         if (result.created) {
           inserted += 1;
         } else {
@@ -742,7 +764,7 @@ export function registerSalesEntriesRoutes(
         minDate,
         maxDate,
         branchIds: Array.from(touchedBranches),
-      });
+      }, false);
 
       return reply.code(200).send({
         inserted,

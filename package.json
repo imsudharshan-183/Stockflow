@@ -9,6 +9,7 @@
     "reset:decisions": "pnpm --filter @stockflow/api reset:decisions",
     "bench:cold": "pnpm --filter @stockflow/api bench:cold",
     "test": "pnpm -r --if-present test",
+    "test:e2e": "playwright test",
     "typecheck": "pnpm -r --if-present typecheck",
     "lint": "eslint . && node scripts/check-ui.mjs",
     "build": "pnpm -r --if-present build",
@@ -16,6 +17,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "1.65.1",
     "eslint": "^9.39.1",
     "prettier": "^3.6.2",
     "typescript": "^5.9.3",

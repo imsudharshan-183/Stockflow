@@ -34,7 +34,7 @@ const EXPECTED_PERMISSIONS: Record<Role, readonly PermissionAction[]> = {
     "orders:receive",
     "stock:flag:decide",
   ],
-  staff: ["recommendations:read", "catalog:view", "orders:receive", "stock:flag"],
+  staff: ["sales:enter", "recommendations:read", "catalog:view", "orders:receive", "stock:flag"],
 };
 
 describe("RBAC Truth Tables (packages/core)", () => {

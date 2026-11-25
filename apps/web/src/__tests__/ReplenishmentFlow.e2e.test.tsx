@@ -84,7 +84,7 @@ vi.mock("@/lib/api", () => ({
       categories: ["Beverages"],
     }),
     locations: async () => ({ locations: [] }),
-    listCatalogProducts: async () => ({
+    storeProducts: async () => ({
       products: [
         {
           sku: "SKU-00012",
@@ -223,6 +223,11 @@ vi.mock("@/lib/api", () => ({
       state.alerts[idx] = updatedAlert;
       return { alert: updatedAlert, order };
     },
+    listCatalogProducts: async () => ({ products: [], total: 0 }),
+    storeDeliveries: async (branch: string) => {
+      const orders = state.orders.filter((order) => order.targetBranchId === branch && order.status === "COMMITTED");
+      return { orders, total: orders.length };
+    },
     listOrders: async (query: OrderListQuery = {}) => {
       const orders = state.orders.filter((o) => {
         if (query.queue === "incoming") return o.status === "AWAITING_DONOR";
@@ -261,7 +266,7 @@ vi.mock("@/lib/api", () => ({
       });
       return order;
     },
-    receiveOrder: async (id: string, body: { comment?: string } = {}) => {
+    receiveDelivery: async (id: string, body: { comment?: string } = {}) => {
       const order = state.orders.find((o) => o.id === id)!;
       const decision = canTransition(order, activeAuth.user, "RECEIVE", {
         ownsTarget: activeAuth.user.branchIds.includes(order.targetBranchId),

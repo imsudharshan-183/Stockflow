@@ -343,7 +343,7 @@ export function Shell() {
         <aside
           aria-label="Primary navigation"
           className={cn(
-            "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-card transition-[width] duration-150 md:flex",
+            "sticky top-0 hidden h-screen shrink-0 flex-col border-r border-border bg-card transition-[width] duration-150 lg:flex",
             collapsed ? "w-16" : "w-60",
           )}
         >
@@ -451,7 +451,7 @@ export function Shell() {
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="size-8 shrink-0 rounded-lg md:hidden"
+                      className="size-8 shrink-0 rounded-lg lg:hidden"
                       aria-label="Open navigation menu"
                       onClick={() => setMobileOpen(true)}
                     />

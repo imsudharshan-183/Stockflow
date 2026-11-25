@@ -7,6 +7,7 @@ import {
   HealthSchema,
   LifecycleRecommendationSchema,
   ProductDetailSchema,
+  StoreProductDetailSchema,
   QueueLifecycleViewSchema,
   RecommendationQuerySchema,
   RecommendationSchema,
@@ -118,7 +119,7 @@ export function registerStockRoutes(
       await services.ensureFreshPlan({ syncDecisions: q.meta === "1" });
       try {
         if (q.meta === "1") {
-          return services.kpi.kpisWithMeta(request.currentUser, q.branch);
+          return await services.kpi.kpisWithMeta(request.currentUser, q.branch);
         }
         return services.kpi.kpis(request.currentUser, q.branch);
       } catch (err) {
@@ -141,7 +142,8 @@ export function registerStockRoutes(
       await services.ensureFreshPlan();
       const q = cleanQuery(request.query) as { branch?: string };
       try {
-        return services.kpi.liveOverview(request.currentUser, q.branch);
+        await services.orders.checkEscalations();
+        return await services.kpi.liveOverview(request.currentUser, q.branch);
       } catch (err) {
         if (err instanceof DecisionForbiddenError) {
           return reply.code(403).send(ErrorBodySchema.parse({ error: err.message }));
@@ -179,7 +181,11 @@ export function registerStockRoutes(
     async (request) => {
       await services.ensureFreshPlan();
       const query = ExtendedRecommendationQuerySchema.parse(cleanQuery(request.query));
-      return services.decisions.list(query, request.currentUser);
+      const result = services.decisions.list(query, request.currentUser);
+      if (request.currentUser.role !== "staff") return result;
+      const recommendations = result.recommendations.map(({ id, action, sku, branchId, donorBranchId, quantity, status }) =>
+        ({ id, action, sku, branchId, donorBranchId, quantity, status }));
+      return { recommendations, total: recommendations.length };
     },
   );
 
@@ -210,7 +216,7 @@ export function registerStockRoutes(
       const { sku } = pathSku.parse(request.params);
       const detail = services.catalog.product(sku, request.currentUser);
       if (!detail) return reply.code(404).send(ErrorBodySchema.parse({ error: "Product not found" }));
-      return ProductDetailSchema.parse(detail);
+      return request.currentUser.role === "staff" ? StoreProductDetailSchema.parse(detail) : ProductDetailSchema.parse(detail);
     },
   );
 

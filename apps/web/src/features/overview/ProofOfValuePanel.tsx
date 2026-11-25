@@ -29,7 +29,7 @@ export function ProofOfValuePanel({
         <div className="space-y-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="ok" dot>
-              Proof of value · {formatNumber(backtest.windowDays)}-day replay
+              Simulation on sample data · {formatNumber(backtest.windowDays)}-day replay
             </Badge>
             <span className="text-xs text-muted-foreground">{scopeLabel} counterfactual comparison</span>
           </div>

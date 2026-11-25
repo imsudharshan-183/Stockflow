@@ -112,7 +112,7 @@ export function QueuePage() {
   });
 
   const [search, setSearch] = useState("");
-  const [openOrderId, setOpenOrderId] = useState<string | null>(null);
+  const [openOrderId, setOpenOrderId] = useState<string | null>(() => params.get("order"));
   const lastTriggerRowIdRef = useRef<string | null>(null);
 
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);

@@ -15,6 +15,7 @@ import {
   type LiveOverviewResponse,
   type User,
 } from "@stockflow/core";
+import { latestSubmissionDates } from "../db.js";
 import { diffCalendarDays, getBahrainToday } from "../utils/bahrainDate.js";
 import { BranchNotFoundError, DecisionForbiddenError } from "./errors.js";
 import { projectPositionFor } from "./projection.js";
@@ -252,26 +253,6 @@ export class KpiService {
     return result;
   }
 
-  private computeAsOfDataDate(branchIndices: readonly number[]): string {
-    const dates = this.runtime.data.dates;
-    for (let day = dates.length - 1; day >= 0; day -= 1) {
-      for (let sku = 0; sku < this.runtime.data.products.length; sku += 1) {
-        const salesByBranch = this.runtime.data.sales[sku];
-        const stockByBranch = this.runtime.data.onHand[sku];
-        const demandByBranch = this.runtime.data.demand[sku];
-        for (const bIdx of branchIndices) {
-          const sold = salesByBranch?.[bIdx]?.[day] ?? 0;
-          const onHand = stockByBranch?.[bIdx]?.[day] ?? 0;
-          const demand = demandByBranch?.[bIdx]?.[day] ?? 0;
-          if (sold > 0 || onHand > 0 || demand > 0) {
-            return dates[day] ?? this.runtime.data.asOf;
-          }
-        }
-      }
-    }
-    return this.runtime.data.asOf;
-  }
-
   private resolveScopedBranchIds(user?: User, branchId?: string): string[] {
     if (user && !can(user.role, "dashboard:financial:scoped")) {
       throw new DecisionForbiddenError("Insufficient permission to view KPIs");
@@ -298,21 +279,24 @@ export class KpiService {
     return allowedList;
   }
 
-  liveOverview(user?: User, branchId?: string): LiveOverviewResponse {
+  async liveOverview(user?: User, branchId?: string): Promise<LiveOverviewResponse> {
     ensureInitializedSyncIfPossible(this.runtime);
     const scopedBranchIds = this.resolveScopedBranchIds(user, branchId);
     const report = this.kpis(user, branchId);
     const branchIdSet = new Set(scopedBranchIds);
-    const branchIndices = this.runtime.data.branches.flatMap((b, idx) =>
-      branchIdSet.has(b.id) ? [idx] : [],
-    );
+    const latest = await latestSubmissionDates(scopedBranchIds, this.runtime.repo.kind === "mongo");
 
     const nowMs = this.runtime.now();
     const computedAt = new Date(nowMs).toISOString();
     // IMPORTANT: Compare against Asia/Bahrain (UTC+3) today so midnight sales near UTC day
     // boundaries never misclassify yesterday's close as current or stale.
     const todayBahrain = getBahrainToday(nowMs).isoDate;
-    const asOfDataDate = this.computeAsOfDataDate(branchIndices);
+    const baselineDate = this.runtime.data.baselineThrough ?? this.runtime.data.asOf;
+    const asOfDataDate = [baselineDate, ...latest.values()].sort().at(-1) ?? baselineDate;
+    const reportingBranches = scopedBranchIds.map((id) => ({
+      branchId: id,
+      lastSubmitted: latest.get(id) ?? null,
+    }));
     const staleDataDays = Math.max(0, diffCalendarDays(todayBahrain, asOfDataDate));
     const dataVersion = Math.max(1, this.runtime.planVersion);
     const decisionVersion = Math.max(1, this.runtime.decisionVersion);
@@ -361,6 +345,16 @@ export class KpiService {
       );
     }
 
+    const shortages = this.runtime.data.products.flatMap((product, sku) => {
+      if (product.status === "archived") return [];
+      return this.runtime.data.branches.flatMap((branch, bIdx) => {
+        if (!branchIdSet.has(branch.id)) return [];
+        const position = projectPositionFor(this.runtime.data, this.runtime.analysis, this.runtime.committedDeltas, sku, bIdx);
+        if (position?.status !== "AT_RISK" || position.coverDays === null || position.coverDays > product.leadTimeDays) return [];
+        return [{ branchId: branch.id, branchName: branch.name, sku: product.sku, name: product.name, coverDays: position.coverDays }];
+      });
+    }).sort((a, b) => a.coverDays - b.coverDays || a.sku.localeCompare(b.sku)).slice(0, 5);
+
     const pendingEstimatedGain = round2(
       pendingRecommendations.reduce((sum, r) => sum + r.netBenefit, 0),
     );
@@ -393,6 +387,7 @@ export class KpiService {
         todayBahrain,
         asOfDataDate,
         staleDataDays,
+        reportingBranches,
       },
       metrics: {
         stockoutRate: wrap(syncedReport.stockoutRate),
@@ -404,12 +399,20 @@ export class KpiService {
         pendingEstimatedGain: wrap(pendingEstimatedGain),
       },
       stockoutSparkline,
+      handoffs: [...this.runtime.orders.values()]
+        .filter((o) => o.status === "AWAITING_DONOR" && (branchIdSet.has(o.targetBranchId) || branchIdSet.has(o.sourceBranchId ?? "")))
+        .sort((a, b) => Number(Boolean(b.escalatedAt)) - Number(Boolean(a.escalatedAt)) || a.createdAt.localeCompare(b.createdAt))
+        .slice(0, 8)
+        .map((o) => ({ id: o.id, sku: o.sku, productName: o.productName, units: o.quantity,
+          source: o.sourceBranchName ?? o.sourceBranchId ?? "", destination: o.targetBranchName,
+          needsRelease: !user || user.role === "admin" || isBranchInScope(user, o.sourceBranchId ?? ""), overdue: Boolean(o.escalatedAt) })),
+      shortages,
       pendingRecommendations,
     });
   }
 
-  kpisWithMeta(user?: User, branchId?: string): KpisWithMetaResponse {
-    const live = this.liveOverview(user, branchId);
+  async kpisWithMeta(user?: User, branchId?: string): Promise<KpisWithMetaResponse> {
+    const live = await this.liveOverview(user, branchId);
     return KpisWithMetaResponseSchema.parse({
       ...live.report,
       meta: live.meta,

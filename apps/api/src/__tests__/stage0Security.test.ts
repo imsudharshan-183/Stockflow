@@ -80,7 +80,9 @@ describe("Stage 0: Sales Entry Auth & /api/kpis Scope Isolation", () => {
         headers: { ...staffHeaders, ...(r.headers ?? {}) },
         payload: r.payload as Record<string, unknown> | Buffer | undefined,
       });
-      expect(staffRes.statusCode, `staff ${r.method} ${r.url}`).toBe(403);
+      const expected = r.url.endsWith("entry-does-not-exist") ? 404 :
+        r.method === "POST" && r.url === "/api/sales-entries" ? 201 : 200;
+      expect(staffRes.statusCode, `staff ${r.method} ${r.url}`).toBe(expected);
     }
 
     // Create an entry in BR-005 as admin, then verify Manama manager isolation and 403/404

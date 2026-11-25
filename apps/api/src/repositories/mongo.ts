@@ -8,6 +8,7 @@ import {
   PositionStatusSchema,
   RecommendationSchema,
   ReplenishmentOrderSchema,
+  StoreOrderSchema,
   StockAlertResolutionSchema,
   StockAlertSchema,
   analyze,
@@ -18,6 +19,7 @@ import {
   type Branch,
   type Dataset,
   type OrderEvent,
+  type OrderListQuery,
   type OrderStatus,
   type Product,
   type ProductChangeRecord,
@@ -25,7 +27,8 @@ import {
   type StockAlert,
   type StockAlertResolution,
 } from "@stockflow/core";
-import { gunzipSync, gzipSync } from "node:zlib";
+import { gunzip, gzip } from "node:zlib";
+import { promisify } from "node:util";
 import mongoose from "mongoose";
 import { z } from "zod";
 import { clearMemorySalesEntries } from "../db.js";
@@ -54,6 +57,7 @@ import type {
   ActionMetaRecord,
   ApiAuditEntry,
   CachedPlanRecord,
+  AllocationGuard,
   OrderLifecycleMeta,
   ResolveStockAlertOrderPayload,
   ResolveStockAlertResult,
@@ -65,7 +69,8 @@ import { MongoUserRepository } from "./mongoUser.js";
 import { getInitialSeedUsers } from "./seedData.js";
 
 const SERIES_BATCH = 400;
-const FACT_BATCH = 5000;
+const compressPlan = promisify(gzip);
+const decompressPlan = promisify(gunzip);
 
 type MongoCache = { uri: string; pending: Promise<void> };
 const globalCache = globalThis as typeof globalThis & { __stockflowMongo?: MongoCache };
@@ -211,7 +216,6 @@ export class MongoRepository implements StockRepository {
     }
     await this.persist(data);
     const initialAnalysis = analyze(data, DEFAULT_POLICY);
-    await this.saveAnalysis(initialAnalysis);
     await DataVersionModel.replaceOne({ _id: "current" }, { _id: "current", version: 1 }, { upsert: true });
     await PlanCacheModel.deleteMany({});
     await this.saveCachedPlan(1, initialAnalysis);
@@ -266,11 +270,16 @@ export class MongoRepository implements StockRepository {
     return typeof doc?.version === "number" ? doc.version : 1;
   }
 
+  async getPhysicalChangeTime(version: number) {
+    const doc = await DataVersionModel.findOne({ _id: "current", version }).select("changedAt").lean();
+    return doc?.changedAt ?? undefined;
+  }
+
   async bumpDataVersion(): Promise<number> {
     await this.ensureConnected();
     const doc = await DataVersionModel.findOneAndUpdate(
       { _id: "current" },
-      { $inc: { version: 1 } },
+      { $inc: { version: 1 }, $set: { changedAt: new Date().toISOString() } },
       { upsert: true, new: true },
     ).lean();
     return typeof doc?.version === "number" ? doc.version : 1;
@@ -285,7 +294,7 @@ export class MongoRepository implements StockRepository {
       const buf = Buffer.isBuffer(doc.planCompressed)
         ? doc.planCompressed
         : Buffer.from((doc.planCompressed as { buffer: Uint8Array }).buffer);
-      rawPlan = JSON.parse(gunzipSync(buf).toString("utf8"));
+      rawPlan = JSON.parse((await decompressPlan(buf)).toString("utf8"));
     }
     return {
       dataVersion: doc.dataVersion,
@@ -296,7 +305,7 @@ export class MongoRepository implements StockRepository {
 
   async saveCachedPlan(dataVersion: number, plan: Analysis): Promise<void> {
     await this.ensureConnected();
-    const compressed = gzipSync(Buffer.from(JSON.stringify(plan), "utf8"));
+    const compressed = await compressPlan(Buffer.from(JSON.stringify(plan), "utf8"));
     // Keep well under MongoDB's 16 MiB BSON document limit.
     if (compressed.byteLength > 15_000_000) {
       throw new Error(`Compressed plan (${compressed.byteLength} bytes) exceeds 15 MB safety limit`);
@@ -310,6 +319,7 @@ export class MongoRepository implements StockRepository {
       },
       { upsert: true },
     );
+    await PlanCacheModel.deleteMany({ dataVersion: { $lt: dataVersion - 1 } });
   }
 
   async listActions(): Promise<ActionMetaRecord[]> {
@@ -403,7 +413,7 @@ export class MongoRepository implements StockRepository {
   async saveDecisionBatch(
     records: ActionMetaRecord[],
     entries: ApiAuditEntry[],
-    options?: { allowOverwriteIds?: ReadonlySet<string> },
+    options?: { allowOverwriteIds?: ReadonlySet<string>; allocationGuard?: AllocationGuard },
   ): Promise<SaveDecisionBatchResult> {
     const persistedIds = new Set<string>();
     const duplicateIds = new Set<string>();
@@ -443,6 +453,7 @@ export class MongoRepository implements StockRepository {
         });
         try {
           await session.withTransaction(async () => {
+            if (options?.allocationGuard) await guardAllocation(options.allocationGuard, session);
             if (pendingRecords.length > 0) {
               await ActionModel.insertMany(pendingRecords, { ordered: false, session });
             }
@@ -646,14 +657,14 @@ export class MongoRepository implements StockRepository {
 
   async hasHistoryOrAudits(sku: string): Promise<{ hasSales: boolean; hasAudits: boolean }> {
     await this.ensureConnected();
-    const [auditCount, salesEntryCount, factCount] = await Promise.all([
+    const [auditCount, salesEntryCount, seedSales] = await Promise.all([
       AuditModel.countDocuments({ sku }),
       SalesEntryModel.countDocuments({ sku, unitsSold: { $gt: 0 } }),
-      FactModel.countDocuments({ sku, units: { $gt: 0 } }),
+      SeriesModel.exists({ sku, sales: { $elemMatch: { $gt: 0 } } }),
     ]);
     return {
       hasAudits: auditCount > 0,
-      hasSales: salesEntryCount > 0 || factCount > 0,
+      hasSales: salesEntryCount > 0 || Boolean(seedSales),
     };
   }
 
@@ -849,6 +860,50 @@ export class MongoRepository implements StockRepository {
     return err.code === 11000 || (typeof err.message === "string" && err.message.includes("E11000"));
   }
 
+  async listOrderHistory(query: OrderListQuery, branches: readonly string[] | null) {
+    await this.ensureConnected();
+    const scopeFilter = (ids: readonly string[]) => ({ $or: [
+      { targetBranchId: { $in: ids } }, { type: "TRANSFER", sourceBranchId: { $in: ids } },
+    ] });
+    const pipeline: mongoose.PipelineStage[] = [];
+    if (branches) pipeline.push({ $match: scopeFilter(branches) });
+    if (query.branch) pipeline.push({ $match: scopeFilter([query.branch]) });
+    if (query.status) pipeline.push({ $match: { status: query.status } });
+    if (query.type) pipeline.push({ $match: { type: query.type } });
+    const events = { $lookup: { from: OrderEventModel.collection.name, localField: "id", foreignField: "orderId",
+      pipeline: [{ $sort: { at: 1 as const, _id: 1 as const } }], as: "events" } };
+    if (query.search) {
+      const pattern = new RegExp(query.search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i");
+      pipeline.push(events, { $match: { $or: ["sku", "productName", "id", "sourceBranchId", "sourceBranchName",
+        "targetBranchId", "targetBranchName", "events.actor.name", "events.comment"].map((key) => ({ [key]: pattern })) } });
+    }
+    pipeline.push({ $sort: { updatedAt: -1, id: 1 } }, { $facet: {
+      count: [{ $count: "total" }],
+      orders: [{ $skip: ((query.historyPage ?? 1) - 1) * 25 }, { $limit: 25 }, ...(query.search ? [] : [events])],
+    } });
+    const [page] = await ReplenishmentOrderModel.aggregate(pipeline);
+    return { orders: ReplenishmentOrderSchema.array().parse(page?.orders ?? []), total: Number(page?.count[0]?.total ?? 0) };
+  }
+
+  async listStoreDeliveries(branchId: string) {
+    await this.ensureConnected();
+    const rows = await ReplenishmentOrderModel.find({
+      targetBranchId: branchId, status: "COMMITTED", type: { $in: ["TRANSFER", "REORDER"] },
+    }).select(Object.keys(StoreOrderSchema.shape).join(" ")).sort({ updatedAt: -1 }).lean();
+    return rows.map((row) => StoreOrderSchema.parse(row));
+  }
+
+  async getOrderEventCount(): Promise<number> {
+    await this.ensureConnected();
+    return OrderEventModel.countDocuments({}).hint("_id_");
+  }
+
+  async getAllocationRevision(): Promise<number> {
+    await this.ensureConnected();
+    const current = await DataVersionModel.findById("current").select("allocationRevision").lean();
+    return current?.allocationRevision ?? 0;
+  }
+
   async listOrders(): Promise<ReplenishmentOrder[]> {
     await this.ensureConnected();
     const [orderRows, eventRows] = await Promise.all([
@@ -921,6 +976,7 @@ export class MongoRepository implements StockRepository {
     event: OrderEvent,
     expectedStatus: OrderStatus | null,
     lifecycleMeta?: OrderLifecycleMeta,
+    allocationGuard?: AllocationGuard,
   ): Promise<SaveOrderWithEventResult> {
     await this.ensureConnected();
     const parsedOrder = ReplenishmentOrderSchema.parse({ ...order, events: [] });
@@ -946,6 +1002,9 @@ export class MongoRepository implements StockRepository {
     let txResult: SaveOrderWithEventResult | null = null;
     try {
       await session.withTransaction(async () => {
+        if (allocationGuard) {
+          await guardAllocation(allocationGuard, session);
+        }
         if (expectedStatus === null) {
           await ReplenishmentOrderModel.create([orderDoc], { session });
           await OrderEventModel.create([parsedEvent], { session });
@@ -1058,7 +1117,6 @@ export class MongoRepository implements StockRepository {
     for (let offset = 0; offset < docs.length; offset += SERIES_BATCH) {
       await SeriesModel.insertMany(docs.slice(offset, offset + SERIES_BATCH));
     }
-    await insertFacts(data);
     await MetaModel.create({
       _id: "dataset",
       seed: data.seed,
@@ -1070,10 +1128,8 @@ export class MongoRepository implements StockRepository {
   }
 
   private async read(meta: z.infer<typeof MetaShape>): Promise<Dataset> {
-    const rows: unknown = await SeriesModel.find().lean();
-    if (!Array.isArray(rows)) throw new Error("series query failed");
     const byKey = new Map<string, z.infer<typeof SeriesShape>>();
-    for (const row of rows) {
+    for await (const row of SeriesModel.find().lean().cursor()) {
       const series = SeriesShape.parse(row);
       byKey.set(`${series.sku}|${series.branchId}`, series);
     }
@@ -1106,6 +1162,7 @@ export class MongoRepository implements StockRepository {
       demand.push(skuDemand);
     }
     const dataset: Dataset = {
+      baselineThrough: meta.asOf,
       seed: meta.seed,
       asOf: meta.asOf,
       dates: meta.dates,
@@ -1116,51 +1173,36 @@ export class MongoRepository implements StockRepository {
       demand,
     };
 
-    const entries = await SalesEntryModel.find().lean();
-    if (entries.length > 0) {
-      const skuIndexBySku = new Map(dataset.products.map((p, i) => [p.sku, i]));
-      const branchIndexById = new Map(dataset.branches.map((b, i) => [b.id, i]));
-      const knownDates = new Set(dataset.dates);
-      const extraDates = Array.from(
-        new Set(entries.map((e) => e.date).filter((d) => !knownDates.has(d))),
-      ).sort();
-      for (const extraDate of extraDates) {
-        let insertAt = dataset.dates.findIndex((d) => d > extraDate);
-        if (insertAt < 0) insertAt = dataset.dates.length;
-        dataset.dates.splice(insertAt, 0, extraDate);
-        for (let p = 0; p < dataset.products.length; p += 1) {
-          for (let b = 0; b < dataset.branches.length; b += 1) {
-            const stockRow = dataset.onHand[p]?.[b];
-            const prevStock =
-              insertAt > 0
-                ? (stockRow?.[insertAt - 1] ?? 0)
-                : (stockRow?.[0] ?? 0);
-            dataset.sales[p]?.[b]?.splice(insertAt, 0, 0);
-            stockRow?.splice(insertAt, 0, prevStock);
-            dataset.demand[p]?.[b]?.splice(insertAt, 0, 0);
+    const skuIndex = new Map(dataset.products.map((p, i) => [p.sku, i]));
+    const branchIndex = new Map(dataset.branches.map((branch, i) => [branch.id, i]));
+    let dateIndex = new Map(dataset.dates.map((date, i) => [date, i]));
+    // Apply each day's observations before using that closing stock for the next missing count.
+    for await (const entry of SalesEntryModel.find().sort({ date: 1 }).lean().cursor()) {
+      const sku = skuIndex.get(entry.sku);
+      const branch = branchIndex.get(entry.branchId);
+      if (sku === undefined || branch === undefined) continue;
+      let day = dateIndex.get(entry.date);
+      if (day === undefined) {
+        const later = dataset.dates.findIndex((date) => date > entry.date);
+        day = later < 0 ? dataset.dates.length : later;
+        (dataset.submissions ??= {})[entry.date] = new Set();
+        dataset.dates.splice(day, 0, entry.date);
+        for (let p = 0; p < dataset.products.length; p++) {
+          for (let b = 0; b < dataset.branches.length; b++) {
+            const stock = dataset.onHand[p]![b]!;
+            stock.splice(day, 0, stock[Math.max(0, day - 1)] ?? 0);
+            dataset.sales[p]![b]!.splice(day, 0, 0);
+            dataset.demand[p]![b]!.splice(day, 0, 0);
           }
         }
+        dateIndex = new Map(dataset.dates.map((date, i) => [date, i]));
       }
-      const latestDate = dataset.dates[dataset.dates.length - 1];
-      if (latestDate) dataset.asOf = latestDate;
-
-      const dateIndexByDate = new Map(dataset.dates.map((d, i) => [d, i]));
-      for (const entry of entries) {
-        const sIdx = skuIndexBySku.get(entry.sku);
-        const bIdx = branchIndexById.get(entry.branchId);
-        const dIdx = dateIndexByDate.get(entry.date);
-        if (sIdx === undefined || bIdx === undefined || dIdx === undefined) continue;
-        const salesRow = dataset.sales[sIdx]?.[bIdx];
-        const onHandRow = dataset.onHand[sIdx]?.[bIdx];
-        const demandRow = dataset.demand[sIdx]?.[bIdx];
-        if (salesRow && onHandRow && demandRow) {
-          salesRow[dIdx] = entry.unitsSold;
-          onHandRow[dIdx] = entry.onHand;
-          demandRow[dIdx] = entry.unitsSold;
-        }
-      }
+      dataset.submissions?.[entry.date]?.add(`${entry.sku}::${entry.branchId}`);
+      dataset.sales[sku]![branch]![day] = entry.unitsSold;
+      dataset.onHand[sku]![branch]![day] = entry.onHand;
+      dataset.demand[sku]![branch]![day] = entry.unitsSold;
     }
-
+    dataset.asOf = dataset.dates.at(-1) ?? meta.asOf;
     return dataset;
   }
 }
@@ -1209,6 +1251,7 @@ function normalizeAuditRow(row: Record<string, unknown>): ApiAuditEntry {
 }
 
 class OrderOptimisticConflict extends Error {
+  readonly statusCode = 409;
   constructor() {
     super("Order status conflict");
   }
@@ -1231,47 +1274,12 @@ async function dropCollectionByName(name: string): Promise<void> {
   }
 }
 
-function money(value: number): number {
-  return Math.round((value + Number.EPSILON) * 1000) / 1000;
-}
-
-async function insertFacts(data: Dataset): Promise<void> {
-  type FactDoc = { branchId: string; sku: string; date: string; units: number; revenue: number; onHand: number };
-  let batch: FactDoc[] = [];
-  const flush = async (): Promise<void> => {
-    if (batch.length === 0) return;
-    await FactModel.insertMany(batch, { ordered: false });
-    batch = [];
-  };
-
-  for (let sku = 0; sku < data.products.length; sku += 1) {
-    const product = data.products[sku];
-    const sales = data.sales[sku];
-    const stock = data.onHand[sku];
-    if (!product || !sales || !stock) throw new Error(`missing facts for sku ${sku}`);
-    for (let branch = 0; branch < data.branches.length; branch += 1) {
-      const branchRow = data.branches[branch];
-      const unitsRow = sales[branch];
-      const stockRow = stock[branch];
-      if (!branchRow || !unitsRow || !stockRow) throw new Error(`missing facts for ${product.sku}`);
-      for (let day = 0; day < data.dates.length; day += 1) {
-        const date = data.dates[day];
-        const units = unitsRow[day];
-        const onHand = stockRow[day];
-        if (date === undefined || units === undefined || onHand === undefined) {
-          throw new Error(`missing day for ${product.sku}`);
-        }
-        batch.push({
-          branchId: branchRow.id,
-          sku: product.sku,
-          date,
-          units,
-          revenue: money(units * product.price),
-          onHand,
-        });
-        if (batch.length >= FACT_BATCH) await flush();
-      }
-    }
-  }
-  await flush();
+async function guardAllocation(guard: AllocationGuard, session: mongoose.ClientSession) {
+  // Serialize competing allocations against the plan and reservations used to validate quantity.
+  const guarded = await DataVersionModel.updateOne({
+    _id: "current",
+    version: guard.dataVersion,
+    $expr: { $eq: [{ $ifNull: ["$allocationRevision", 0] }, guard.revision] },
+  }, { $inc: { allocationRevision: 1 } }, { session });
+  if (!guarded.matchedCount) throw new OrderOptimisticConflict();
 }

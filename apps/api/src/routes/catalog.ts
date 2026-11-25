@@ -5,6 +5,8 @@ import {
   ProductDetailWithHistorySchema,
   ProductListQuerySchema,
   ProductListResponseSchema,
+  StoreProductListSchema,
+  StoreProductSchema,
   ProductSchema,
   UpdateProductSchema,
 } from "@stockflow/core";
@@ -32,7 +34,7 @@ export function registerCatalogRoutes(
       }
       try {
         const result = await services.catalog.listCatalogProducts(parsed.data, request.currentUser);
-        return ProductListResponseSchema.parse(result);
+        return request.currentUser.role === "staff" ? StoreProductListSchema.parse(result) : ProductListResponseSchema.parse(result);
       } catch (err) {
         return handleDomainRouteError(err, reply);
       }
@@ -51,6 +53,10 @@ export function registerCatalogRoutes(
       const result = await services.catalog.getCatalogProduct(pathParsed.data.sku);
       if (!result) {
         return sendApiError(reply, 404, "Product not found");
+      }
+      if (request.currentUser.role === "staff") {
+        if (result.product.status === "archived") return sendApiError(reply, 404, "Product not found");
+        return { product: StoreProductSchema.parse(result.product) };
       }
       return ProductDetailWithHistorySchema.parse(result);
     },

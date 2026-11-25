@@ -4,7 +4,7 @@ import type { Recommendation, User } from "@stockflow/core";
 import type { StockRepository } from "../repositories/types.js";
 import { createStockServices } from "../services/index.js";
 import { buildTestApp, createDualRepo, createUser, type RepoKind } from "../test/dualRepo.js";
-import { bearer, tokenFor } from "../test/helpers.js";
+import { bearer, buildMultipartPayload, tokenFor } from "../test/helpers.js";
 
 describe.each<RepoKind>(["memory", "mongo-memory"])("Serverless Plan Consistency (%s)", (kind) => {
   let repo: StockRepository;
@@ -88,6 +88,30 @@ describe.each<RepoKind>(["memory", "mongo-memory"])("Serverless Plan Consistency
     } finally {
       await instA.app.close();
       await instB.app.close();
+    }
+  });
+
+  it("previews imports without writing, counts repeated keys, and recovers the saved observation after restart", async () => {
+    const { app } = await buildTestApp(repo);
+    try {
+      const file = buildMultipartPayload("file", "counts.csv",
+        "branchId,sku,date,unitsSold,onHand\nBR-009,SKU-90002,2026-11-12,2,7\nBR-009,SKU-90002,2026-11-12,0,0");
+      const headers = { ...bearer(tokenFor(app, adminUser)), "content-type": file.contentType };
+      const version = await repo.getDataVersion();
+      const preview = await app.inject({ method: "POST", url: "/api/sales-entries/import?preview=1", headers, payload: file.payload });
+      expect(preview.json()).toEqual({ inserted: 1, updated: 1, errors: [] });
+      expect(await repo.getDataVersion()).toBe(version);
+      const saved = await app.inject({ method: "POST", url: "/api/sales-entries/import", headers, payload: file.payload });
+      expect(saved.json()).toEqual(preview.json());
+      expect(await repo.getDataVersion()).toBe(version + 1);
+      const fresh = createStockServices(repo);
+      await fresh.ensureInitialized();
+      const report = await fresh.kpi.liveOverview(adminUser, "BR-009");
+      expect(report.meta.reportingBranches).toEqual([{ branchId: "BR-009", lastSubmitted: "2026-11-12" }]);
+      const other = await fresh.kpi.liveOverview(adminUser, "BR-001");
+      expect(other.meta.reportingBranches?.[0]?.lastSubmitted).not.toBe("2026-11-12");
+    } finally {
+      await app.close();
     }
   });
 

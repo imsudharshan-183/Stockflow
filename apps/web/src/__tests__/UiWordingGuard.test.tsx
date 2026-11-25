@@ -51,14 +51,14 @@ vi.mock("@/features/auth/AuthContext", () => ({
 const apiMocks = vi.hoisted(() => ({
   kpis: vi.fn(),
   locations: vi.fn(),
-  listCatalogProducts: vi.fn(),
+  storeProducts: vi.fn(),
   listOrders: vi.fn(),
   donorCandidates: vi.fn(),
   listStockAlerts: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
-  api: apiMocks,
+  api: { ...apiMocks, listCatalogProducts: apiMocks.storeProducts, storeDeliveries: apiMocks.listOrders },
 }));
 
 const sampleOrder: ReplenishmentOrder = {
@@ -188,7 +188,7 @@ describe("Workstream 1: Centralized UI wording guard (no Pull Request / donor / 
         },
       ],
     } as unknown as LocationListResponse);
-    apiMocks.listCatalogProducts.mockResolvedValue({
+    apiMocks.storeProducts.mockResolvedValue({
       products: [
         {
           sku: "SKU-00012",

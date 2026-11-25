@@ -68,7 +68,7 @@ export function NeedsAttentionStrip({
     );
   }
 
-  if (recommendations.length === 0) {
+  if (!summary.reorderCount && !summary.transferCount && !summary.markdownCount) {
     return (
       <section aria-label="Needs attention today" className="space-y-3">
         <h2 className="text-sm font-semibold text-foreground">Needs attention today</h2>
@@ -83,6 +83,7 @@ export function NeedsAttentionStrip({
   const cards = [
     {
       key: "stockout",
+      count: summary.reorderCount,
       title: "Soonest stockout risk",
       badgeTone: "reorder" as const,
       badgeLabel: "Reorder",
@@ -99,6 +100,7 @@ export function NeedsAttentionStrip({
     },
     {
       key: "transfer",
+      count: summary.transferCount,
       title: "Largest transfer opportunity",
       badgeTone: "transfer" as const,
       badgeLabel: "Transfer",
@@ -115,6 +117,7 @@ export function NeedsAttentionStrip({
     },
     {
       key: "markdown",
+      count: summary.markdownCount,
       title: "Markdown & overstock clearance",
       badgeTone: "markdown" as const,
       badgeLabel: "Markdown",
@@ -134,19 +137,14 @@ export function NeedsAttentionStrip({
   return (
     <section aria-label="Needs attention today" className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">Needs attention today</h2>
-          <p className="text-xs text-muted-foreground">
-            Three highest-leverage queues derived from today&apos;s ranked plan
-          </p>
-        </div>
+        <h2 className="text-base font-semibold text-foreground">Needs attention today</h2>
         <Link to="/queue?status=PENDING" className="text-xs font-medium text-primary hover:underline">
-          Open full pending queue →
+          See all pending actions →
         </Link>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        {cards.map((card) => {
+      <div className="grid gap-3 grid-cols-[repeat(auto-fit,minmax(min(100%,15rem),1fr))]">
+        {cards.filter((card) => card.count > 0).map((card) => {
           const Icon = card.icon;
           return (
             <Card

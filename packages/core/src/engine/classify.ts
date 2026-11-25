@@ -101,8 +101,13 @@ export function assessNetwork(
       const historyEnd = Math.min(lastHistory, sales.length - 1);
       const historySales = historyEnd >= 0 ? sales.slice(0, historyEnd + 1) : [];
       const historyStock = historyEnd >= 0 ? stock.slice(0, historyEnd + 1) : [];
+      // A missing observation has no EWMA weight. A reported zero on an in-stock day still has weight.
+      const pair = `${product.sku}::${at(data.branches, branchIndex, "branch").id}`;
+      const reported = (_: number, day: number) => data.submissions?.[data.dates[day]!]?.has(pair) ?? true;
       const estimate = forecaster.estimateDemand(
-        { sales: historySales, onHand: historyStock },
+        data.submissions
+          ? { sales: historySales.filter(reported), onHand: historyStock.filter(reported) }
+          : { sales: historySales, onHand: historyStock },
         { alpha, leadTimeDays: product.leadTimeDays, serviceZ: policy.serviceZ },
       );
       const onHand = onHandOverride

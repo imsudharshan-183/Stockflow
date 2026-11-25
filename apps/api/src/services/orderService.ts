@@ -1,3 +1,5 @@
+import { latestStockCounts } from "../db.js";
+import { getBahrainToday } from "../utils/bahrainDate.js";
 import { randomUUID } from "node:crypto";
 import {
   DEFAULT_DONOR_ESCALATION_HOURS,
@@ -89,6 +91,7 @@ function actorRefOf(user?: User): ActorRef {
 }
 
 export class OrderService {
+  private syncedEvents: { count: number; dataVersion: number } | null = null;
   private readonly escalationMs: number;
   private readonly inflightStagedByOrderId = new Map<
     string,
@@ -107,7 +110,8 @@ export class OrderService {
     return this.runtime.planVersion > 1 ? this.runtime.planComputedAt : undefined;
   }
 
-  async initializeAndMigrate(replayCutoffAt?: string): Promise<void> {
+  async initializeAndMigrate(replayCutoffAt?: string, migrateLegacy = true): Promise<void> {
+    const count = await this.runtime.repo.getOrderEventCount?.();
     const persisted = await this.runtime.repo.listOrders();
     this.runtime.orders.clear();
     for (const order of persisted) {
@@ -120,9 +124,10 @@ export class OrderService {
       this.runtime.orderLifecycleMeta.set(id, meta);
     }
 
-    await this.migrateLegacyDecisionsToOrders();
+    if (migrateLegacy) await this.migrateLegacyDecisionsToOrders();
     this.syncDecisionsOverlayFromOrders();
-    this.replayOrdersIntoCommittedDeltas(replayCutoffAt);
+    await this.reconcileStockCounts(replayCutoffAt);
+    if (count !== undefined) this.syncedEvents = { count, dataVersion: this.runtime.planVersion };
   }
 
   private syncDecisionsOverlayFromOrders(): void {
@@ -223,7 +228,24 @@ export class OrderService {
     }
   }
 
-  replayOrdersIntoCommittedDeltas(replayCutoffAt?: string): void {
+  async reconcileStockCounts(replayCutoffAt?: string): Promise<void> {
+    const orders = [...this.runtime.orders.values()];
+    const countedOrders = orders.filter((o) =>
+      (o.type === "MARKDOWN" && o.status === "COMMITTED") || (o.type === "TRANSFER" && o.status === "RECEIVED"));
+    const pairs = countedOrders.map((o) => ({ sku: o.sku, branchId: o.sourceBranchId ?? o.targetBranchId }));
+    const counts = await latestStockCounts(pairs, this.runtime.repo.kind === "mongo");
+    const reconciled = new Set<string>();
+    for (const order of countedOrders) {
+      const at = Date.parse(order.receivedAt ?? order.committedAt ?? order.updatedAt);
+      const count = counts.get(`${order.sku}::${order.sourceBranchId ?? order.targetBranchId}`);
+      if (count && count.updatedAt.getTime() >= at && count.date >= getBahrainToday(at).isoDate) {
+        reconciled.add(order.id);
+      }
+    }
+    this.replayOrdersIntoCommittedDeltas(replayCutoffAt, reconciled);
+  }
+
+  private replayOrdersIntoCommittedDeltas(replayCutoffAt: string | undefined, reconciled: Set<string>): void {
     clearAllCommittedDeltas(this.runtime.committedDeltas, this.runtime.committedRecommendationIds);
 
     const applyOrderDelta = (
@@ -260,7 +282,8 @@ export class OrderService {
     for (const order of this.runtime.orders.values()) {
       if (order.status !== "COMMITTED" && order.status !== "RECEIVED") continue;
       const effectiveAt = order.committedAt ?? order.updatedAt;
-      if (replayCutoffAt && effectiveAt < replayCutoffAt) continue;
+      if (reconciled.has(order.id)) continue;
+      if (order.events.some((event) => event.action === "MIGRATED") && replayCutoffAt && effectiveAt < replayCutoffAt) continue;
 
       applyOrderDelta(
         order.id,
@@ -318,8 +341,22 @@ export class OrderService {
 
   private async ensureOrdersSynced(): Promise<void> {
     await ensureFreshPlan(this.runtime);
-    await this.initializeAndMigrate(this.replayCutoff());
+    await this.syncPersistedOrders();
     await this.checkEscalations();
+  }
+
+  async syncPersistedOrders(migrateLegacy = true): Promise<void> {
+    const count = await this.runtime.repo.getOrderEventCount?.();
+    const hasUnmigrated = migrateLegacy && [...this.runtime.actionMeta.keys()].some((id) => !this.runtime.orders.has(id));
+    if (count === undefined || hasUnmigrated || this.syncedEvents?.count !== count ||
+        this.syncedEvents.dataVersion !== this.runtime.planVersion) {
+      if (hasUnmigrated) this.runtime.audit = await this.runtime.repo.listAudit();
+      const changed = count !== undefined && this.syncedEvents !== null && this.syncedEvents.count !== count;
+      await this.initializeAndMigrate(this.replayCutoff(), migrateLegacy);
+      if (changed) bumpDecisionVersion(this.runtime);
+    } else {
+      this.syncDecisionsOverlayFromOrders();
+    }
   }
 
   async checkEscalations(nowMs: number = this.runtime.now()): Promise<ReplenishmentOrder[]> {
@@ -638,6 +675,22 @@ export class OrderService {
     query: OrderListQuery & { view?: QueueLifecycleView },
     user: User,
   ): Promise<OrderListResponse | LifecycleOrderListResponse> {
+    if (query.historyPage) {
+      if (!can(user.role, "audit:read")) throw new DecisionForbiddenError("Audit access required");
+      await ensureInitialized(this.runtime);
+      if (this.runtime.repo.listOrderHistory) {
+        return this.runtime.repo.listOrderHistory(query, user.role === "admin" ? null : user.branchIds);
+      }
+      const search = query.search?.toLowerCase() ?? "";
+      const matches = (await this.runtime.repo.listOrders()).filter((order) =>
+        isOrderInScope(order, user) && (!query.branch || [order.sourceBranchId, order.targetBranchId].includes(query.branch)) &&
+        (!query.status || order.status === query.status) && (!query.type || order.type === query.type) &&
+        (!search || [order.id, order.sku, order.productName, order.sourceBranchId, order.sourceBranchName, order.targetBranchId,
+          order.targetBranchName, ...order.events.flatMap((e) => [e.actor.name, e.comment])].some((v) => v?.toLowerCase().includes(search)))
+      ).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
+      const start = (query.historyPage - 1) * 25;
+      return { orders: matches.slice(start, start + 25), total: matches.length };
+    }
     await this.ensureOrdersSynced();
     const combined = new Map<string, ReplenishmentOrder>();
     const recById = new Map<string, Recommendation>();
@@ -1002,6 +1055,7 @@ export class OrderService {
   }
 
   async commit(id: string, body: OrderCommitBody, user: User): Promise<ReplenishmentOrder> {
+    const allocationRevision = await this.runtime.repo.getAllocationRevision?.();
     await this.ensureOrdersSynced();
     const { order, expectedStatus } = this.resolveOrderRecord(id);
     const comment = body.comment?.trim() ? body.comment.trim() : undefined;
@@ -1148,6 +1202,7 @@ export class OrderService {
         event,
         expectedStatus,
         nextMeta,
+        allocationRevision === undefined ? undefined : { revision: allocationRevision, dataVersion: this.runtime.planVersion },
       );
       if (saved.status !== "saved") {
         this.inflightStagedByOrderId.delete(order.id);

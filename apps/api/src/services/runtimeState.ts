@@ -1,3 +1,4 @@
+import { Worker } from "node:worker_threads";
 import type {
   Analysis,
   Dataset,
@@ -23,11 +24,24 @@ import {
 } from "./projection.js";
 import { computeActivePlan } from "./scope.js";
 
+async function rebuildPlan(data: Dataset, kind: StockRepository["kind"]): Promise<Analysis> {
+  // Small fixtures finish faster in-process. Full network recomputes otherwise stall HTTP requests.
+  const cells = data.products.length * data.branches.length * data.dates.length;
+  if (kind !== "mongo" || cells < 100_000) return computeActivePlan(data);
+  return new Promise((resolve, reject) => {
+    const worker = new Worker(new URL("./planWorker.mjs", import.meta.url), { workerData: data });
+    worker.once("message", (plan: Analysis) => resolve(plan));
+    worker.once("error", reject);
+    worker.once("exit", (code) => reject(new Error(`Plan worker exited before returning a plan (code ${code})`)));
+  });
+}
+
 export interface StockRuntimeState {
   readonly repo: StockRepository;
   now: () => number;
   lifecycleConfig: QueueLifecycleConfig;
   decisionVersion: number;
+  allocationRevision?: number;
   readonly decisions: Map<string, Extract<RecommendationStatus, "APPROVED" | "REJECTED">>;
   readonly actionMeta: Map<string, ActionMetaRecord>;
   readonly orderLifecycleMeta: Map<string, OrderLifecycleMeta>;
@@ -50,6 +64,7 @@ export interface StockRuntimeState {
   inflightRefresh: Promise<void> | null;
   data: Dataset;
   analysis: Analysis;
+  onPhysicalRefresh?: (at: string) => Promise<void>;
   onReplayAudit?: (replayCutoffAt?: string) => void;
   onAfterInit?: (replayCutoffAt?: string) => Promise<void>;
 }
@@ -170,19 +185,19 @@ export async function ensureInitialized(state: StockRuntimeState): Promise<void>
       if (state.initialized) return;
 
       const tDataset = performance.now();
+      const currentVersion = await state.repo.getDataVersion();
       const data = await state.repo.loadDataset();
       const datasetMs = Math.round(performance.now() - tDataset);
       console.log(`loading dataset (${datasetMs}ms)`);
 
       const tPlan = performance.now();
-      const currentVersion = await state.repo.getDataVersion();
       const cached = await state.repo.loadCachedPlan(currentVersion);
 
       let analysis: Analysis;
       if (cached) {
         analysis = cached.plan;
       } else {
-        analysis = (await state.repo.loadAnalysis()) ?? computeActivePlan(data);
+        analysis = await rebuildPlan(data, state.repo.kind);
         try {
           await state.repo.saveCachedPlan(currentVersion, analysis);
         } catch {
@@ -195,9 +210,10 @@ export async function ensureInitialized(state: StockRuntimeState): Promise<void>
       state.data = data;
       state.analysis = analysis;
       state.planVersion = currentVersion;
-      state.planComputedAt = cached?.computedAt;
+      state.planComputedAt = (currentVersion > 1 ? await state.repo.getPhysicalChangeTime?.(currentVersion) : undefined) ?? cached?.computedAt ?? new Date(state.now()).toISOString();
       state.scopedKpiCache.clear();
-      const replayCutoff = currentVersion > 1 ? cached?.computedAt : undefined;
+      const replayCutoff = currentVersion > 1 ? state.planComputedAt : undefined;
+      state.allocationRevision = await state.repo.getAllocationRevision?.();
       await syncDecisionsAndAudit(state, replayCutoff);
       if (state.onAfterInit) {
         await state.onAfterInit(replayCutoff);
@@ -296,7 +312,7 @@ export async function ensureFreshPlan(
       if (cached) {
         nextPlan = cached.plan;
       } else {
-        nextPlan = computeActivePlan(freshData);
+        nextPlan = await rebuildPlan(freshData, state.repo.kind);
         try {
           await state.repo.saveCachedPlan(currentVersion, nextPlan);
         } catch {
@@ -309,7 +325,7 @@ export async function ensureFreshPlan(
       state.data = freshData;
       state.analysis = nextPlan;
       state.planVersion = currentVersion;
-      state.planComputedAt = cached?.computedAt;
+      state.planComputedAt = (currentVersion > 1 ? await state.repo.getPhysicalChangeTime?.(currentVersion) : undefined) ?? cached?.computedAt ?? new Date(state.now()).toISOString();
       clearAllCommittedDeltas(state.committedDeltas, state.committedRecommendationIds);
       state.alertAdjustments.clear();
       state.orders.clear();
@@ -318,7 +334,7 @@ export async function ensureFreshPlan(
       if (!actions) applyDecisionHistoryToState(state, await state.repo.listActions());
       if (!audit) state.audit = await state.repo.listAudit();
       if (state.onAfterInit) {
-        await state.onAfterInit(cached?.computedAt);
+        await state.onAfterInit(currentVersion > 1 ? state.planComputedAt : undefined);
       }
     })().finally(() => {
       state.inflightRefresh = null;
@@ -330,6 +346,11 @@ export async function ensureFreshPlan(
 
 export async function commitPlanVersion(state: StockRuntimeState): Promise<number> {
   const nextVersion = await state.repo.bumpDataVersion();
+  if (state.repo.kind === "mongo") {
+    // Read committed observations, including writes from other instances, before publishing the plan.
+    await ensureFreshPlan(state);
+    return nextVersion;
+  }
   state.planVersion = nextVersion;
   state.planComputedAt = new Date(state.now()).toISOString();
   state.scopedKpiCache.clear();
@@ -338,5 +359,6 @@ export async function commitPlanVersion(state: StockRuntimeState): Promise<numbe
   } catch {
     // Fallback to compute-and-serve if plan persistence fails.
   }
+  await state.onPhysicalRefresh?.(state.planComputedAt);
   return nextVersion;
 }

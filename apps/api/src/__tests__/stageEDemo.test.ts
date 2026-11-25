@@ -6,6 +6,7 @@ import {
   DonorCandidatesResponseSchema,
   OrderListResponseSchema,
   ReplenishmentOrderSchema,
+  StoreOrderSchema,
   type Branch,
   type Dataset,
   type Product,
@@ -246,7 +247,7 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
           payload: { comment: "Counted 15 units on shelf at Manama CBD" },
         });
         expect(receiveRes.statusCode).toBe(200);
-        const receivedOrder = ReplenishmentOrderSchema.parse(json(receiveRes.payload));
+        const receivedOrder = StoreOrderSchema.parse(json(receiveRes.payload));
         expect(receivedOrder.status).toBe("RECEIVED");
         expect(receivedOrder.receivedAt).toBeTruthy();
         expect(services.runtime.committedDeltas.get("SKU-00012::BR-001")?.inTransit ?? 0).toBe(0);
@@ -360,6 +361,37 @@ describe.each<RepoKind>(["memory", "mongo-memory"])(
           reserved: 90,
           inTransit: 0,
         });
+
+        // A catalog edit cannot acknowledge physical receipt or free an outstanding shipment.
+        const edit = await app.inject({ method: "PATCH", url: "/api/catalog/products/SKU-00012",
+          headers: hAdmin, payload: { leadTimeDays: 8 } });
+        expect(edit.statusCode).toBe(200);
+        expect(services.runtime.committedDeltas.get("SKU-00012::BR-005")?.reserved).toBe(90);
+        const history = await app.inject({ method: "GET", url: "/api/orders?historyPage=1&search=receiving",
+          headers: hAdmin });
+        expect(history.statusCode).toBe(200);
+        const page = await app.inject({ method: "GET", url: "/api/orders?historyPage=1&search=Counted%2015",
+          headers: hManama });
+        expect(page.json().orders.map((o: { id: string }) => o.id)).toContain(receivedOrder.id);
+        if (kind === "mongo-memory") {
+          const peer = await buildTestApp(repo);
+          try {
+            const request = { type: "TRANSFER" as const, sku: "SKU-00012", targetBranchId: "BR-001",
+              sourceBranchId: "BR-014", quantity: 50 };
+            const first = await services.orders.create(request, mgrManama);
+            const second = await peer.services.orders.create(request, mgrManama);
+            const release = { force: true, comment: "Release 50 units" };
+            const results = await Promise.allSettled([
+              services.orders.commit(first.id, release, adminUser),
+              peer.services.orders.commit(second.id, release, adminUser),
+            ]);
+            expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+            const status = await Promise.all([repo.getOrder(first.id), repo.getOrder(second.id)]);
+            expect(status.filter((o) => o?.status === "COMMITTED")).toHaveLength(1);
+          } finally {
+            await peer.app.close();
+          }
+        }
       } finally {
         await app.close();
       }

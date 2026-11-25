@@ -1,5 +1,5 @@
 import mongoose from "mongoose";
-import { ImportLogModel, SalesEntryModel } from "./repositories/models.js";
+import { DataVersionModel, ImportLogModel, SalesEntryModel } from "./repositories/models.js";
 
 export interface SalesEntryRecord {
   id: string;
@@ -9,6 +9,7 @@ export interface SalesEntryRecord {
   unitsSold: number;
   onHand: number;
   updatedAt: Date;
+  source?: "sample" | "reported";
 }
 
 export interface UpsertSalesEntryResult {
@@ -83,16 +84,64 @@ function makeEntryKey(branchId: string, sku: string, date: string): string {
   return `${branchId}::${sku}::${date}`;
 }
 
+type DailyObservation = Pick<SalesEntryRecord, "branchId" | "sku" | "date" | "unitsSold" | "onHand">;
+
+export async function previewSalesImport(rows: DailyObservation[], mongo: boolean) {
+  const keys = new Set(rows.map((r) => makeEntryKey(r.branchId, r.sku, r.date)));
+  let existing = 0;
+  if (mongo) {
+    const unique = [...new Map(rows.map((r) => [makeEntryKey(r.branchId, r.sku, r.date), r])).values()];
+    for (let i = 0; i < unique.length; i += 500) {
+      const filters = unique.slice(i, i + 500).map(({ branchId, sku, date }) => ({ branchId, sku, date }));
+      existing += await SalesEntryModel.countDocuments({ $or: filters });
+    }
+  } else {
+    existing = [...keys].filter((key) => memorySalesEntries.has(key)).length;
+  }
+  const inserted = keys.size - existing;
+  return { inserted, updated: rows.length - inserted };
+}
+
+export async function persistMongoSalesImport(rows: DailyObservation[], log: ImportLogEntry) {
+  const session = await mongoose.startSession();
+  const save = async (session?: mongoose.ClientSession) => {
+    const updatedAt = new Date(log.importedAt);
+    const ops = rows.map(({ branchId, sku, date, unitsSold, onHand }) => ({
+      updateOne: {
+        filter: { branchId, sku, date },
+        update: { $set: { unitsSold, onHand, updatedAt, source: "reported" as const } },
+        upsert: true,
+      },
+    }));
+    const saved = ops.length ? await SalesEntryModel.bulkWrite(ops, { ordered: true, session }) : null;
+    const inserted = saved?.upsertedCount ?? 0;
+    const updated = saved?.matchedCount ?? 0;
+    if (rows.length) {
+      await DataVersionModel.updateOne({ _id: "current" }, { $inc: { version: 1 }, $set: { changedAt: log.importedAt } }, { session, upsert: true });
+    }
+    await ImportLogModel.create([{ ...log, inserted, updated }], { session });
+    return { inserted, updated };
+  };
+  try {
+    return await session.withTransaction(() => save(session));
+  } catch (err) {
+    if ((err as { code?: number }).code !== 20) throw err;
+    return await save();
+  } finally {
+    await session.endSession();
+  }
+}
+
 export async function upsertSalesEntry(input: {
   branchId: string;
   sku: string;
   date: string;
   unitsSold: number;
   onHand: number;
-}): Promise<UpsertSalesEntryResult> {
+}, mongo: boolean, source: "sample" | "reported" = "reported"): Promise<UpsertSalesEntryResult> {
   const now = new Date();
 
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+  if (mongo) {
     const rawResult = await SalesEntryModel.collection.findOneAndUpdate(
       { branchId: input.branchId, sku: input.sku, date: input.date },
       {
@@ -103,6 +152,7 @@ export async function upsertSalesEntry(input: {
           unitsSold: input.unitsSold,
           onHand: input.onHand,
           updatedAt: now,
+          source,
         },
       },
       { upsert: true, returnDocument: "after", includeResultMetadata: true },
@@ -129,6 +179,7 @@ export async function upsertSalesEntry(input: {
   const existed = memorySalesEntries.has(key);
   const record: SalesEntryRecord = {
     id: key,
+    source,
     branchId: input.branchId,
     sku: input.sku,
     date: input.date,
@@ -140,6 +191,47 @@ export async function upsertSalesEntry(input: {
   return { entry: record, created: !existed };
 }
 
+export async function latestStockCounts(pairs: { sku: string; branchId: string }[], mongo: boolean) {
+  const requested = new Map(pairs.map((pair) => [`${pair.sku}::${pair.branchId}`, pair]));
+  const result = new Map<string, { date: string; updatedAt: Date; unitsSold: number }>();
+  if (mongo) {
+    const unique = [...requested.values()];
+    for (let i = 0; i < unique.length; i += 250) {
+      const rows = await SalesEntryModel.aggregate<{ _id: { sku: string; branchId: string }; date: string; updatedAt: Date; unitsSold: number }>([
+        { $match: { source: { $ne: "sample" }, $or: unique.slice(i, i + 250) } },
+        { $sort: { date: -1 } },
+        { $group: { _id: { sku: "$sku", branchId: "$branchId" }, date: { $first: "$date" }, updatedAt: { $first: "$updatedAt" }, unitsSold: { $first: "$unitsSold" } } },
+      ]);
+      for (const row of rows) result.set(`${row._id.sku}::${row._id.branchId}`, row);
+    }
+  } else {
+    for (const entry of memorySalesEntries.values()) {
+      const key = `${entry.sku}::${entry.branchId}`;
+      if (entry.source !== "sample" && requested.has(key) && entry.date > (result.get(key)?.date ?? "")) result.set(key, entry);
+    }
+  }
+  return result;
+}
+
+export async function latestSubmissionDates(branchIds: readonly string[], mongo: boolean): Promise<Map<string, string>> {
+  if (mongo) {
+    const rows = await SalesEntryModel.aggregate<{ _id: string; date: string }>([
+      { $match: { branchId: { $in: branchIds }, source: { $ne: "sample" } } },
+      { $sort: { branchId: 1, date: -1 } },
+      { $group: { _id: "$branchId", date: { $first: "$date" } } },
+    ]);
+    return new Map(rows.map((row) => [row._id, row.date]));
+  }
+  const allowed = new Set(branchIds);
+  const latest = new Map<string, string>();
+  for (const entry of memorySalesEntries.values()) {
+    if (entry.source !== "sample" && allowed.has(entry.branchId) && entry.date > (latest.get(entry.branchId) ?? "")) {
+      latest.set(entry.branchId, entry.date);
+    }
+  }
+  return latest;
+}
+
 export async function listSalesEntries(filter: {
   allowedBranchIds?: readonly string[] | null;
   branchId?: string;
@@ -148,14 +240,14 @@ export async function listSalesEntries(filter: {
   to?: string;
   page: number;
   limit: number;
-}): Promise<{
+}, mongo: boolean): Promise<{
   entries: SalesEntryRecord[];
   total: number;
   page: number;
   limit: number;
   totalPages: number;
 }> {
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+  if (mongo) {
     const query: Record<string, unknown> = {};
     if (filter.branchId) {
       query.branchId = filter.branchId;
@@ -216,8 +308,8 @@ export async function listSalesEntries(filter: {
   };
 }
 
-export async function getSalesEntryById(id: string): Promise<SalesEntryRecord | null> {
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+export async function getSalesEntryById(id: string, mongo: boolean): Promise<SalesEntryRecord | null> {
+  if (mongo) {
     if (!mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await SalesEntryModel.collection.findOne({ _id: new mongoose.Types.ObjectId(id) });
     if (!doc) return null;
@@ -229,11 +321,12 @@ export async function getSalesEntryById(id: string): Promise<SalesEntryRecord | 
 export async function updateSalesEntryById(
   id: string,
   patch: { unitsSold?: number; onHand?: number },
+  mongo: boolean,
 ): Promise<SalesEntryRecord | null> {
   const now = new Date();
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+  if (mongo) {
     if (!mongoose.Types.ObjectId.isValid(id)) return null;
-    const $set: Record<string, unknown> = { updatedAt: now };
+    const $set: Record<string, unknown> = { updatedAt: now, source: "reported" };
     if (patch.unitsSold !== undefined) $set.unitsSold = patch.unitsSold;
     if (patch.onHand !== undefined) $set.onHand = patch.onHand;
     const doc = await SalesEntryModel.collection.findOneAndUpdate(
@@ -249,6 +342,7 @@ export async function updateSalesEntryById(
   if (!existing) return null;
   const updated: SalesEntryRecord = {
     ...existing,
+    source: "reported",
     unitsSold: patch.unitsSold ?? existing.unitsSold,
     onHand: patch.onHand ?? existing.onHand,
     updatedAt: now,
@@ -257,8 +351,8 @@ export async function updateSalesEntryById(
   return updated;
 }
 
-export async function deleteSalesEntryById(id: string): Promise<SalesEntryRecord | null> {
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+export async function deleteSalesEntryById(id: string, mongo: boolean): Promise<SalesEntryRecord | null> {
+  if (mongo) {
     if (!mongoose.Types.ObjectId.isValid(id)) return null;
     const doc = await SalesEntryModel.collection.findOneAndDelete({
       _id: new mongoose.Types.ObjectId(id),
@@ -273,13 +367,18 @@ export async function deleteSalesEntryById(id: string): Promise<SalesEntryRecord
   return existing;
 }
 
-export function recordSalesEntryAudit(record: SalesEntryAuditRecord): void {
+export async function recordSalesEntryAudit(record: SalesEntryAuditRecord, mongo: boolean): Promise<void> {
+  if (mongo) {
+    await mongoose.connection.collection<SalesEntryAuditRecord>("sales_entry_audits").insertOne(record);
+    return;
+  }
   memorySalesEntryAudits.push(record);
 }
 
 const recomputeCallLog: Array<{ branchId: string; sku: string; at: string }> = [];
 
 export async function recomputeForSku(branchId: string, sku: string): Promise<void> {
+  if (process.env.NODE_ENV !== "test") return;
   recomputeCallLog.push({ branchId, sku, at: new Date().toISOString() });
 }
 
@@ -291,7 +390,7 @@ export function clearRecomputeCallLog(): void {
   recomputeCallLog.length = 0;
 }
 
-export async function recordImportLog(entry: ImportLogEntry): Promise<ImportLogEntry> {
+export async function recordImportLog(entry: ImportLogEntry, mongo: boolean): Promise<ImportLogEntry> {
   const normalized: ImportLogEntry = {
     id: entry.id,
     importedAt: entry.importedAt,
@@ -305,7 +404,7 @@ export async function recordImportLog(entry: ImportLogEntry): Promise<ImportLogE
     branchIds: [...new Set(entry.branchIds)].sort(),
   };
 
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+  if (mongo) {
     await ImportLogModel.create(normalized);
     return normalized;
   }
@@ -317,10 +416,10 @@ export async function recordImportLog(entry: ImportLogEntry): Promise<ImportLogE
 export async function listImportLogs(filter: {
   userId?: string;
   limit?: number;
-} = {}): Promise<ImportLogEntry[]> {
+}, mongo: boolean): Promise<ImportLogEntry[]> {
   const limit = Math.min(50, Math.max(1, filter.limit ?? 10));
 
-  if (mongoose.connection.readyState === 1 && mongoose.connection.db) {
+  if (mongo) {
     const query = filter.userId ? { "user.userId": filter.userId } : {};
     const rows = await ImportLogModel.find(query)
       .sort({ importedAt: -1 })

@@ -1,6 +1,7 @@
-import { ArrowRight, Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
+import { OverviewViews, QueueSummary } from "./OverviewViews";
+import { TabsContent } from "@/components/ui/tabs";
+import { Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
 import {
   Brush,
   CartesianGrid,
@@ -17,10 +18,10 @@ import { pickChartPoint, useChartDetail } from "@/components/shared/ChartDetailP
 import { FreshnessBanner } from "@/components/shared/FreshnessBanner";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PendingStockAlertsCard } from "@/components/shared/PendingStockAlertsCard";
-import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Analytics } from "@/features/overview/Analytics";
 import { KpiCard } from "@/features/overview/KpiCards";
+import { Shortages, TransferHandoffs } from "./Shortages";
 import { NeedsAttentionStrip } from "@/features/overview/NeedsAttentionStrip";
 import { useBahrainToday } from "@/hooks/useBahrainToday";
 import type { LiveOverviewResponse } from "@/lib/api";
@@ -34,7 +35,6 @@ import {
   formatPct,
 } from "@/lib/format";
 import { TOKENS } from "@/lib/tokens";
-import { cn } from "@/lib/utils";
 import type { KpiSummary, Recommendation, TrendPoint } from "@stockflow/core";
 
 export interface WeekPoint {
@@ -238,6 +238,9 @@ export function AdminOverview({
         subtitle={`Today: ${today.displayDate} · Data through: ${formatDate(asOfDataDate)} · ${formatNumber(report.branches.length)} branches monitored`}
         actions={
           <FreshnessBanner
+            today={live?.meta.todayBahrain}
+            branches={report.branches}
+            reportingBranches={live?.meta.reportingBranches}
             staleDataDays={staleDataDays}
             isRefreshing={isRefreshing}
             onRefresh={onRefresh}
@@ -245,114 +248,87 @@ export function AdminOverview({
         }
       />
 
-      {/* Hero Panel */}
-      <section className="hero-surface flex flex-col justify-between gap-4 rounded-2xl border border-border p-6 shadow-card lg:flex-row lg:items-center">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="ok">Live queue</Badge>
-            <span className="text-xs font-medium text-muted-foreground">
-              Data through {formatDate(asOfDataDate)}
-            </span>
-          </div>
-          <h2 className="text-lg font-semibold tracking-tight text-foreground sm:text-xl">
-            {pendingCount > 0
-              ? `${formatNumber(pendingCount)} ranked actions worth ${formatMoney(pendingGain)} in estimated gain`
-              : "All pending recommendations reviewed"}
-          </h2>
-        </div>
+      <OverviewViews>
+        <TabsContent value="daily" className="space-y-5">
+          <QueueSummary count={pendingCount} gain={pendingGain} />
+          <TransferHandoffs items={live?.handoffs} />
 
-        <div className="shrink-0">
-          <span className="hero-cta-glow inline-block rounded-xl">
-            <Link
-              to="/queue"
-              className={cn(
-                buttonVariants({ variant: "primary", size: "lg" }),
-                "rounded-xl px-5 font-semibold",
-              )}
-            >
-              Review {formatNumber(pendingCount)} actions
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </Link>
-          </span>
-        </div>
-      </section>
+          <Shortages items={live?.shortages} />
+          <NeedsAttentionStrip
+            report={report}
+            recommendations={recommendations}
+            isLoading={recommendationsLoading}
+            error={recommendationsError}
+            onRetry={onRetryRecommendations}
+          />
 
-      {/* 3 Distinct Network KPI Cards */}
-      <section className="grid gap-5 sm:grid-cols-3">
-        <KpiCard
-          label="Stockout rate"
-          value={formatPct(stockoutRateValue)}
-          note="Share of recent selling days with demand and an empty shelf."
-          formula="Stockout branch-SKU days ÷ (branches × SKUs × 28)"
-          icon={TriangleAlert}
-          tone="risk"
-          series={stockoutSparkline}
-          deltaOverride={stockoutDeltaOverride}
-          money={false}
-          invertDelta
-        />
-        <KpiCard
-          label="Overstock value"
-          value={formatMoney(overstockValue)}
-          note={`Includes ${formatMoney(deadStockValue)} dead stock (<1 unit/wk)`}
-          formula="Stock above the 30-day sending branch floor × unit cost. Dead stock is the portion selling under one unit per week."
-          icon={Boxes}
-          tone="warn"
-          footerLabel="Surplus above 30-day sending branch floor"
-        />
-        <KpiCard
-          label="Sales at risk"
-          value={formatMoney(salesAtRisk)}
-          note="Shelf revenue a short branch may miss before next delivery."
-          formula="Expected lost units × retail price for positions below their reorder level."
-          icon={CircleDollarSign}
-          tone="info"
-          footerLabel="Positions below reorder level"
-        />
-      </section>
+          <PendingStockAlertsCard
+            scope={selectedLocation ? "branch" : "network"}
+            branchId={selectedLocation}
+          />
 
-      {/* Needs Attention Today Strip */}
-      <NeedsAttentionStrip
-        report={report}
-        recommendations={recommendations}
-        isLoading={recommendationsLoading}
-        error={recommendationsError}
-        onRetry={onRetryRecommendations}
-      />
+        </TabsContent>
+        <TabsContent value="reports" className="space-y-5">
+          <section className="grid gap-5 sm:grid-cols-3">
+            <KpiCard
+              label="Stockout rate"
+              value={formatPct(stockoutRateValue)}
+              note="Share of recent selling days with demand and an empty shelf."
+              formula="Stockout branch-SKU days ÷ (branches × SKUs × 28)"
+              icon={TriangleAlert}
+              tone="risk"
+              series={stockoutSparkline}
+              deltaOverride={stockoutDeltaOverride}
+              money={false}
+              invertDelta
+            />
+            <KpiCard
+              label="Overstock value"
+              value={formatMoney(overstockValue)}
+              note={`Includes ${formatMoney(deadStockValue)} dead stock (<1 unit/wk)`}
+              formula="Stock above the 30-day sending branch floor × unit cost. Dead stock is the portion selling under one unit per week."
+              icon={Boxes}
+              tone="warn"
+              footerLabel="Surplus above 30-day sending branch floor"
+            />
+            <KpiCard
+              label="Sales at risk"
+              value={formatMoney(salesAtRisk)}
+              note="Shelf revenue a short branch may miss before next delivery."
+              formula="Expected lost units × retail price for positions below their reorder level."
+              icon={CircleDollarSign}
+              tone="info"
+              footerLabel="Positions below reorder level"
+            />
+          </section>
 
-      {/* Pending Staff Stock Alerts (scoped to selectedLocation when chosen) */}
-      <PendingStockAlertsCard
-        scope={selectedLocation ? "branch" : "network"}
-        branchId={selectedLocation}
-      />
+          <Analytics
+            report={report}
+            rows={recommendations}
+            selectedLocation={selectedLocation}
+            recommendationsLoading={recommendationsLoading}
+            recommendationsError={recommendationsError}
+            onRetryRecommendations={onRetryRecommendations}
+          />
 
-      {/* Full Network Heatmap & Analytics */}
-      <Analytics
-        report={report}
-        rows={recommendations}
-        selectedLocation={selectedLocation}
-        recommendationsLoading={recommendationsLoading}
-        recommendationsError={recommendationsError}
-        onRetryRecommendations={onRetryRecommendations}
-      />
-
-      {/* 90-Day Network Trend Charts */}
-      <section className="grid gap-6 lg:grid-cols-2">
-        <ChartCard
-          title="Stockout rate trend"
-          data={weeks}
-          dataKey="stockoutRate"
-          color={TOKENS.chart.stockoutRate}
-          kind="rate"
-        />
-        <ChartCard
-          title="Inventory value trend"
-          data={weeks}
-          dataKey="inventoryValue"
-          color={TOKENS.chart.inventoryValue}
-          kind="money"
-        />
-      </section>
+          <section className="grid gap-6 lg:grid-cols-2">
+            <ChartCard
+              title="Stockout rate trend"
+              data={weeks}
+              dataKey="stockoutRate"
+              color={TOKENS.chart.stockoutRate}
+              kind="rate"
+            />
+            <ChartCard
+              title="Inventory value trend"
+              data={weeks}
+              dataKey="inventoryValue"
+              color={TOKENS.chart.inventoryValue}
+              kind="money"
+            />
+          </section>
+        </TabsContent>
+      </OverviewViews>
     </div>
   );
 }

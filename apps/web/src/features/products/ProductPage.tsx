@@ -7,7 +7,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useSearchParams } from "react-router-dom";
 import {
   Bar,
   CartesianGrid,
@@ -59,12 +59,34 @@ import { cn } from "@/lib/utils";
 const STATUS_ORDER = { AT_RISK: 0, OVERSTOCK: 1, HEALTHY: 2, NEW: 3 } as const;
 
 export function ProductPage() {
+  const { user } = useAuth();
+  return user?.role === "staff" ? <StoreProductDetail /> : <FinancialProductDetail />;
+}
+
+function StoreProductDetail() {
+  const { sku = "" } = useParams();
+  const query = useQuery({ queryKey: ["store-product", sku], queryFn: () => api.storeProduct(sku) });
+  if (query.isPending) return <LoadingBlock />;
+  if (query.isError) return <ErrorBlock message={query.error.message} onRetry={() => void query.refetch()} />;
+  return <div className="space-y-4">
+    <PageHeader title={query.data.product.name} subtitle={sku} />
+    {query.data.positions.map((position) => <Card key={position.branch.id}><CardContent>
+      <h2>{position.branch.name}</h2>
+      <p>{formatNumber(position.onHand)} units available · {formatCover(position.coverDays)} cover</p>
+      <StockDeltaBadges inTransit={position.inTransit} reserved={position.reserved} />
+    </CardContent></Card>)}
+    <Link to="/">Back to store inventory</Link>
+  </div>;
+}
+
+function FinancialProductDetail() {
   const { sku } = useParams();
   const product = useQuery({
     queryKey: queryKeys.product(sku ?? ""),
     queryFn: () => api.product(sku ?? ""),
     enabled: Boolean(sku),
   });
+  const [searchParams] = useSearchParams();
   const [picked, setPicked] = useState<string | null>(null);
 
   if (!sku) return <EmptyBlock title="Missing SKU" body="Open a product from the queue." />;
@@ -79,6 +101,7 @@ export function ProductPage() {
   );
   const selectedId =
     picked ??
+    positions.find((item) => item.branch.id === searchParams.get("branch"))?.branch.id ??
     positions.find((position) => position.recommendation)?.branch.id ??
     positions[0]?.branch.id ??
     "";
@@ -261,18 +284,17 @@ function Logic({
   }));
 
   const horizonDays = Math.max(21, position.leadTimeDays * 2);
-  const startAvailable = Math.max(0, position.onHand - (position.reserved ?? 0));
+  const startAvailable = position.onHand;
   const inTransit = position.inTransit ?? 0;
   const velocity = Math.max(0, position.velocity);
-  const rec = position.recommendation;
+  const rec = position.recommendation?.status === "PENDING" ? position.recommendation : null;
   const recArrivalDay = rec
     ? rec.action === "REORDER"
       ? position.leadTimeDays
-      : rec.action === "TRANSFER"
-        ? Math.min(2, horizonDays)
-        : 0
+      : 0
     : null;
-  const recQty = rec && rec.action !== "MARKDOWN" ? rec.quantity : 0;
+  const sendsStock = rec?.action === "TRANSFER" && rec.donorBranchId === position.branch.id;
+  const recQty = rec && rec.action !== "MARKDOWN" ? rec.quantity * (sendsStock ? -1 : 1) : 0;
   const planVelocity = rec?.action === "MARKDOWN" ? velocity * 1.5 : velocity;
   const stockoutDay =
     velocity > 0 && startAvailable <= velocity * horizonDays
@@ -340,7 +362,7 @@ function Logic({
           </p>
 
           <dl className="grid grid-cols-2 gap-2.5 rounded-xl border border-border bg-secondary/30 p-3">
-            <Mini label="On hand" value={`${formatNumber(position.onHand)} units`} />
+            <Mini label="Available now" value={`${formatNumber(position.onHand)} units`} />
             <Mini label="In transit" value={`${formatNumber(position.inTransit ?? 0)} units`} />
             <Mini label="Reserved" value={`${formatNumber(position.reserved ?? 0)} units`} />
             <Mini label="Daily demand" value={`${formatNumber(position.velocity)} / day`} />
@@ -394,7 +416,7 @@ function Logic({
         <ChartCard
           detailId="stockProjection"
           title={LABELS.stockProjection.label}
-          subtitle={`Forward ${formatNumber(horizonDays)}-day horizon at ${formatNumber(velocity)}/day velocity · lead time ${formatNumber(position.leadTimeDays)}d shaded`}
+          subtitle={`Assumes committed inbound arrives tomorrow · ${formatNumber(horizonDays)}-day projection at ${formatNumber(velocity)}/day velocity · lead time ${formatNumber(position.leadTimeDays)}d shaded`}
           helpKey="stockProjection"
           heightClass="h-64"
           isEmpty={projectionRows.length === 0}
@@ -502,8 +524,8 @@ function Logic({
                     strokeDasharray="3 3"
                     label={{
                       value:
-                        recQty > 0
-                          ? `${actionLabel(rec.action)} +${formatNumber(recQty)}`
+                        recQty !== 0
+                          ? `${actionLabel(rec.action)} ${recQty > 0 ? "+" : ""}${formatNumber(recQty)}`
                           : actionLabel(rec.action),
                       position: "top",
                       fill: TOKENS.chart.healthy,

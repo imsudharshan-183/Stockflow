@@ -273,7 +273,7 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
   });
 
   it("enforces sales:enter permission and branch scope on POST /api/sales-entries", async () => {
-    const staffToken = tokenFor(authedApp, SEED_USERS.staffManama); // BR-001 only, no sales:enter
+    const staffToken = tokenFor(authedApp, SEED_USERS.staffManama); // BR-001 only
     const mgrToken = tokenFor(authedApp, SEED_USERS.managerManama); // BR-001, BR-002
 
     const staffAttempt = await authedApp.inject({
@@ -282,7 +282,7 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
       headers: bearer(staffToken),
       payload: { ...valid, branchId: "BR-001" },
     });
-    expect(staffAttempt.statusCode).toBe(403);
+    expect(staffAttempt.statusCode).toBe(201);
 
     const mgrOos = await authedApp.inject({
       method: "POST",
@@ -342,13 +342,13 @@ describe("POST /api/sales-entries & /import auth and branch scoping (AUTH_ENABLE
     const mgrToken = tokenFor(authedApp, SEED_USERS.managerManama);
     const staffToken = tokenFor(authedApp, SEED_USERS.staffManama);
 
-    // Staff blocked on GET & template
+    // Staff can read entries in their assigned branch
     const staffGet = await authedApp.inject({
       method: "GET",
       url: "/api/sales-entries",
       headers: bearer(staffToken),
     });
-    expect(staffGet.statusCode).toBe(403);
+    expect(staffGet.statusCode).toBe(200);
 
     const tplRes = await authedApp.inject({
       method: "GET",
