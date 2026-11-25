@@ -1,9 +1,10 @@
 import { Check, ChevronDown, ChevronRight, Lock, MapPin, Search } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { NavLink } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatMoney, formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -38,25 +39,7 @@ export function LocationSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const currentItem = useMemo(
     () => locations.find((l) => l.branch.id === selectedLocation) ?? null,
@@ -106,32 +89,41 @@ export function LocationSwitcher({
       : "All assigned";
 
   return (
-    <div ref={containerRef} className="relative px-2.5 pt-3">
-      <Button
-        type="button"
-        variant="secondary"
-        size="sm"
-        onClick={() => {
-          setOpen((prev) => !prev);
-          setSearch("");
+    <div className="px-2.5 pt-3">
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (next) setSearch("");
         }}
-        aria-expanded={open}
-        aria-haspopup="listbox"
-        aria-label="Switch location scope"
-        className="h-9 w-full justify-between rounded-xl border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-row-hover"
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <MapPin className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
-          <span className="truncate">{triggerLabel}</span>
-        </span>
-        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-      </Button>
+        <PopoverTrigger
+          aria-haspopup="listbox"
+          aria-label="Switch location scope"
+          render={
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-9 w-full justify-between rounded-xl border border-border bg-background px-2.5 text-xs font-medium text-foreground hover:bg-row-hover"
+            />
+          }
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <MapPin className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+            <span className="truncate">{triggerLabel}</span>
+          </span>
+          <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </PopoverTrigger>
 
-      {open ? (
-        <div
+        <PopoverContent
+          side="bottom"
+          align="start"
+          sideOffset={6}
           role="listbox"
           aria-label="Locations"
-          className="absolute right-2.5 left-2.5 z-50 mt-1.5 max-h-80 overflow-hidden rounded-xl border border-border bg-card shadow-pop flex flex-col"
+          initialFocus={searchInputRef}
+          className="flex max-h-[min(20rem,var(--available-height))] w-[var(--anchor-width)] min-w-[220px] max-w-[calc(100vw-1rem)] flex-col overflow-hidden p-0"
         >
           <div className="border-b border-border p-2">
             <div className="relative">
@@ -140,7 +132,7 @@ export function LocationSwitcher({
                 aria-hidden="true"
               />
               <Input
-                autoFocus
+                ref={searchInputRef}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Filter locations..."
@@ -202,8 +194,8 @@ export function LocationSwitcher({
               </div>
             ))}
           </div>
-        </div>
-      ) : null}
+        </PopoverContent>
+      </Popover>
     </div>
   );
 }

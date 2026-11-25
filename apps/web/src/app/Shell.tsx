@@ -17,7 +17,7 @@ import {
   X,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import { LocationSwitcher, SidebarLocationsList } from "@/app/LocationSidebarParts";
 import { ModeToggle } from "@/components/shared/ModeToggle";
@@ -25,6 +25,7 @@ import { CommandPalette } from "@/components/shared/CommandPalette";
 import { GlossaryDialog } from "@/components/shared/GlossaryDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAuth } from "@/features/auth/AuthContext";
@@ -120,8 +121,6 @@ export function Shell() {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const userMenuRef = useRef<HTMLDivElement>(null);
-  const userTriggerRef = useRef<HTMLButtonElement>(null);
 
   const locationsQuery = useQuery({
     queryKey: queryKeys.locations,
@@ -177,27 +176,6 @@ export function Shell() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-
-  useEffect(() => {
-    if (!userMenuOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) {
-        setUserMenuOpen(false);
-      }
-    };
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setUserMenuOpen(false);
-        userTriggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [userMenuOpen]);
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -550,44 +528,48 @@ export function Shell() {
               <ModeToggle />
 
               {user ? (
-                <div ref={userMenuRef} className="relative flex min-w-0 shrink-0 items-center">
-                  <Button
-                    ref={userTriggerRef}
-                    variant="ghost"
-                    onClick={() => setUserMenuOpen((prev) => !prev)}
-                    aria-haspopup="menu"
-                    aria-expanded={userMenuOpen}
-                    aria-label={`Account menu for ${user.name}`}
-                    className="h-9 max-w-[260px] min-w-0 gap-2 rounded-full border border-border bg-card px-2 py-1 text-foreground shadow-xs hover:bg-row-hover min-[900px]:pr-2.5"
-                  >
-                    <span
-                      className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-text"
-                      aria-hidden="true"
+                <div className="flex min-w-0 shrink-0 items-center">
+                  <Popover open={userMenuOpen} onOpenChange={setUserMenuOpen}>
+                    <PopoverTrigger
+                      aria-haspopup="menu"
+                      aria-label={`Account menu for ${user.name}`}
+                      render={
+                        <Button
+                          variant="ghost"
+                          className="h-9 max-w-[260px] min-w-0 gap-2 rounded-full border border-border bg-card px-2 py-1 text-foreground shadow-xs hover:bg-row-hover min-[900px]:pr-2.5"
+                        />
+                      }
                     >
-                      {initialsOf(user.name)}
-                    </span>
-                    <span className="hidden min-w-0 items-center gap-1.5 min-[900px]:flex">
-                      <span className="max-w-[120px] truncate text-xs font-medium text-foreground">
-                        {user.name}
+                      <span
+                        className="flex size-6 shrink-0 items-center justify-center rounded-full bg-primary-soft text-xs font-semibold text-primary-text"
+                        aria-hidden="true"
+                      >
+                        {initialsOf(user.name)}
                       </span>
-                      <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
-                        {user.role}
-                      </Badge>
-                    </span>
-                    <ChevronDown
-                      className={cn(
-                        "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
-                        userMenuOpen ? "rotate-180" : "",
-                      )}
-                      aria-hidden="true"
-                    />
-                  </Button>
+                      <span className="hidden min-w-0 items-center gap-1.5 min-[900px]:flex">
+                        <span className="max-w-[120px] truncate text-xs font-medium text-foreground">
+                          {user.name}
+                        </span>
+                        <Badge tone={roleBadgeTone(user.role)} className="shrink-0">
+                          {user.role}
+                        </Badge>
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150",
+                          userMenuOpen ? "rotate-180" : "",
+                        )}
+                        aria-hidden="true"
+                      />
+                    </PopoverTrigger>
 
-                  {userMenuOpen ? (
-                    <div
+                    <PopoverContent
+                      side="bottom"
+                      align="end"
+                      sideOffset={8}
                       role="menu"
                       aria-label="User account details"
-                      className="absolute top-full right-0 z-50 mt-2 w-64 rounded-2xl border border-border bg-card p-3 shadow-pop"
+                      className="w-64 max-w-[calc(100vw-1rem)] rounded-2xl p-3"
                     >
                       <div className="space-y-1 border-b border-border pb-3">
                         <div className="flex items-center justify-between gap-2">
@@ -622,8 +604,8 @@ export function Shell() {
                           Sign out
                         </Button>
                       </div>
-                    </div>
-                  ) : null}
+                    </PopoverContent>
+                  </Popover>
                 </div>
               ) : null}
             </div>

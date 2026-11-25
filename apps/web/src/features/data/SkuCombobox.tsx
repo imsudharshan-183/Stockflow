@@ -1,5 +1,16 @@
 import { Check, ChevronDown, Search, X } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from "react";
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type RefObject,
+} from "react";
+import { createPortal } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { formatMoneyPrecise } from "@/lib/format";
@@ -31,6 +42,7 @@ export function SkuCombobox({
 }: SkuComboboxProps) {
   const listboxId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
+  const listboxRef = useRef<HTMLDivElement>(null);
   const internalRef = useRef<HTMLInputElement>(null);
   const resolvedRef = inputRef ?? internalRef;
 
@@ -42,10 +54,14 @@ export function SkuCombobox({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const [panelStyle, setPanelStyle] = useState<CSSProperties | null>(null);
 
   useEffect(() => {
     function handleOutsideClick(event: MouseEvent) {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      const target = event.target as Node;
+      const inContainer = containerRef.current?.contains(target) ?? false;
+      const inListbox = listboxRef.current?.contains(target) ?? false;
+      if (!inContainer && !inListbox) {
         setOpen(false);
         setQuery("");
       }
@@ -67,6 +83,52 @@ export function SkuCombobox({
       )
       .slice(0, 30);
   }, [products, query]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+
+    const GAP = 6;
+    const EDGE_PADDING = 8;
+    const MAX_HEIGHT = 256;
+    const MIN_WIDTH = 260;
+
+    const updatePosition = () => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+
+      if (rect.width > 0 && rect.height > 0 && (rect.bottom < 0 || rect.top > vh)) {
+        setOpen(false);
+        setQuery("");
+        return;
+      }
+
+      const spaceBelow = vh - rect.bottom - GAP - EDGE_PADDING;
+      const spaceAbove = rect.top - GAP - EDGE_PADDING;
+      const openUp = spaceBelow < 180 && spaceAbove > spaceBelow;
+      const maxHeight = Math.max(120, Math.min(MAX_HEIGHT, Math.floor(openUp ? spaceAbove : spaceBelow)));
+      const width = rect.width > 0 ? Math.min(Math.max(rect.width, MIN_WIDTH), vw - EDGE_PADDING * 2) : 280;
+      const left = Math.max(EDGE_PADDING, Math.min(rect.left, vw - width - EDGE_PADDING));
+
+      setPanelStyle({
+        top: openUp ? undefined : rect.bottom + GAP,
+        bottom: openUp ? vh - rect.top + GAP : undefined,
+        left,
+        width,
+        maxHeight,
+      });
+    };
+
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, filtered.length]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -146,6 +208,12 @@ export function SkuCombobox({
               setOpen(true);
             }
           }}
+          onClick={() => {
+            if (!disabled && !open) {
+              setQuery("");
+              setOpen(true);
+            }
+          }}
           onChange={(e) => {
             setQuery(e.target.value);
             if (!open) setOpen(true);
@@ -191,63 +259,68 @@ export function SkuCombobox({
         </div>
       </div>
 
-      {open ? (
-        <div
-          id={listboxId}
-          role="listbox"
-          aria-label="Matching products"
-          className="absolute z-40 mt-1.5 max-h-64 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg"
-        >
-          {filtered.length === 0 ? (
-            <div className="px-3 py-2.5 text-xs text-muted-foreground">
-              No matching SKUs found.
-            </div>
-          ) : (
-            filtered.map((product, index) => {
-              const isSelected = product.sku === value;
-              const isHighlighted = index === activeIndex;
-              return (
-                <Button
-                  key={product.sku}
-                  type="button"
-                  role="option"
-                  aria-selected={isSelected}
-                  variant="ghost"
-                  size="sm"
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    commitSelection(product);
-                  }}
-                  className={cn(
-                    "h-auto w-full justify-between rounded-lg px-2.5 py-2 text-left font-normal",
-                    isHighlighted && "bg-secondary/80",
-                    isSelected && "border border-primary/30 bg-primary/5",
-                  )}
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-xs font-semibold text-foreground">
-                        {product.sku}
-                      </span>
-                      <span className="truncate text-xs font-medium text-foreground">
-                        {product.name}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
-                      <span>{product.category}</span>
-                      <span>·</span>
-                      <span className="tabular-nums">{formatMoneyPrecise(product.price)}</span>
-                    </div>
-                  </div>
-                  {isSelected ? (
-                    <Check className="ml-2 size-3.5 shrink-0 text-primary" aria-hidden="true" />
-                  ) : null}
-                </Button>
-              );
-            })
-          )}
-        </div>
-      ) : null}
+      {open && typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={listboxRef}
+              id={listboxId}
+              role="listbox"
+              aria-label="Matching products"
+              style={panelStyle ?? undefined}
+              className="fixed z-[60] overflow-y-auto rounded-xl border border-border bg-popover p-1 text-popover-foreground shadow-pop dark:border-input"
+            >
+              {filtered.length === 0 ? (
+                <div className="px-3 py-2.5 text-xs text-muted-foreground">
+                  No matching SKUs found.
+                </div>
+              ) : (
+                filtered.map((product, index) => {
+                  const isSelected = product.sku === value;
+                  const isHighlighted = index === activeIndex;
+                  return (
+                    <Button
+                      key={product.sku}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      variant="ghost"
+                      size="sm"
+                      onMouseDown={(e) => {
+                        e.preventDefault();
+                        commitSelection(product);
+                      }}
+                      className={cn(
+                        "h-auto w-full justify-between rounded-lg px-2.5 py-2 text-left font-normal",
+                        isHighlighted && "bg-secondary/80",
+                        isSelected && "border border-primary/30 bg-primary/5",
+                      )}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            {product.sku}
+                          </span>
+                          <span className="truncate text-xs font-medium text-foreground">
+                            {product.name}
+                          </span>
+                        </div>
+                        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <span>{product.category}</span>
+                          <span>·</span>
+                          <span className="tabular-nums">{formatMoneyPrecise(product.price)}</span>
+                        </div>
+                      </div>
+                      {isSelected ? (
+                        <Check className="ml-2 size-3.5 shrink-0 text-primary" aria-hidden="true" />
+                      ) : null}
+                    </Button>
+                  );
+                })
+              )}
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
