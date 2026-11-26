@@ -12,6 +12,8 @@ coverage
 *.tsbuildinfo
 temp_snapshot/
 
-# Playwright
+# Local browser checks and generated reports
+/e2e/
+/playwright.config.ts
 playwright-report/
 test-results/

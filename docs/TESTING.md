@@ -14,8 +14,6 @@
 
 Run `pnpm --filter @stockflow/api exec vitest run src/__tests__/brief.test.ts src/__tests__/stockChat.test.ts` for role and branch isolation, grounded responses, and provider fallback. These tests use simulated provider responses.
 
-Run `pnpm exec playwright test e2e/stock-assistant.spec.ts` for the three signed-in browser journeys. They cover the welcome, morning brief, role-specific questions, reopening the chat, and links into store inventory and transfer orders.
-
 ## Check sales simulation
 
 From the repository root, run these suites for the seed, API, and catalog button respectively.

@@ -116,7 +116,6 @@ Estimated gains and simulated comparisons are planning figures. Realized savings
 | Command | Purpose |
 | --- | --- |
 | `pnpm test` | Run core, API, and web tests, including isolated MongoDB tests. |
-| `pnpm test:e2e` | Run Playwright browser checks. Install Chromium once with `pnpm exec playwright install chromium`. |
 | `pnpm lint` | Check code style and UI conventions. |
 | `pnpm typecheck` | Check TypeScript across the workspace. |
 | `pnpm build` | Run workspace builds and produce the web production bundle. |
