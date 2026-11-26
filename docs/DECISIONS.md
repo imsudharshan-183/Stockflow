@@ -6,6 +6,8 @@ The algorithm notes, modeling assumptions, and operational security summary live
 
 Branch managers and company admins open the action queue each morning to decide which stock moves need attention. Each row is a transfer, a reorder, or a markdown, with a net BHD benefit (`BD`) and a sentence that names the cover, the reorder point, the freight breakdown (for transfers), and the money. The network is 15 branches across Bahrain and about 500 SKUs. History is 120 synthetic days. Managers can inspect the inputs behind an estimate before approving a move.
 
+The [architecture explorer](../demo/) illustrates the morning plan, order approvals, and assistant lookups using local scenarios. In the running application the API enforces those decisions. The [daily simulation design](ADR.md#adr-018-advance-demo-sales-one-dataset-day-at-a-time) describes how demo sales enter the same planning pipeline as other sales entries.
+
 ## StockFlow assistant
 
 The signed-in assistant explains the product and its glossary, then answers business questions through a small set of read-only application lookups. Its base instructions define StockFlow terms and supported work. The model can classify a question or choose a supplied fact to highlight in a brief. The API constructs the displayed explanation, figures, and links from its scoped records. Unsupported requests return guidance.

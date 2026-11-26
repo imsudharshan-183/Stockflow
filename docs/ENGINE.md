@@ -8,6 +8,8 @@ For architectural trade-offs and security/ops decisions, see [docs/DECISIONS.md]
 
 ## 1. End-to-End Pipeline
 
+The diagram uses the original 120-day seed. A live dataset can contain later reporting dates. For the admin simulation, `simulateNextDay(dataset, targetDate)` starts each product and branch at the closing stock preceding the target date. It reuses the seed generator’s replenishment schedule and demand profile, with a random stream derived from the target date. Replaying a date against the same history gives the same sales, closing stock, and demand. Persistence and plan refresh belong to the API. [Generator](../packages/core/src/seed/generate.ts)
+
 ```
 Dataset (500 SKUs x 15 Bahrain branches x 120 daily buckets)
    │

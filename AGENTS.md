@@ -4,6 +4,8 @@
 StockFlow is a morning decision and replenishment order system for a 15-branch Bahrain retail network (~500 SKUs, 120-day synthetic history). It ranks transfers, reorders, and markdowns by net BHD benefit (`BD`), persists governed order transitions, and explains recommendations in language store teams use.
 
 ## Architecture Map
+- `demo/` contains the standalone architecture explorer for the morning plan, stock transfers, and assistant. Start it with `node demo/server.mjs`.
+- The admin sales simulation connects `packages/core/src/seed/generate.ts`, `apps/api/src/routes/catalog.ts`, and the Products Catalog. Keep the original seed fingerprint stable. The server owns the target date, Bahrain daily limit, and sample provenance.
 - `packages/core`: Pure TypeScript domain logic, shared utilities, and Zod contracts (no I/O, no `Date.now`, no DB drivers).
   - `src/engine/`: EWMA demand forecasting, safety stock, classification (`DEAD_VELOCITY_PER_DAY = 1/7`), greedy matching, Haversine freight & net benefit, `computeActionBenefitForQuantity`, `rankDonorCandidates`, `projectPosition`, backtest.
   - `src/report/`: DTOs, KPI rollups (`categoryRisk`, `deadStockValue <= cashReleasable`), branch/SKU drilldowns, plain-language reasons.
@@ -31,7 +33,7 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
 2. **Scoping after plan computation**: The morning plan loads/computes lazily (`ensureInitialized()` / `ensureFreshPlan()`) so `/api/health` never blocks. Non-admin branch filtering and KPI slicing run *after* full-network matching: transfers are visible to donor OR receiver branch scope; reorders/markdowns to target branch scope.
 3. **`dataVersion` vs `decisionVersion` & governed orders**:
    - Physical mutations (sales entries, CSV import, catalog edits/archive/restore, branch create/update/archive) bump `dataVersion`, recompute/persist `plan_cache`, clear overlays, and zero-mask archived branches while keeping historical drilldowns.
-   - Decision/order transitions (`SUGGESTED`, `OPEN_REQUEST`, `AWAITING_DONOR`, `COMMITTED`, `DECLINED`, `CANCELLED`, `RECEIVED`, `REOPEN`) NEVER bump `dataVersion` or rewrite `plan_cache`. Only `bumpDecisionVersion()` increments to bust `scopedKpiCache`.
+   - Order transitions update `decisionVersion` and invalidate `scopedKpiCache`. Keep `dataVersion` and `plan_cache` tied to physical data changes. In the order state machine, the `DECLINE` action produces `REJECTED`, and `REOPEN` is an action.
    - Intent states never mutate `committedDeltas`. Moving into `COMMITTED` reserves donor surplus + receiver `inTransit` and rejects over-allocation with `409 Conflict`; `RECEIVE` decrements only `inTransit` until the next `dataVersion` physical refresh. `engineSnapshot` is read-only; human edits (`approvedQty`, bounded by action rules and reason code) and `comment` go into immutable `OrderEvent` rows written atomically with the order.
    - Queue lifecycle (`pending`, `in_progress`, `decided`) computes read-time views from `APPROVED_ACTIVE_DAYS=3`, `REJECT_SNOOZE_DAYS=3`, `+/-50%` worsened auto-reopen, and the `24h` reopen window.
 4. **Role hierarchy & validation**: `admin > manager > staff`. Only admins manage users/lower roles, with strict email validation, >=8 char passwords, >=1 assigned branch for non-admins, and no self-demotion/self-deactivation/last-admin removal.
@@ -55,7 +57,7 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
 - `pnpm seed:mongo` / `pnpm seed:users` / `pnpm reset:decisions --yes` — Mongo seeding and decision reset
 
 ## Documentation Pointers
-- [docs/ADR.md](docs/ADR.md) — Architecture Decision Records (`ADR-001` through `ADR-017`)
+- [docs/ADR.md](docs/ADR.md) — Architecture Decision Records (`ADR-001` through `ADR-018`)
 - [docs/ENGINE.md](docs/ENGINE.md) — Engine formulas, constants table, worked example, and extension seams
 - [docs/DECISIONS.md](docs/DECISIONS.md) — Assumptions, known limitations, scaling path, and security summary
 - [docs/FRONTEND.md](docs/FRONTEND.md) — Design system, UI guardrails, route table, UX principles

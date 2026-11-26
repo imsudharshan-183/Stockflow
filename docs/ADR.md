@@ -23,6 +23,7 @@ This document records the numbered architectural decisions (`ADR-001`+), trade-o
 | [ADR-015](#adr-015-structured-stock-alert-resolution-atomic-order-escalation-and-live-adjustment-overlay) | Alert Resolution & Live Adjustment Overlay | Replace binary alert decisions with 4 structured resolutions, atomic `ALERT_ESCALATION` order creation, and non-mutating `LOGGED_ADJUSTMENT` overlays. |
 | [ADR-016](#adr-016-unified-replenishmentorder-pipeline-two-party-cross-cluster-handshake-and-lazy-materialization) | Unified Order Pipeline & Two-Party Handshake | Replace disconnected decision/request/alert queues with `ReplenishmentOrder`, immutable `OrderEvent`s, lazy materialization, and `RECEIVED` `inTransit` clearing. |
 | [ADR-017](#adr-017-read-only-stock-assistant) | Read-only stock assistant | Use authenticated store lookups and server-built answers. |
+| [ADR-018](#adr-018-advance-demo-sales-one-dataset-day-at-a-time) | Daily sales simulation | Reuse seed logic and the sales-entry pipeline for an optional admin tool. |
 
 ---
 
@@ -356,3 +357,9 @@ Prior to the Stage B–E redesign, three operational workflows lived in separate
 The assistant uses the signed-in employee’s role and selected store to answer stock questions. The API runs a supported lookup against the same scoped data used by the application. The provider may interpret the question or choose an existing metric to highlight. The API supplies every displayed figure, explanation and destination link.
 
 Provider failures fall back to supported record lookups. A question can still be interpreted incorrectly. Answers show the lookup result and its date so employees can check the underlying records before acting.
+
+## ADR-018 Advance demo sales one dataset day at a time
+
+Two dates matter when an admin runs the simulation. The dataset’s last date determines which day to generate. The Bahrain calendar date determines when another run is allowed. Using the date as the generator seed makes a batch reproducible while preserving the original 120-day baseline.
+
+The catalog route uses the existing sales-entry upsert for each eligible branch and SKU. The first sample entry marks the run. Once the rows are saved, the API applies them to the dataset, recomputes once per distinct SKU, commits one plan version, and records the completed import. If the batch stops early, a later eligible request can finish the same date and preserve existing entries. The API reports newly inserted rows, so a recovery can report fewer than 7,500. [Route and recovery logic](../apps/api/src/routes/catalog.ts)

@@ -1,5 +1,11 @@
 # StockFlow Demo Walkthrough
 
+## Walk through the architecture
+
+Run `node demo/server.mjs` from the repository root and open [the local explorer](http://127.0.0.1:4178/). Start with **Morning plan** to see how a shortage becomes a recommendation. In **Stock transfer**, follow who can release stock and who confirms delivery. In **AI assistant**, follow a question through its role and branch checks. Choose a scenario and change a decision to inspect its outcome and code location.
+
+The explorer uses local examples. For a demo with editable store data, start the web app and API using the [README setup](../README.md#run-the-local-demo).
+
 ## Seeded Accounts
 - **Admin** (`admin@stockflow.dev`): Full network visibility across all 15 branches, catalog management, user management, decisions, and daily data entry.
 - **Manager - Manama** (`manager.manama@stockflow.dev`): Scoped to `BR-001` (`Manama - CBD`) and `BR-002` (`Manama - Juffair`) (decisions, audit, data entry, and scoped KPIs).
@@ -9,11 +15,13 @@
 
 Open the robot button after signing in. As admin, ask “How many products are over BD 200?” and then “List them”. As a manager, select a store and ask “Show my stock forecast”. As staff, choose “How do I flag a stock issue?” to find the steps on the inventory screen. Open **Show my brief** to see which records support the morning summary.
 
-## Before Each Demo
-Reset prior recommendation decisions and decision audit entries without touching the catalog, sales entries, users, refresh tokens, or `dataVersion`:
-```bash
-pnpm reset:decisions --yes
-```
+## Advance the dataset for a demo
+
+1. Enable `AUTH_ENABLED=true` and `ALLOW_SYNTHETIC_DATA=true` on the demo API and restart it.
+2. Sign in as admin, open **Products Catalog → Demo tools**, and select **Simulate today's sales**. The result shows the date, branch count, and new row count.
+3. On the original seed, expect November 12, 2026, 15 branches, and 7,500 rows. Open **Daily entries** to inspect the new date and **Action queue** to review the refreshed plan.
+
+The next run becomes available on the next Bahrain calendar day. For a demo of **stores reported today**, submit a real daily entry for today in the demo app. Generated rows are marked as sample data.
 
 ## 5-Minute Walkthrough
 1. **Admin Overview & Plain Language (`/`)**:
@@ -29,4 +37,4 @@ pnpm reset:decisions --yes
    - Inspect a transfer's Bahrain distance-aware freight breakdown (`fixed + distance + per-unit`) in the recommendation drawer, approve it, confirm live **Reserved** (donor) / **In transit** (receiver) badges update on `/branches/:id` and `/products/:sku`, and verify the immutable audit trail on `/audit`.
 5. **Role Switching & Staff Escalations**:
    - Sign in as `staff.manama@stockflow.dev` (locked to `BR-001`, non-financial store inventory), click **Flag stock** on any non-`NEW` SKU row, choose an alert category (`Critical low`, `Damaged / shrinkage`, or `Count mismatch`), enter a note, and submit.
-   - Sign in as `manager.manama@stockflow.dev` (scoped to `BR-001`/`BR-002`, out-of-scope `/branches/BR-005` blocked) and approve or reject the escalated item (with its category pill) under **Pending branch stock alerts** on `/`, then switch back to staff to confirm **Recent Branch Stock Alerts** shows the resolved status and manager name.
+   - Sign in as `manager.manama@stockflow.dev` and open **Pending branch stock alerts** on the overview. Choose **Resolve** and record the appropriate action, such as **Request Replenishment** or **Log Adjustment**. Switch back to the reporting store to see the resolution.

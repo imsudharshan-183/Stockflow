@@ -16,6 +16,18 @@ Run `pnpm --filter @stockflow/api exec vitest run src/__tests__/brief.test.ts sr
 
 Run `pnpm exec playwright test e2e/stock-assistant.spec.ts` for the three signed-in browser journeys. They cover the welcome, morning brief, role-specific questions, reopening the chat, and links into store inventory and transfer orders.
 
+## Check sales simulation
+
+From the repository root, run these suites for the seed, API, and catalog button respectively.
+
+```sh
+pnpm --filter @stockflow/core exec vitest run src/seed/seed.test.ts
+pnpm --filter @stockflow/api exec vitest run src/__tests__/simulateNextDay.test.ts
+pnpm --filter @stockflow/web exec vitest run src/__tests__/SimulateSales.test.tsx
+```
+
+The seed test fingerprints the full original dataset and checks date-based replay. API tests cover permissions, the feature flag, the Bahrain midnight boundary, batch recompute counts, and interrupted runs with a store entry already present. The UI tests cover visibility, pending state, and the displayed counts.
+
 ## Test Suites
 - **`packages/core`**:
   - `src/engine/engine.test.ts` (9): EWMA velocity, safety stock, classification, greedy matching, net benefit, backtest.
@@ -26,7 +38,7 @@ Run `pnpm exec playwright test e2e/stock-assistant.spec.ts` for the three signed
   - `src/orders.test.ts` (4): Finite-state machine `canTransition()` guards and permission/override checks.
   - `src/schemas/auth.test.ts` (4): RBAC `can`, `scopeBranches`, `canManageRole` unit checks.
   - `src/schemas/authTruthTable.test.ts` (3): Exhaustive truth tables for `can`, `canManageRole`, and `scopeBranches`.
-  - `src/seed/seed.test.ts` (7): Deterministic dataset generation and backtest replay invariants.
+  - `src/seed/seed.test.ts` covers deterministic dataset generation, daily simulation, and backtest replay.
 - **`apps/api`**:
   - `src/__tests__/dbRoundTripsAndLatency.test.ts` *(dual-repo, `MongoMemoryReplSet`)*: DB round-trip budgets, `dataVersion` invariance on decisions, concurrent overlapping batches (`E11000`), rollback safety, `< 300 ms` latency.
   - `src/__tests__/planConsistency.test.ts` *(dual-repo)*: Serverless consistency across sales entries, catalog archive, `plan_cache` hits, concurrent rebuild dedup.

@@ -4,6 +4,16 @@ StockFlow helps retail teams decide what to do with stock each morning. It uses 
 
 The demo covers **15 Bahrain branches, 500 products, and 120 days of synthetic history**. Daily reporting follows Bahrain time (UTC+3).
 
+## Explore the architecture
+
+For a walkthrough of the **morning plan**, **stock transfer**, or **AI assistant**, run the following from the repository root and open [the architecture explorer](http://127.0.0.1:4178/).
+
+```sh
+node demo/server.mjs
+```
+
+Choose a scenario, then step through its decisions. Each step shows the actor, input, outcome, and code location. The explorer plays illustrative scenarios locally and runs independently of the app, MongoDB, and AI providers. [Explorer source](demo/)
+
 ## Who uses it?
 
 | Role | Where they start | What they can do |
@@ -44,15 +54,21 @@ Use **Node.js 24.15 or later in the 24.x series** and **pnpm 12**. From the repo
 
 The in-memory demo supplies its own dataset and accounts. Restarting the API resets your changes. To check which storage mode is active, open [API health](http://localhost:3001/api/health).
 
+### Add a day of sample sales
+
+To review a fresh plan in the running app, set `ALLOW_SYNTHETIC_DATA=true` alongside `AUTH_ENABLED=true` in the API environment and restart the API. Sign in as an admin and choose **Products Catalog → Demo tools → Simulate today's sales**. The result shows the dataset date, participating branches, and number of new sales rows.
+
+A fresh run advances the dataset by one day. For example, the original November 11 seed advances to November 12 even if the demo runs weeks later. The API allows one run per Bahrain calendar day. Sample rows feed the plan, while the reported-sales lookup counts store submissions. [Demo walkthrough](docs/DEMO.md)
+
 ## Morning briefs and transfer explanations
 
 Select **Show my brief** on the daily dashboard or store inventory, or **Explain this transfer** in a transfer order. With sign-in enabled, StockFlow can produce a summary directly from the user's permitted records. Staff briefs cover shelf checks, receipts, and flags for their store.
 
-The floating robot button opens **StockFlow**, the in-app assistant. It starts with “Hi, I’m StockFlow. What would you like me to do today?” and shows suggested questions for the signed-in role. Admins can ask for network-wide reports and catalog insights. Managers can ask about assigned stores, forecasts, product risk, and incoming work. Staff get store-level operational help, product stock checks, incoming deliveries, and instructions for flagging stock. Ask in plain language, for example “How many products are over BD 200?”, “Show my stock forecast”, or “What does stock cover mean?”. Follow-ups such as “List them” use the previous lookup.
+Open the floating robot button to ask a question in your role. An admin can ask “How many products are over BD 200?” and follow up with “List them.” A manager can ask for the stock forecast at an assigned store. Staff can check incoming deliveries or ask how to flag a shelf issue.
 
-The assistant explains StockFlow terms and workflows, and redirects questions outside the application. It answers from fixed, read-only lookups. The API applies role and branch access before returning data. Admin scope is the active network, manager scope is assigned branches, and staff scope is their assigned or selected branch. Staff do not receive financial metrics or network reports. The model receives the question, role, authorized store names, and, for briefs, the scoped metrics it can highlight. The API builds the answer text and figures from stock records and predefined guidance. It never receives database credentials or arbitrary MongoDB query access. The chat supports follow-ups and keeps recent turns in this browser session while navigating the app.
+The API chooses from supported read-only lookups and checks the signed-in employee’s branch access. When a provider helps interpret a question, it receives the question, previous lookup context if present, role, and authorized store names. For a brief, it can choose a highlight from scoped metric IDs and values. StockFlow builds the figures and destination links from its records.
 
-Set `GEMINI_API_KEY` in the ignored repository-root `.env` for Google AI Studio, or `OPENAI_API_KEY` for OpenAI. Gemini takes precedence when both are present. The optional model overrides are `GEMINI_MODEL` and `OPENAI_MODEL`. Restart the API after configuration changes. For deployment, set these variables only on the API service. With a configured provider, chat sends your question, lookup context, and scoped measurements to that provider. Without a working provider, supported questions use built-in lookups. Database queries, access checks, quantities, and navigation targets are controlled by the server.
+For provider assistance, set `GEMINI_API_KEY` or `OPENAI_API_KEY` on the API and restart it. Gemini takes precedence when both are configured. Optional model settings are `GEMINI_MODEL` and `OPENAI_MODEL`. For local development, keep keys in the ignored root `.env`. Supported lookups and briefs also work with the built-in fallback.
 
 ## Use MongoDB for persistence
 
@@ -68,6 +84,16 @@ pnpm dev
 The seed creates the dataset, initial plan, and demo users. Subsequent starts only need `pnpm dev`. Check [database health](http://localhost:3001/api/health/db) to verify connectivity.
 
 ## How stock data becomes a decision
+
+```mermaid
+flowchart LR
+    Web["Store team · React app"] --> API["Fastify API · role and branch checks"]
+    API <--> Store["In-memory or MongoDB storage"]
+    API --> Core["TypeScript engine · network-wide plan"]
+    Core --> API
+    API --> Web
+    API -. "Optional chat intent or brief focus" .-> Provider["Gemini or OpenAI"]
+```
 
 | Stage | What happens |
 | --- | --- |
@@ -85,6 +111,7 @@ Estimated gains and simulated comparisons are planning figures. Realized savings
 | [`apps/web`](apps/web) | React, Vite, and Tailwind CSS. Role-specific screens for daily work, store inventory, and reporting. |
 | [`apps/api`](apps/api) | Node.js and Fastify. Authentication, branch permissions, import validation, order transitions, and memory or MongoDB storage through repository interfaces. |
 | [`packages/core`](packages/core) | Pure TypeScript forecasting, transfer matching, order rules, shared Zod schemas, and deterministic demo data. |
+| [`demo`](demo) | Standalone architecture explorer with three interactive walkthroughs. |
 
 | Command | Purpose |
 | --- | --- |
@@ -103,3 +130,4 @@ For hosting, the repository includes a [Vercel configuration](vercel.json) that 
 - [API reference](docs/API.md) — endpoints and role permissions.
 - [Architecture decisions](docs/ADR.md) and [known limitations](docs/DECISIONS.md) — design choices and trade-offs.
 - [Frontend guide](docs/FRONTEND.md) — routes, shared components, and UI conventions.
+- [Testing guide](docs/TESTING.md) — workspace checks and targeted regression suites.

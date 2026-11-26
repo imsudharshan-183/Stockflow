@@ -44,6 +44,10 @@
 | `/audit` | `AuditPage` (`OrderEventRow`) | `admin`, `manager` | Searchable order & decision audit trail showing actor badges, quantity edits, and disposition codes; blocked for `staff` |
 | `/users` | `UsersPage` (`UserRoleAndBranchesFields`) | `admin` | Create, edit role/branches, reset password, and deactivate users with browser autofill isolation and email/password validation |
 
+## Demo tools
+
+On `/products`, the admin catalog reads the optional `allowSyntheticData` capability from `GET /api/health`. When enabled, **Simulate today's sales** submits an empty POST, disables the button while pending, and reports the server’s date and counts. On success it invalidates operational queries so the queue, inventory, and reports can refresh. The standalone [architecture explorer](../demo/) runs on port 4178 and has its own navigation.
+
 ## UX Principles
 - **Plain language first**: Surface terms used by store teams and contextual help popovers for inventory metrics.
 - **Role-appropriate landing**: Admins see network `BD` risk and cash-release totals; managers see their branch cluster and escalated alerts; staff record sales and shelf counts, flag stock issues and receive deliveries in their assigned store.
