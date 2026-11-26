@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <link rel="icon" href="data:,">
+  <title>System architecture · StockFlow</title>
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="diagram.js"></script>
+</head>
+<body>
+  <header class="mast"><div class="mast-inner">
+    <div class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#493ae3"/><path d="m7 12 9-5 9 5-9 5z M7 17l9 5 9-5 M7 22l9 5 9-5" fill="none" stroke="white" stroke-width="2" stroke-linejoin="round"/></svg>StockFlow</div>
+    <span class="divider"></span><span class="mast-label">Architecture explorer</span><span class="local"><i></i>Local demo</span>
+  </div></header>
+  <main>
+    <h1>System architecture<span>.</span></h1>
+    <p class="intro">Follow the flow from top to bottom. Choose Yes or No at a decision to see how the next action changes.</p>
+    <section class="surface" aria-label="Interactive architecture walkthrough">
+      <div class="toolbar"><div class="choices" role="group" aria-label="Choose a walkthrough">
+        <button data-flow="plan" aria-pressed="true">Morning plan</button>
+        <button data-flow="order" aria-pressed="false">Stock transfer</button>
+        <button data-flow="ai" aria-pressed="false">AI assistant</button>
+      </div><label class="scenario">Scenario <select id="scenario"></select></label></div>
+      <div class="map-heading"><h2 id="map-heading"></h2><div class="legend"><i></i>Active node</div></div>
+      <div class="explorer">
+      <div class="canvas" tabindex="0" role="region" aria-label="Vertical decision diagram"><div id="map"></div></div>
+      <article class="detail" aria-live="polite" aria-atomic="true">
+        <div class="step-line"><span id="count"></span><span class="hairline"></span><span id="actor"></span></div>
+        <h2 id="action" tabindex="-1"></h2><p id="explanation"></p>
+        <dl class="evidence"><div><dt>Input</dt><dd id="input"></dd></div><div><dt id="result-label">Outcome</dt><dd id="outcome"></dd></div></dl>
+        <div id="decision-choices" class="inspector-choices" role="group" aria-label="Choose the decision outcome"></div>
+        <div class="source"><span>Code location</span><code id="source"></code></div>
+      </article>
+      </div>
+      <div class="transport"><button id="play" class="primary"></button><label class="jump">Jump to step <select id="stage"></select></label>
+        <div class="paging"><button id="back">Back</button><button id="next">Next step</button></div>
+      </div>
+    </section>
+    <footer><span>StockFlow <b>/</b> Architecture explorer</span><span>Illustrative scenarios · Local playback</span></footer>
+  </main>
+</body>
+</html>
