@@ -52,6 +52,7 @@ export function registerStockRoutes(
   // RBAC: Public liveness probe (secret-redacted diagnostics only).
   app.get("/health", async () => {
     return HealthSchema.parse({
+      ...(diagnostics?.env?.AUTH_ENABLED && diagnostics.env.ALLOW_SYNTHETIC_DATA && { allowSyntheticData: true }),
       status: "ok",
       repository: services.repositoryKind(),
       startupError: diagnostics?.startupError ? redactSecrets(diagnostics.startupError) : null,

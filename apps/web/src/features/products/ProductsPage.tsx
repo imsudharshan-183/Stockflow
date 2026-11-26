@@ -47,6 +47,7 @@ import { StaffProductStats } from "@/features/products/StaffProductStats";
 import { invalidateOperationalQueries, queryKeys } from "@/hooks/queryKeys";
 import { api } from "@/lib/api";
 import {
+  formatDate,
   formatDateTime,
   formatMoneyFull,
   formatNumber,
@@ -75,6 +76,11 @@ function CatalogProductsPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const queryClient = useQueryClient();
+  const capabilities = useQuery({ queryKey: ["health"], queryFn: api.health, enabled: isAdmin });
+  const simulation = useMutation({
+    mutationFn: api.simulateNextDay,
+    onSuccess: () => invalidateOperationalQueries(queryClient),
+  });
 
   // Filters & Pagination State
   const [search, setSearch] = useState("");
@@ -231,6 +237,22 @@ function CatalogProductsPage() {
             ) : null
           }
         />
+
+        {isAdmin && capabilities.data?.allowSyntheticData && (
+          <section aria-label="Demo tools" className="rounded-lg border border-border p-4">
+            <h2 className="text-sm font-semibold">Demo tools</h2>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Add one day of sample sales after the latest dataset date. Available once per Bahrain calendar day.
+            </p>
+            <Button variant="secondary" size="sm" disabled={simulation.isPending} onClick={() => simulation.mutate()}>
+              {simulation.isPending ? "Simulating sales…" : "Simulate today's sales"}
+            </Button>
+            <p role="status" className="text-sm">
+              {simulation.data && `Added ${formatNumber(simulation.data.rows)} sales rows across ${formatNumber(simulation.data.branches)} branches for ${formatDate(simulation.data.targetDate)}.`}
+              {simulation.error?.message}
+            </p>
+          </section>
+        )}
 
         <TableCard>
           <TableToolbar>

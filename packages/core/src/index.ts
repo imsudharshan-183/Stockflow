@@ -222,7 +222,7 @@ export type {
   RankDonorCandidatesOptions,
   TransferCostBreakdown,
 } from "./engine/index.js";
-export { generateDataset } from "./seed/generate.js";
+export { generateDataset, simulateNextDay } from "./seed/generate.js";
 export {
   BAHRAIN_BRANCHES,
   BHD_PRICE_TIERS,

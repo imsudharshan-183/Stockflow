@@ -50,6 +50,7 @@ export async function buildApp(
       PORT: 3001,
       HOST: "127.0.0.1",
       MONGODB_URI: "",
+      ALLOW_SYNTHETIC_DATA: false,
       AUTH_ENABLED: false,
       JWT_SECRET: "default-dev-secret",
       ACCESS_TOKEN_TTL: "15m",
@@ -112,7 +113,7 @@ export async function buildApp(
       registerStockRoutes(scope, services, authGuards, { env, startupError });
       registerLocationRoutes(scope, services, authGuards);
       registerBranchRoutes(scope, services, authGuards);
-      registerCatalogRoutes(scope, services, authGuards);
+      registerCatalogRoutes(scope, services, authGuards, env);
       registerSalesEntriesRoutes(scope, services, authGuards);
       registerStockAlertsRoutes(scope, services, authGuards);
       registerOrderRoutes(scope, services, authGuards);

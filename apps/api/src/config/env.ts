@@ -12,6 +12,7 @@ const EnvSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3001),
   HOST: z.string().min(1).default("127.0.0.1"),
   MONGODB_URI: z.string().default(""),
+  ALLOW_SYNTHETIC_DATA: z.string().optional().transform(value => value === "true"),
   AUTH_ENABLED: z
     .preprocess((val) => {
       if (typeof val === "string") {
@@ -87,6 +88,7 @@ export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
     PORT: source.PORT,
     HOST: source.HOST,
     MONGODB_URI: source.MONGODB_URI,
+    ALLOW_SYNTHETIC_DATA: source.ALLOW_SYNTHETIC_DATA,
     AUTH_ENABLED: source.AUTH_ENABLED,
     JWT_SECRET: source.JWT_SECRET,
     ACCESS_TOKEN_TTL: source.ACCESS_TOKEN_TTL,

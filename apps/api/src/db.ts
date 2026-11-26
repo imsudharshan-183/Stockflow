@@ -10,6 +10,7 @@ export interface SalesEntryRecord {
   onHand: number;
   updatedAt: Date;
   source?: "sample" | "reported";
+  simulationDay?: string;
 }
 
 export interface UpsertSalesEntryResult {
@@ -60,6 +61,7 @@ function mapSalesEntryDoc(
     unitsSold?: unknown;
     onHand?: unknown;
     updatedAt?: unknown;
+    simulationDay?: unknown;
   },
   fallbackDate?: Date,
 ): SalesEntryRecord {
@@ -70,6 +72,7 @@ function mapSalesEntryDoc(
     date: String(doc.date),
     unitsSold: Number(doc.unitsSold),
     onHand: Number(doc.onHand),
+    ...(typeof doc.simulationDay === "string" && { simulationDay: doc.simulationDay }),
     updatedAt: doc.updatedAt instanceof Date ? doc.updatedAt : (fallbackDate ?? new Date()),
   };
 }
@@ -132,28 +135,26 @@ export async function persistMongoSalesImport(rows: DailyObservation[], log: Imp
   }
 }
 
-export async function upsertSalesEntry(input: {
-  branchId: string;
-  sku: string;
-  date: string;
-  unitsSold: number;
-  onHand: number;
-}, mongo: boolean, source: "sample" | "reported" = "reported"): Promise<UpsertSalesEntryResult> {
+export async function upsertSalesEntry(
+  input: DailyObservation,
+  mongo: boolean,
+  source: "sample" | "reported" = "reported",
+  simulation?: { firstRowOn?: string },
+): Promise<UpsertSalesEntryResult> {
   const now = new Date();
+  const identity = { branchId: input.branchId, sku: input.sku, date: input.date };
+  const match = simulation ? { ...identity, source: "sample" as const } : identity;
+  const observation = {
+    ...identity,
+    unitsSold: input.unitsSold, onHand: input.onHand, updatedAt: now, source,
+    ...(simulation?.firstRowOn && { simulationDay: simulation.firstRowOn, simulationAnchor: true }),
+  };
 
   if (mongo) {
     const rawResult = await SalesEntryModel.collection.findOneAndUpdate(
-      { branchId: input.branchId, sku: input.sku, date: input.date },
+      match,
       {
-        $set: {
-          branchId: input.branchId,
-          sku: input.sku,
-          date: input.date,
-          unitsSold: input.unitsSold,
-          onHand: input.onHand,
-          updatedAt: now,
-          source,
-        },
+        $set: observation,
       },
       { upsert: true, returnDocument: "after", includeResultMetadata: true },
     );
@@ -176,19 +177,15 @@ export async function upsertSalesEntry(input: {
   }
 
   const key = makeEntryKey(input.branchId, input.sku, input.date);
-  const existed = memorySalesEntries.has(key);
+  const existing = memorySalesEntries.get(key);
+  if (simulation && existing && existing.source !== "sample") return { entry: existing, created: false };
   const record: SalesEntryRecord = {
     id: key,
-    source,
-    branchId: input.branchId,
-    sku: input.sku,
-    date: input.date,
-    unitsSold: input.unitsSold,
-    onHand: input.onHand,
-    updatedAt: now,
+    ...existing,
+    ...observation,
   };
   memorySalesEntries.set(key, record);
-  return { entry: record, created: !existed };
+  return { entry: record, created: !existing };
 }
 
 export async function latestStockCounts(pairs: { sku: string; branchId: string }[], mongo: boolean) {
@@ -252,6 +249,7 @@ export async function reportedDailySales(branchIds: string[], date: string, mong
 }
 
 export async function listSalesEntries(filter: {
+  simulationAnchor?: true;
   allowedBranchIds?: readonly string[] | null;
   branchId?: string;
   sku?: string;
@@ -267,7 +265,7 @@ export async function listSalesEntries(filter: {
   totalPages: number;
 }> {
   if (mongo) {
-    const query: Record<string, unknown> = {};
+    const query: Record<string, unknown> = filter.simulationAnchor ? { simulationAnchor: true } : {};
     if (filter.branchId) {
       query.branchId = filter.branchId;
     } else if (filter.allowedBranchIds) {
@@ -304,6 +302,7 @@ export async function listSalesEntries(filter: {
   const allowedSet = filter.allowedBranchIds ? new Set(filter.allowedBranchIds) : null;
   const all = Array.from(memorySalesEntries.values())
     .filter((e) => {
+      if (filter.simulationAnchor && !e.simulationDay) return false;
       if (allowedSet && !allowedSet.has(e.branchId)) return false;
       if (filter.branchId && e.branchId !== filter.branchId) return false;
       if (filter.sku && e.sku !== filter.sku) return false;
@@ -433,13 +432,17 @@ export async function recordImportLog(entry: ImportLogEntry, mongo: boolean): Pr
 }
 
 export async function listImportLogs(filter: {
+  id?: string;
   userId?: string;
   limit?: number;
 }, mongo: boolean): Promise<ImportLogEntry[]> {
   const limit = Math.min(50, Math.max(1, filter.limit ?? 10));
 
   if (mongo) {
-    const query = filter.userId ? { "user.userId": filter.userId } : {};
+    const query = {
+      ...(filter.userId && { "user.userId": filter.userId }),
+      ...(filter.id && { id: filter.id }),
+    };
     const rows = await ImportLogModel.find(query)
       .sort({ importedAt: -1 })
       .limit(limit)
@@ -463,6 +466,7 @@ export async function listImportLogs(filter: {
   }
 
   return [...memoryImportLogs]
+    .filter((item) => !filter.id || item.id === filter.id)
     .filter((item) => (!filter.userId ? true : item.user.userId === filter.userId))
     .sort((a, b) => b.importedAt.localeCompare(a.importedAt))
     .slice(0, limit);

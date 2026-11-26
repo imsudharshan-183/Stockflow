@@ -384,6 +384,7 @@ export const ProductDetailSchema = z.object({
 });
 
 export const HealthSchema = z.object({
+  allowSyntheticData: z.literal(true).optional(),
   status: z.literal("ok"),
   repository: z.enum(["memory", "mongo"]),
   startupError: z.string().nullable(),

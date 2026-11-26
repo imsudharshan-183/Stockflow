@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { DEFAULT_POLICY } from "../engine/config.js";
 import { assessPositions, backtest } from "../engine/index.js";
@@ -23,11 +24,28 @@ import {
   matchesProductQuery,
   type CatalogCategory,
 } from "./catalog.js";
-import { generateDataset } from "./generate.js";
+import { generateDataset, simulateNextDay } from "./generate.js";
 
 const data = generateDataset();
 
 describe("seed", () => {
+  it("preserves the complete original 120-day JSON byte stream", () => {
+    expect(data.dates).toHaveLength(120);
+    expect(createHash("sha256").update(JSON.stringify(data)).digest("hex"))
+      .toBe("d373b467db049fc0971ec411c2f86ac28f75c688a65891967569b9e478590f4c");
+  });
+
+  it("continues from closing stock and draws reproducible sales for each date", () => {
+    const day = simulateNextDay(data, "2026-11-12");
+    expect(day).toHaveLength(7500);
+    expect(simulateNextDay(data, "2026-11-12")).toEqual(day);
+    expect(simulateNextDay(data, "2026-11-13").map(row => row.sales)).not.toEqual(day.map(row => row.sales));
+    // After 840 days the weekday and 120-day season repeat. Only the RNG changes wanted units.
+    const later = new Date(Date.parse("2026-11-12T00:00:00Z") + 840 * 86_400_000).toISOString().slice(0, 10);
+    expect(simulateNextDay(data, later).map(row => row.demand)).not.toEqual(day.map(row => row.demand));
+    // SKU 0, branch 0 refills every 7 days. Day 120 is between deliveries.
+    expect(day[0]!.sales + day[0]!.onHand).toBe(data.onHand[0]![0]!.at(-1));
+  });
   it("builds the Bahrain catalog with tiered non-round BHD pricing and stays deterministic", () => {
     expect(data.branches).toHaveLength(15);
     expect(data.branches[0]?.id).toBe("BR-001");

@@ -1,4 +1,5 @@
 import type { Product } from "../schemas/index.js";
+import { diffCalendarDays } from "../bahrainDate.js";
 import { round3 } from "../round.js";
 import {
   BAHRAIN_BRANCHES,
@@ -95,6 +96,33 @@ export function generateDataset(seed = SEED): Dataset {
     onHand,
     demand,
   };
+}
+
+export function simulateNextDay(dataset: Dataset, targetDate: string) {
+  const timestamp = Date.parse(`${targetDate}T00:00:00Z`);
+  if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== targetDate) {
+    throw new Error("Simulation needs a valid ISO calendar date");
+  }
+  const firstDate = dataset.dates[0];
+  if (!firstDate || targetDate <= firstDate) throw new Error("Simulation needs a preceding stock day");
+  const nextIndex = dataset.dates.findIndex((date) => date >= targetDate);
+  const openingIndex = (nextIndex < 0 ? dataset.dates.length : nextIndex) - 1;
+  const dayOffset = diffCalendarDays(targetDate, firstDate);
+  let seed = 0;
+  for (const char of targetDate) seed = (Math.imul(seed, 31) + char.charCodeAt(0)) >>> 0;
+  const rng = mulberry32(seed);
+  return dataset.products.flatMap((product, s) => dataset.branches.map((branch, b) => {
+    const opening = dataset.onHand[s]?.[b]?.[openingIndex];
+    if (opening === undefined) throw new Error(`Missing opening stock for ${product.sku} at ${branch.id}`);
+    const path = simulateBranchSku(
+      rng, [targetDate], plannedMean(s, b, branch.id), product.leadTimeDays,
+      s, b, branch.id, product.sku === PROMO_SKU, opening, dayOffset,
+    );
+    return {
+      sku: product.sku, branchId: branch.id, date: targetDate,
+      sales: path.sales[0]!, onHand: path.onHand[0]!, demand: path.demand[0]!,
+    };
+  }));
 }
 
 function buildProducts(): Product[] {
@@ -214,6 +242,8 @@ function simulateBranchSku(
   branchIndex: number,
   branchId: string,
   promo: boolean,
+  openingOverride?: number,
+  dayOffset = 0,
 ): { sales: number[]; onHand: number[]; demand: number[] } {
   const sales: number[] = [];
   const onHandSeries: number[] = [];
@@ -227,18 +257,19 @@ function simulateBranchSku(
     branchIndex,
     branchId,
   );
-  let onHand = profile.opening;
+  let onHand = openingOverride ?? profile.opening;
   const fillRate = isFastSku(skuIndex) && isChronicBranch(branchId) ? 0.5 : 1;
 
   for (let day = 0; day < dates.length; day++) {
-    if (day % schedule.cycle === schedule.phase) {
+    const dayIndex = dayOffset + day;
+    if (dayIndex % schedule.cycle === schedule.phase) {
       const target = profile.target;
       if (target !== null && onHand < target) {
         onHand += Math.round((target - onHand) * fillRate);
       }
     }
     const date = dates[day] ?? END_DATE;
-    const wanted = poisson(rng, dailyMean(mean, date, day, promo));
+    const wanted = poisson(rng, dailyMean(mean, date, dayIndex, promo));
     const sold = Math.min(onHand, wanted);
     onHand -= sold;
     sales.push(sold);

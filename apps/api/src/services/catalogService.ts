@@ -133,7 +133,7 @@ export class CatalogService {
               : (stockByBranch[b]?.[0] ?? 0);
           salesByBranch[b]?.splice(insertAt, 0, 0);
           stockByBranch[b]?.splice(insertAt, 0, prevStock);
-          demandByBranch[b]?.splice(insertAt, 0, 0);
+          if (demandByBranch[b] !== salesByBranch[b]) demandByBranch[b]?.splice(insertAt, 0, 0);
         }
       }
       const latest = this.runtime.data.dates[this.runtime.data.dates.length - 1];
