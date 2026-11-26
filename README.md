@@ -44,6 +44,16 @@ Use **Node.js 24.15 or later in the 24.x series** and **pnpm 12**. From the repo
 
 The in-memory demo supplies its own dataset and accounts. Restarting the API resets your changes. To check which storage mode is active, open [API health](http://localhost:3001/api/health).
 
+## Morning briefs and transfer explanations
+
+Select **Show my brief** on the daily dashboard or store inventory, or **Explain this transfer** in a transfer order. With sign-in enabled, StockFlow can produce a summary directly from the user's permitted records. Staff briefs cover shelf checks, receipts, and flags for their store.
+
+The floating robot button opens **StockFlow**, the in-app assistant. It starts with “Hi, I’m StockFlow. What would you like me to do today?” and shows suggested questions for the signed-in role. Admins can ask for network-wide reports and catalog insights. Managers can ask about assigned stores, forecasts, product risk, and incoming work. Staff get store-level operational help, product stock checks, incoming deliveries, and instructions for flagging stock. Ask in plain language, for example “How many products are over BD 200?”, “Show my stock forecast”, or “What does stock cover mean?”. Follow-ups such as “List them” use the previous lookup.
+
+The assistant explains StockFlow terms and workflows, and redirects questions outside the application. It answers from fixed, read-only lookups. The API applies role and branch access before returning data. Admin scope is the active network, manager scope is assigned branches, and staff scope is their assigned or selected branch. Staff do not receive financial metrics or network reports. The model receives the question, role, authorized store names, and, for briefs, the scoped metrics it can highlight. The API builds the answer text and figures from stock records and predefined guidance. It never receives database credentials or arbitrary MongoDB query access. The chat supports follow-ups and keeps recent turns in this browser session while navigating the app.
+
+Set `GEMINI_API_KEY` in the ignored repository-root `.env` for Google AI Studio, or `OPENAI_API_KEY` for OpenAI. Gemini takes precedence when both are present. The optional model overrides are `GEMINI_MODEL` and `OPENAI_MODEL`. Restart the API after configuration changes. For deployment, set these variables only on the API service. With a configured provider, chat sends your question, lookup context, and scoped measurements to that provider. Without a working provider, supported questions use built-in lookups. Database queries, access checks, quantities, and navigation targets are controlled by the server.
+
 ## Use MongoDB for persistence
 
 Set `MONGODB_URI` in the root `.env` to a MongoDB instance dedicated to this demo. The API uses the **`stockflow` database**. Use a replica set if you want order approvals and CSV batches to have multi-document transaction guarantees.

@@ -1,3 +1,4 @@
+import { StockBrief } from "@/components/shared/StockBrief";
 import { OverviewViews, QueueSummary } from "./OverviewViews";
 import { TabsContent } from "@/components/ui/tabs";
 import { Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
@@ -181,7 +182,7 @@ export function ChartCard({
               strokeWidth={2}
             />
             {sliced.length > 3 ? (
-              <Brush dataKey="label" height={20} stroke={TOKENS.chart.axis} />
+              <Brush dataKey="label" height={20} stroke={TOKENS.chart.axis} fill={TOKENS.surface.tableHeader} />
             ) : null}
           </LineChart>
         </ResponsiveContainer>
@@ -251,6 +252,7 @@ export function AdminOverview({
       <OverviewViews>
         <TabsContent value="daily" className="space-y-5">
           <QueueSummary count={pendingCount} gain={pendingGain} />
+          <StockBrief branchId={selectedLocation ?? undefined} />
           <TransferHandoffs items={live?.handoffs} />
 
           <Shortages items={live?.shortages} />

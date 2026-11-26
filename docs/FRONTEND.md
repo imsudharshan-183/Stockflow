@@ -45,7 +45,8 @@
 | `/users` | `UsersPage` (`UserRoleAndBranchesFields`) | `admin` | Create, edit role/branches, reset password, and deactivate users with browser autofill isolation and email/password validation |
 
 ## UX Principles
-- **Plain language first**: Surface buyer-friendly terms and contextual help popovers for inventory metrics.
-- **Role-appropriate landing**: Admins see network `BD` risk and cash-release totals; managers see their branch cluster and escalated alerts; staff see a read-only view of their assigned store.
+- **Plain language first**: Surface terms used by store teams and contextual help popovers for inventory metrics.
+- **Role-appropriate landing**: Admins see network `BD` risk and cash-release totals; managers see their branch cluster and escalated alerts; staff record sales and shelf counts, flag stock issues and receive deliveries in their assigned store.
 - **Linkable URL state**: Location scope, filters, tabs, sorting, and pagination belong in URL query parameters so views survive refresh and sharing.
 - **Accessible & non-color-only**: Statuses pair color tokens with text labels or icons; charts provide table fallbacks and keyboard navigation.
+- **Role-aware StockFlow assistant**: Signed-in users see a floating chat named StockFlow. The welcome is “Hi, I’m StockFlow. What would you like me to do today?” Suggested questions adapt to admin, manager, and staff. Answers link to the relevant application screen and retain the recent conversation during navigation.

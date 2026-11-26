@@ -41,6 +41,14 @@ import {
 
 export { resolveRiskChart, type RiskChartRow };
 
+const tooltipSurface = {
+  backgroundColor: TOKENS.surface.card,
+  borderColor: TOKENS.surface.border,
+  borderRadius: 8,
+  color: TOKENS.text.ink,
+};
+const tooltipText = { color: TOKENS.text.ink };
+
 function renderBarEndLabel({
   x,
   y,
@@ -110,6 +118,7 @@ export function Analytics({
   const { showDetail } = useChartDetail();
   const [hiddenActions, setHiddenActions] = useState<ReadonlySet<Action>>(new Set());
 
+  const [highlightedAction, setHighlightedAction] = useState<Action | null>(null);
   const mix = useMemo(() => mixOf(rows), [rows]);
   const visibleMix = useMemo(
     () => mix.filter((m) => !hiddenActions.has(m.action) && m.value > 0),
@@ -123,6 +132,7 @@ export function Analytics({
     () => mix.filter((m) => !hiddenActions.has(m.action)).reduce((sum, m) => sum + m.value, 0),
     [mix, hiddenActions],
   );
+  const highlighted = visibleMix.find((slice) => slice.action === highlightedAction);
   const fullMixCount = useMemo(() => mix.reduce((sum, m) => sum + m.count, 0), [mix]);
 
   const skus = useMemo(() => topSkus(rows, 8), [rows]);
@@ -150,7 +160,7 @@ export function Analytics({
       <ChartCard
         detailId="actionMix"
         title={LABELS.actionMix.label}
-        subtitle="Click a slice for breakdown; toggle legend items to filter"
+        subtitle="Select a slice for details. Use the legend to filter."
         helpKey="actionMix"
         heightClass="flex min-h-[16rem] flex-col justify-center"
         isLoading={recommendationsLoading}
@@ -169,59 +179,19 @@ export function Analytics({
       >
         <div className="@container w-full">
         <div className="flex w-full flex-col items-center gap-4 @[28rem]:flex-row @[28rem]:items-center">
-          <div className="relative h-44 w-44 shrink-0 @[28rem]:h-52 @[28rem]:w-56">
+          <div className="action-mix-pie relative h-44 w-44 shrink-0 @[28rem]:h-52 @[28rem]:w-56">
             <ResponsiveContainer width="100%" height="100%">
-              <PieChart margin={{ top: 18, right: 28, bottom: 18, left: 28 }}>
+              <PieChart>
                 <Pie
                   data={visibleMix}
                   dataKey="value"
                   nameKey="name"
-                  innerRadius={40}
-                  outerRadius={54}
+                  innerRadius={56}
+                  outerRadius={73}
+                  stroke={TOKENS.surface.card}
                   paddingAngle={2}
-                  labelLine={false}
-                  label={({
-                    cx,
-                    cy,
-                    midAngle,
-                    outerRadius: oR,
-                    payload,
-                    percent,
-                  }: {
-                    cx?: number;
-                    cy?: number;
-                    midAngle?: number;
-                    outerRadius?: number;
-                    payload?: { symbol?: string };
-                    percent?: number;
-                  }) => {
-                    if (
-                      cx === undefined ||
-                      cy === undefined ||
-                      midAngle === undefined ||
-                      oR === undefined ||
-                      !percent ||
-                      percent < 0.04
-                    ) {
-                      return null;
-                    }
-                    const rad = Math.PI / 180;
-                    const r = oR + 11;
-                    const x = cx + r * Math.cos(-midAngle * rad);
-                    const y = cy + r * Math.sin(-midAngle * rad);
-                    return (
-                      <text
-                        x={x}
-                        y={y}
-                        fill={TOKENS.chart.axis}
-                        textAnchor={x >= cx ? "start" : "end"}
-                        dominantBaseline="central"
-                        className="text-[10px] font-semibold tabular-nums"
-                      >
-                        {`${payload?.symbol ?? ""} ${Math.round(percent * 100)}%`}
-                      </text>
-                    );
-                  }}
+                  onMouseEnter={(_, index) => setHighlightedAction(visibleMix[index]?.action ?? null)}
+                  onMouseLeave={() => setHighlightedAction(null)}
                   onClick={(entry: {
                     action?: Action;
                     name?: string;
@@ -256,7 +226,7 @@ export function Analytics({
                           value: count > 0 ? formatMoneyFull(value / count) : formatMoneyFull(0),
                         },
                       ],
-                      linkTo: `/queue?action=${item.action}`,
+                      linkTo: `/queue?type=${item.action}`,
                       linkLabel: "Open in Queue →",
                     });
                   }}
@@ -266,22 +236,17 @@ export function Analytics({
                     <Cell key={slice.name} fill={slice.color} />
                   ))}
                 </Pie>
-                <RechartsTooltip
-                  formatter={(value, _name, item) => {
-                    const sym = (item?.payload as { symbol?: string } | undefined)?.symbol ?? "";
-                    const label = (item?.payload as { name?: string } | undefined)?.name ?? "";
-                    return [formatMoneyFull(Number(value)), `${sym} ${label}`.trim()];
-                  }}
-                />
               </PieChart>
             </ResponsiveContainer>
             <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-2 text-center">
-              <span className="text-lg leading-tight font-semibold text-foreground tabular-nums">
-                {formatNumber(totalMixCount)}
+              <span className="text-xs font-medium text-muted-foreground">
+                {highlighted?.name ?? "All visible"}
               </span>
-              <span className="text-[10px] font-medium text-muted-foreground">actions</span>
-              <span className="mt-0.5 text-xs font-semibold text-gain-text tabular-nums">
-                {formatMoney(totalMixValue)}
+              <span className="text-sm font-semibold text-foreground tabular-nums">
+                {formatNumber(highlighted?.count ?? totalMixCount)} actions
+              </span>
+              <span className="text-xs font-medium text-gain-text tabular-nums">
+                {highlighted ? formatMoneyFull(highlighted.value) : formatMoney(totalMixValue)}
               </span>
             </div>
           </div>
@@ -290,12 +255,16 @@ export function Analytics({
             {mix.map((slice) => {
               const hidden = hiddenActions.has(slice.action);
               return (
-                <li key={slice.name} className="flex items-center justify-between gap-2">
+                <li key={slice.name} className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => toggleAction(slice.action)}
+                    onFocus={() => setHighlightedAction(slice.action)}
+                    onBlur={() => setHighlightedAction(null)}
+                    onMouseEnter={() => setHighlightedAction(slice.action)}
+                    onMouseLeave={() => setHighlightedAction(null)}
                     aria-pressed={!hidden}
                     className={cn(
                       "h-7 gap-1.5 px-1.5 text-xs font-medium",
@@ -307,9 +276,14 @@ export function Analytics({
                       {slice.symbol}
                     </span>
                     <span>{slice.name}</span>
+                    {!hidden && totalMixValue > 0 && (
+                      <span className="text-muted-foreground tabular-nums" title="Share of visible estimated gain">
+                        {formatPct(slice.value / totalMixValue)}
+                      </span>
+                    )}
                   </Button>
                   <Link
-                    to={`/queue?action=${slice.action}`}
+                    to={`/queue?type=${slice.action}`}
                     className="shrink-0 text-right text-muted-foreground tabular-nums hover:text-primary hover:underline"
                   >
                     <span className="font-semibold text-foreground">{formatNumber(slice.count)}</span>{" "}
@@ -364,6 +338,8 @@ export function Analytics({
                 tick={{ fontSize: 11, fill: TOKENS.chart.axis }}
               />
               <RechartsTooltip
+                contentStyle={tooltipSurface}
+                itemStyle={tooltipText}
                 cursor={{ fill: TOKENS.chart.grid, opacity: 0.2 }}
                 formatter={(value) => [formatMoneyFull(Number(value)), LABELS.lostSalesAtRisk.label]}
               />
@@ -462,6 +438,8 @@ export function Analytics({
                 }}
               />
               <RechartsTooltip
+                contentStyle={tooltipSurface}
+                itemStyle={tooltipText}
                 cursor={{ fill: TOKENS.chart.grid, opacity: 0.2 }}
                 formatter={(value) => [formatMoneyFull(Number(value)), LABELS.netBenefit.label]}
                 labelFormatter={(label) => {

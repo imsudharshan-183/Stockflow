@@ -232,6 +232,25 @@ export async function latestSubmissionDates(branchIds: readonly string[], mongo:
   return latest;
 }
 
+export async function reportedDailySales(branchIds: string[], date: string, mongo: boolean) {
+  if (mongo) {
+    return SalesEntryModel.aggregate<{ _id: string; units: number; entries: number }>([
+      { $match: { branchId: { $in: branchIds }, date, source: { $ne: "sample" } } },
+      { $group: { _id: "$branchId", units: { $sum: "$unitsSold" }, entries: { $sum: 1 } } },
+    ]);
+  }
+  const allowed = new Set(branchIds);
+  const rows = new Map<string, { _id: string; units: number; entries: number }>();
+  for (const entry of memorySalesEntries.values()) {
+    if (entry.date !== date || entry.source === "sample" || !allowed.has(entry.branchId)) continue;
+    const row = rows.get(entry.branchId) ?? { _id: entry.branchId, units: 0, entries: 0 };
+    row.units += entry.unitsSold;
+    row.entries++;
+    rows.set(entry.branchId, row);
+  }
+  return [...rows.values()];
+}
+
 export async function listSalesEntries(filter: {
   allowedBranchIds?: readonly string[] | null;
   branchId?: string;

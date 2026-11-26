@@ -1,6 +1,8 @@
+import { StockBrief } from "@/components/shared/StockBrief";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronLeft, ChevronRight, Package, PackageCheck, Search, X } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { OrderStatusBadge } from "@/components/shared/OrderStatusBadge";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -101,6 +103,12 @@ export function StaffProductStats() {
   );
   const { selectedLocation, setSelectedLocation } = useLocationScope();
   const staffBranchId = resolveStaffActiveBranch(assignedBranchIds, selectedLocation) ?? "Store";
+  const { hash, key: navigationKey } = useLocation();
+  useEffect(() => {
+    if (["#store-deliveries", "#store-alerts", "#weekly-stock-check-title"].includes(hash)) {
+      document.getElementById(hash.slice(1))?.focus();
+    }
+  }, [hash, navigationKey]);
 
   const handleBranchSwitch = (nextBranchId: string) => {
     if (nextBranchId === staffBranchId) return;
@@ -273,6 +281,7 @@ export function StaffProductStats() {
         }
       />
 
+      <StockBrief branchId={staffBranchId} />
       <nav aria-label="Store tasks" className="flex flex-wrap gap-2">
         <a href="#weekly-stock-check-title" className={buttonVariants({ variant: "secondary", size: "sm" })}>
           Check shelf stock

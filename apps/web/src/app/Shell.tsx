@@ -31,6 +31,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { useAuth } from "@/features/auth/AuthContext";
 import { queryKeys } from "@/hooks/queryKeys";
 import { useLocationScope } from "@/hooks/useLocationScope";
+import { StockChat } from "@/components/shared/StockChat";
 import { api } from "@/lib/api";
 import { formatNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -611,13 +612,17 @@ export function Shell() {
             </div>
           </header>
 
-          <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 py-6 sm:px-6">
+          <main className="mx-auto w-full max-w-7xl flex-1 space-y-6 px-4 pt-6 pb-20 sm:px-6">
             <Outlet />
           </main>
         </div>
       </div>
 
       <GlossaryDialog open={glossaryOpen} onOpenChange={setGlossaryOpen} />
+      {user && <StockChat key={JSON.stringify([user.id, user.role, user.branchIds, selectedLocation])}
+        branch={selectedLocation ?? undefined}
+        role={user.role}
+        scope={selectedLocationLabel ?? selectedLocation ?? (user.role === "admin" ? "All stores" : "Assigned stores")} />}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </TooltipProvider>
   );

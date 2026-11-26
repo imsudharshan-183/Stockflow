@@ -22,6 +22,7 @@ This document records the numbered architectural decisions (`ADR-001`+), trade-o
 | [ADR-014](#adr-014-modular-domain-services-with-shared-stockruntimestate-composition-root) | Split Domain Services & Composition Root | Replace monolithic `StockService` with `KpiService`, `CatalogService`, `StockAlertService`, and `DecisionService` sharing `StockRuntimeState`. |
 | [ADR-015](#adr-015-structured-stock-alert-resolution-atomic-order-escalation-and-live-adjustment-overlay) | Alert Resolution & Live Adjustment Overlay | Replace binary alert decisions with 4 structured resolutions, atomic `ALERT_ESCALATION` order creation, and non-mutating `LOGGED_ADJUSTMENT` overlays. |
 | [ADR-016](#adr-016-unified-replenishmentorder-pipeline-two-party-cross-cluster-handshake-and-lazy-materialization) | Unified Order Pipeline & Two-Party Handshake | Replace disconnected decision/request/alert queues with `ReplenishmentOrder`, immutable `OrderEvent`s, lazy materialization, and `RECEIVED` `inTransit` clearing. |
+| [ADR-017](#adr-017-read-only-stock-assistant) | Read-only stock assistant | Use authenticated store lookups and server-built answers. |
 
 ---
 
@@ -349,3 +350,9 @@ Prior to the Stage B–E redesign, three operational workflows lived in separate
 6. **Stage 0 Security Hardening & Stage D Unified UI**:
    - Added `authenticate` + `requirePermission("sales:enter")` + branch scoping across all `/api/sales-entries*` endpoints and fixed `/api/kpis` scope leakage (`403`/`404` enforcement).
    - Updated `apps/web` with the 3-tab `/queue` (`Suggested & Intra-cluster`, `Incoming Pull Requests`, `My Outgoing Requests`), ranked `DonorPicker` modal, structured alert `Resolve` dialog, staff `Incoming Deliveries` receipt confirmation, and chronological order-threaded `/audit` view.
+
+## ADR-017 Read-only stock assistant
+
+The assistant uses the signed-in employee’s role and selected store to answer stock questions. The API runs a supported lookup against the same scoped data used by the application. The provider may interpret the question or choose an existing metric to highlight. The API supplies every displayed figure, explanation and destination link.
+
+Provider failures fall back to supported record lookups. A question can still be interpreted incorrectly. Answers show the lookup result and its date so employees can check the underlying records before acting.

@@ -4,6 +4,8 @@
 
 :root,
 .light {
+  color-scheme: light;
+  --scrollbar-thumb: #798B86;
   /* Layered surfaces (soft mineral tint) */
   --bg: #F5F7F6;
   --background: #F5F7F6;
@@ -108,6 +110,8 @@
 }
 
 .dark {
+  color-scheme: dark;
+  --scrollbar-thumb: #718783;
   --bg: #101B1D;
   --background: #101B1D;
   --surface: #172528;
@@ -190,6 +194,13 @@
   --chart-transfer: #A78BFA;
   --chart-reorder: #80D8D0;
   --chart-markdown: #FBBF24;
+}
+
+/* Inherited by page, sidebar, table and dialog scroll areas. */
+@media (forced-colors: none) {
+  :root {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
 }
 
 body {
@@ -312,6 +323,20 @@ select.custom-select::-ms-expand {
   .\@\[28rem\]\:w-56 {
     width: 14rem;
   }
+}
+
+/* Recharts focuses both SVG groups and paths. Trace the pie for keyboard focus. */
+.action-mix-pie .recharts-pie:focus,
+.action-mix-pie .recharts-pie-sector:focus,
+.action-mix-pie .recharts-sector:focus {
+  outline: none;
+}
+
+.action-mix-pie .recharts-pie:focus-visible .recharts-sector,
+.action-mix-pie .recharts-pie-sector:focus-visible .recharts-sector,
+.action-mix-pie .recharts-sector:focus-visible {
+  stroke: var(--ink);
+  stroke-width: 3;
 }
 
 /* Reduced motion support */

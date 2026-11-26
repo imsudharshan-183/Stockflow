@@ -1,4 +1,8 @@
 import {
+  BriefResponseSchema,
+  ChatResponseSchema,
+  type ChatRequest,
+  type BriefRequest,
   ApiAuditListSchema,
   BatchDecideResponseSchema,
   BranchDetailSchema,
@@ -180,6 +184,12 @@ function withQuery(path: string, query: Record<string, unknown>): string {
 }
 
 export const api = {
+  chat: (input: ChatRequest) => request("/api/ai/chat", ChatResponseSchema, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }),
+  brief: (input: BriefRequest) => request("/api/ai/brief", BriefResponseSchema, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }),
   // Auth
   login: (credentials: LoginRequest): Promise<LoginResponse> =>
     request("/api/auth/login", LoginResponseSchema, {

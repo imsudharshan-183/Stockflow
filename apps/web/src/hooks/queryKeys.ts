@@ -52,6 +52,7 @@ export async function invalidateOperationalQueries(queryClient: QueryClient): Pr
     queryClient.invalidateQueries({ queryKey: ["kpis"] }),
     queryClient.invalidateQueries({ queryKey: ["kpisLive"] }),
     queryClient.invalidateQueries({ queryKey: ["orders"] }),
+    queryClient.invalidateQueries({ queryKey: ["order"] }),
     queryClient.invalidateQueries({ queryKey: ["recommendations"] }),
     queryClient.invalidateQueries({ queryKey: ["locations"] }),
     queryClient.invalidateQueries({ queryKey: ["locationSummary"] }),

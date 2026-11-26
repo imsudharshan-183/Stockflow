@@ -1,3 +1,4 @@
+import { StockBrief } from "@/components/shared/StockBrief";
 import { Check, ExternalLink, PackageCheck, Repeat2, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { OrderEventRow } from "@/components/shared/OrderEventRow";
@@ -133,6 +134,7 @@ export function OrderDrawer({
               </div>
 
               {/* Freight & Live Sending Branch State */}
+              {order.type === "TRANSFER" && <StockBrief orderId={order.id} />}
               {order.type === "TRANSFER" && order.sourceBranchId ? (
                 <div className="rounded-xl border border-border bg-secondary/40 p-4 text-xs">
                   <p className="font-semibold text-foreground">Transfer &amp; sending branch capacity</p>

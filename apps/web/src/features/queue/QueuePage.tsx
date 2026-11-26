@@ -112,7 +112,7 @@ export function QueuePage() {
   });
 
   const [search, setSearch] = useState("");
-  const [openOrderId, setOpenOrderId] = useState<string | null>(() => params.get("order"));
+  const openOrderId = params.get("order");
   const lastTriggerRowIdRef = useRef<string | null>(null);
 
   const [requestDialogOpen, setRequestDialogOpen] = useState(false);
@@ -303,10 +303,17 @@ export function QueuePage() {
     [filteredRows],
   );
 
-  const openOrder = useMemo(
+  const listedOrder = useMemo(
     () => serverRows.find((row) => row.id === openOrderId) ?? null,
     [serverRows, openOrderId],
   );
+  const linkedOrder = useQuery({
+    queryKey: queryKeys.order(openOrderId ?? ""),
+    queryFn: () => api.getOrder(openOrderId!),
+    enabled: Boolean(openOrderId && !listedOrder),
+    retry: false,
+  });
+  const openOrder = listedOrder ?? (openOrderId ? linkedOrder.data : null) ?? null;
 
   const incomingCount = incomingCountQuery.data?.total ?? 0;
 
@@ -369,13 +376,21 @@ export function QueuePage() {
 
   function openRowDrawer(rowId: string) {
     lastTriggerRowIdRef.current = rowId;
-    setOpenOrderId(rowId);
+    setParams((current) => {
+      const next = new URLSearchParams(current);
+      next.set("order", rowId);
+      return next;
+    }, { replace: true });
   }
 
   function handleDrawerOpenChange(nextOpen: boolean) {
     if (!nextOpen) {
       const returnId = lastTriggerRowIdRef.current;
-      setOpenOrderId(null);
+      setParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete("order");
+        return next;
+      }, { replace: true });
       if (returnId) {
         window.requestAnimationFrame(() => {
           document.querySelector<HTMLElement>(`[data-row-id="${returnId}"]`)?.focus();
@@ -1267,7 +1282,7 @@ function readFilters(params: URLSearchParams): QueueFilters {
     view: isLifecycleView(rawView) ? rawView : "pending",
     branch: params.get("branch") ?? "",
     category: params.get("category") ?? "",
-    type: params.get("type") ?? "",
+    type: params.get("type") ?? params.get("action") ?? "",
     status: params.get("status") ?? "",
     page: Number.isFinite(page) && page > 0 ? Math.floor(page) : 1,
   };

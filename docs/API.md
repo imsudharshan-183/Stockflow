@@ -11,6 +11,8 @@ All endpoints are mounted under `/api`. Protected routes require a valid JWT acc
 - `GET /api/auth/me` — Returns current authenticated user profile and permissions.
 
 ## Stock & Morning Plan (`/api/*`)
+- `POST /api/ai/chat` — Signed-in, rate-limited, read-only StockFlow assistant. Accepts `{ question, branchId?, previous? }`. The server derives role and allowed branches from the authenticated session, then routes to fixed catalog, daily sales, inventory, forecast, delivery, transfer, overview, or glossary lookups. Admin queries can span the network; managers are restricted to assigned branches; staff receive permitted operational data for their stores. Never accepts database queries or write actions.
+- `POST /api/ai/brief` — Creates a concise explanation from role-scoped overview or transfer records. A configured provider receives the role, date and scoped metric IDs and values, and can select a metric to highlight. The API supplies the explanation and figures.
 - `GET /api/kpis` — Network (admin) or branch-scoped (manager) KPI rollup.
 - `GET /api/recommendations` — Paginated, filterable morning action queue (transfers, reorders, markdowns), scoped to caller's branches.
 - `GET /api/recommendations/:id` — Single recommendation detail (403/404 if out of scope).

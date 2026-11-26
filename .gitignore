@@ -12,10 +12,6 @@ coverage
 *.tsbuildinfo
 temp_snapshot/
 
-# Temporarily kept local-only
-docs/PROPOSAL.md
-docs/TESTING.md
-
 # Playwright
 playwright-report/
 test-results/

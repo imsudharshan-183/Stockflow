@@ -95,7 +95,7 @@ export function NeedsAttentionStrip({
       detail: summary.topReorder
         ? `${summary.topReorder.productName} · ${formatCover(summary.topReorder.metrics.coverDays)} left (${summary.topReorder.branchName})`
         : `${formatMoney(report.lostSalesAtRisk)} sales at risk across scope`,
-      to: "/queue?action=REORDER",
+      to: "/queue?type=REORDER",
       cta: "Review reorders",
     },
     {
@@ -112,7 +112,7 @@ export function NeedsAttentionStrip({
       detail: summary.topTransfer
         ? `${summary.topTransfer.productName} · ${summary.topTransfer.donorBranchName ?? "Surplus"} → ${summary.topTransfer.branchName}`
         : "No pending inter-branch transfers in this scope",
-      to: "/queue?action=TRANSFER",
+      to: "/queue?type=TRANSFER",
       cta: "Review transfers",
     },
     {
@@ -129,7 +129,7 @@ export function NeedsAttentionStrip({
       detail: summary.topMarkdown
         ? `${summary.topMarkdown.productName} · ${formatNumber(summary.topMarkdown.quantity)} units (${summary.topMarkdown.branchName})`
         : `${formatMoney(report.cashReleasable)} surplus above 30-day floor`,
-      to: "/queue?action=MARKDOWN",
+      to: "/queue?type=MARKDOWN",
       cta: "Review markdowns",
     },
   ];

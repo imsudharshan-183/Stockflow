@@ -1,3 +1,4 @@
+import { StockBrief } from "@/components/shared/StockBrief";
 import { OverviewViews, QueueSummary } from "./OverviewViews";
 import { TabsContent } from "@/components/ui/tabs";
 import { Boxes, CircleDollarSign, ListOrdered, TriangleAlert } from "lucide-react";
@@ -87,6 +88,7 @@ export function ManagerOverview({
       <OverviewViews>
         <TabsContent value="daily" className="space-y-5">
           <QueueSummary count={pendingApprovalsCount} gain={backlogValue} />
+          <StockBrief branchId={selectedLocation ?? undefined} />
           <TransferHandoffs items={live?.handoffs} />
 
           <Shortages items={live?.shortages} />
@@ -155,6 +157,7 @@ export function ManagerOverview({
           <ProofOfValuePanel
             backtest={report.backtest}
             scopeLabel={selectedLocation ? `${report.branches[0]?.name ?? selectedLocation}` : "Cluster"}
+            branchCount={report.branches.length}
           />
 
           <section className="grid gap-6 lg:grid-cols-2">

@@ -5,6 +5,10 @@ import { config } from "dotenv";
 import { z } from "zod";
 
 const EnvSchema = z.object({
+  OPENAI_API_KEY: z.string().trim().optional(),
+  GEMINI_API_KEY: z.string().trim().optional(),
+  GEMINI_MODEL: z.string().trim().optional(),
+  OPENAI_MODEL: z.string().trim().optional(),
   PORT: z.coerce.number().int().positive().default(3001),
   HOST: z.string().min(1).default("127.0.0.1"),
   MONGODB_URI: z.string().default(""),
@@ -76,6 +80,10 @@ export function loadDotenv(options: LoadDotenvOptions = {}): void {
 
 export function readEnv(source: NodeJS.ProcessEnv = process.env): Env {
   const env = EnvSchema.parse({
+    OPENAI_API_KEY: source.OPENAI_API_KEY,
+    GEMINI_API_KEY: source.GEMINI_API_KEY,
+    GEMINI_MODEL: source.GEMINI_MODEL,
+    OPENAI_MODEL: source.OPENAI_MODEL,
     PORT: source.PORT,
     HOST: source.HOST,
     MONGODB_URI: source.MONGODB_URI,

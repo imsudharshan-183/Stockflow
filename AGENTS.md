@@ -1,7 +1,7 @@
 # StockFlow — Project Rules & Context
 
 ## Overview
-StockFlow is a morning decision and replenishment order system for a 15-branch Bahrain retail network (~500 SKUs, 120-day synthetic history). It ranks transfers, reorders, and markdowns by net BHD benefit (`BD`), persists governed order transitions, and explains recommendations in plain buyer language.
+StockFlow is a morning decision and replenishment order system for a 15-branch Bahrain retail network (~500 SKUs, 120-day synthetic history). It ranks transfers, reorders, and markdowns by net BHD benefit (`BD`), persists governed order transitions, and explains recommendations in language store teams use.
 
 ## Architecture Map
 - `packages/core`: Pure TypeScript domain logic, shared utilities, and Zod contracts (no I/O, no `Date.now`, no DB drivers).
@@ -17,6 +17,7 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
   - `src/repositories/`: Memory and Mongo stores (`StockRepository`, `UserRepository`, alerts, `orders`, `order_events`, `actions`, `audit`).
   - `src/services/`: `createStockServices` (`index.ts`) sharing one `StockRuntimeState` (`runtimeState.ts`) across `KpiService`, `CatalogService`, `StockAlertService`, `DecisionService`, `OrderService` (`orderSnapshot.ts`), `queueLifecycle.ts`, `projection.ts`, `scope.ts`, `errors.ts`, `AuthService`.
   - `src/plugins/` & `src/routes/`: Fastify app/auth/error plugins and `/api/*` routes (`auth`, `branches`, `catalog`, `helpers`, `locations`, `orders`, `salesEntries`, `stock`, `stockAlerts`, `users`), plus `src/utils/bahrainDate.ts`.
+  - StockFlow assistant: `routes/brief.ts`, `services/stockChat.ts`, `services/chatCatalog.ts`, `services/briefFacts.ts`, and `services/modelOutput.ts` implement role-aware read-only chat and briefs.
 - `apps/web`: React 19 + Vite + Tailwind CSS + Base UI frontend.
   - `src/app/`: `Shell.tsx`, `LocationSidebarParts.tsx` (network-relative median risk health dots), `App.tsx`.
   - `src/components/ui/`: Shared primitives (`Button`, `Badge`, `Table`, `Card`, `Dialog`, `Sheet`, `Input`, `Tabs`, `Tooltip`, etc.).
@@ -37,11 +38,13 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
 5. **Server-side RBAC & date/coord rules**: UI hiding is cosmetic. `/api/*` routes enforce `authenticate` / `requirePermission`, `/api/sales/imports` is scoped per caller, overview freshness uses `Asia/Bahrain` (`UTC+3`), and branch coordinates validate Bahrain bounds rounded to 6 decimals with unique `(name, city)`.
 6. **Frontend guardrails (`scripts/check-ui.mjs`)**: Only shared `<Button>`, `<Badge>`, `<Table>` primitives; colors strictly via `index.css` / `tokens.ts`; number/money/date formatting in `features/` strictly via `@/lib/format`.
 7. **Secrets & test isolation**: Never read, print, log, or commit `.env` or secrets. Tests run against `InMemoryRepository` or `mongodb-memory-server` (`*_test` DB guard for external URIs).
+8. **Assistant scope and data access**: Chat intent is a bounded schema, never a generated Mongo query. Derive role and branch scope from the authenticated user, enforce permissions in API services, and only send the model the question plus minimum approved lookup facts. Admin may query active network data, managers only assigned branches, and staff only permitted operational store data. Keep staff financial metrics and management workflows out of chat results. Keep provider secrets in ignored `.env`.
 
 ## RBAC Summary
 - `admin`: All active branches (+ archived branch admin); `dashboard:financial:network`, `dashboard:financial:scoped`, `dashboard:operational:scoped`, `catalog:view`, `products:manage`, `branches:manage`, `users:manage`, `branches:view_all`, `recommendations:read`, `recommendations:decide`, `orders:receive`, `audit:read`, `sales:enter`, `stock:flag:decide`.
 - `manager`: Assigned `branchIds`; `dashboard:financial:scoped`, `dashboard:operational:scoped`, `catalog:view`, `recommendations:read`, `recommendations:decide`, `orders:receive`, `audit:read`, `sales:enter`, `stock:flag:decide`.
 - `staff`: Assigned `branchIds` (single or multi-branch switcher on `StaffProductStats`); `catalog:view`, `recommendations:read`, `orders:receive`, `sales:enter`, `stock:flag`. Lands on non-financial store inventory (`StaffProductStats` with `Flag stock` alerts and zero `BD` financials); blocked from `/queue`, `/branches/:id`, `/audit`, `/users`.
+- **StockFlow assistant**: Opens with “Hi, I’m StockFlow. What would you like me to do today?” Suggestions adapt by role. It explains StockFlow terms and workflows, and queries supported reports, inventory, and forecasts within the authenticated scope. The API remains the authority for data access.
 
 ## Key Commands
 - `pnpm dev` — Run API and web dev servers
@@ -52,7 +55,7 @@ StockFlow is a morning decision and replenishment order system for a 15-branch B
 - `pnpm seed:mongo` / `pnpm seed:users` / `pnpm reset:decisions --yes` — Mongo seeding and decision reset
 
 ## Documentation Pointers
-- [docs/ADR.md](docs/ADR.md) — Architecture Decision Records (`ADR-001` through `ADR-021`)
+- [docs/ADR.md](docs/ADR.md) — Architecture Decision Records (`ADR-001` through `ADR-017`)
 - [docs/ENGINE.md](docs/ENGINE.md) — Engine formulas, constants table, worked example, and extension seams
 - [docs/DECISIONS.md](docs/DECISIONS.md) — Assumptions, known limitations, scaling path, and security summary
 - [docs/FRONTEND.md](docs/FRONTEND.md) — Design system, UI guardrails, route table, UX principles

@@ -1,4 +1,4 @@
-const ENV_SECRET_KEYS = ["MONGODB_URI", "JWT_SECRET", "ADMIN_PASSWORD"] as const;
+const ENV_SECRET_KEYS = ["MONGODB_URI", "JWT_SECRET", "ADMIN_PASSWORD", "GEMINI_API_KEY", "OPENAI_API_KEY"] as const;
 
 /** Strip connection strings, bearer tokens, and known env secrets before printing. */
 export function redactSecrets(text: string, env: NodeJS.ProcessEnv = process.env): string {

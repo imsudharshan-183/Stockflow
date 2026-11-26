@@ -3,7 +3,11 @@
 ## Seeded Accounts
 - **Admin** (`admin@stockflow.dev`): Full network visibility across all 15 branches, catalog management, user management, decisions, and daily data entry.
 - **Manager - Manama** (`manager.manama@stockflow.dev`): Scoped to `BR-001` (`Manama - CBD`) and `BR-002` (`Manama - Juffair`) (decisions, audit, data entry, and scoped KPIs).
-- **Staff - Manama CBD** (`staff.manama@stockflow.dev`): Locked to `BR-001` (`Manama - CBD`) with a read-only location view (no decision buttons, no data entry, no financial/audit/user pages).
+- **Staff - Manama CBD** (`staff.manama@stockflow.dev`): Locked to `BR-001` (`Manama - CBD`) for store inventory, sales entry, stock alerts and delivery receipts.
+
+## Try the assistant
+
+Open the robot button after signing in. As admin, ask “How many products are over BD 200?” and then “List them”. As a manager, select a store and ask “Show my stock forecast”. As staff, choose “How do I flag a stock issue?” to find the steps on the inventory screen. Open **Show my brief** to see which records support the morning summary.
 
 ## Before Each Demo
 Reset prior recommendation decisions and decision audit entries without touching the catalog, sales entries, users, refresh tokens, or `dataVersion`:
