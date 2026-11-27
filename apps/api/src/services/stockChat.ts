@@ -79,6 +79,12 @@ async function interpret(input: ChatRequest, model: ModelConfig, user: User, sto
   const help = () => records({ topic: "help", search: "" });
   if (/\b(yesterday|tomorrow|last (?:week|month|quarter|year)|weather|temperature|sports|historical|revenue|profits?|delete|approve|cancel|password|credentials)\b|\d{4}-\d{2}-\d{2}/i.test(question))
     return help();
+  if (/^(?:summari[sz]e|show|refresh) (?:my |our )?today[’']?s (?:uploaded |reported )?sales[.!?]*$/i.test(question) ||
+      ((input.page === "sales" || input.previous?.topic === "sales") &&
+        /^summari[sz]e (?:it|this|the data|the upload|my upload)[.!?]*$/i.test(question)))
+    return records({ topic: "sales", search: "" });
+  if (input.productSku && /^(?:how much of this product is on hand|show (?:stock|forecast) for this product)[?.!]*$/i.test(question))
+    return records({ topic: /forecast/i.test(question) ? "forecast" : "product", search: input.productSku });
   const productCode = question.match(/\bSKU-\d+\b/i)?.[0].toUpperCase();
   if (productCode && /\b(sales|sold)\b/i.test(question)) return help();
   if (productCode && /\b(forecast|velocity|cover|demand)\b/i.test(question))
@@ -152,11 +158,15 @@ export async function answerStockQuestion(
   await services.ensureFreshPlan();
   const named = services.runtime.data.branches.filter((store) => input.question.toLowerCase().includes(store.name.toLowerCase()));
   mentioned.push(...named.map((store) => store.id));
-  const followUp = /^(?:again|refresh|and\b|what about\b|how about\b|list them|show (?:them|those)|which ones)/i.test(input.question);
+  const firstRisk = /^(?:why is the first (?:item|product|one) at risk|explain the first (?:item|product|one))[?!.]*$/i.test(input.question);
+  const firstItem = firstRisk && input.previous?.topic === "shortages" ? input.previous.firstItem : undefined;
+  const bareAmount = /^(?:bh?d\s*)?\d+(?:\.\d+)?(?:\s*bh?d)?[?!.]*$/i.test(input.question);
+  const followUp = firstRisk || bareAmount || /^(?:again|refresh|and\b|what about\b|how about\b|list them|show (?:them|those)|which (?:ones|products)[?!.]*$|see highest-priced|summari[sz]e (?:it|this|the data|the upload)\b)/i.test(input.question);
   const branch =
-    input.branchId ?? mentioned[0] ?? (followUp ? input.previous?.branchId : undefined) ?? (user.role === "staff" ? user.branchIds[0] : undefined);
+    input.branchId ?? mentioned[0] ?? (followUp ? input.previous?.branchId : undefined) ?? firstItem?.branchId ?? (user.role === "staff" ? user.branchIds[0] : undefined);
   if (
     (branch && !isBranchInScope(user, branch)) ||
+    (firstItem && !isBranchInScope(user, firstItem.branchId)) ||
     mentioned.some((id) => !isBranchInScope(user, id))
   )
     throw new DecisionForbiddenError("Branch outside your assigned stores");
@@ -165,7 +175,29 @@ export async function answerStockQuestion(
   );
   if (branch && !stores.length) throw new BranchNotFoundError("Store not found");
   const today = getBahrainToday(services.runtime.now()).isoDate;
-  const { intent: proposed, source } = await interpret(input, model, user, stores.map((store) => store.name));
+  if (firstRisk || /^(?:why is (?:it|that|that item) at risk|why that one)[?!.]*$/i.test(input.question)) {
+    const store = stores.find((b) => b.id === firstItem?.branchId);
+    const item = store && firstItem && services.catalog.locationInventory(store.id, {
+      search: firstItem.sku, page: 1, limit: 1, sortBy: "sku", sortDir: "asc",
+    }, user)?.items.find((row) => row.sku === firstItem.sku);
+    if (!store || !item) return {
+      summary: "Which product and store do you mean? Ask for low stock to see the current list.",
+      facts: [], asOf: today, context: { topic: "help", search: "", branchId: branch }, source: "records",
+    };
+    const incoming = item.inTransit ? ` and ${item.inTransit} units on the way` : "";
+    const reason = item.status === "AT_RISK"
+      ? `This falls below the reorder point of about ${item.reorderPoint} units.`
+      : "The latest stock plan no longer flags this item as at risk.";
+    const cover = item.coverDays === null ? "" : ` Estimated stock cover is ${item.coverDays.toFixed(1)} days.`;
+    return {
+      summary: `${store.name} has ${item.onHand} units of ${item.name} on hand${incoming}. ${reason}${cover}`,
+      facts: [{ id: item.sku, label: item.name, value: `${item.velocity.toFixed(2)} units sold per day (forecast)`,
+        href: `/products/${encodeURIComponent(item.sku)}?location=${encodeURIComponent(store.id)}&branch=${encodeURIComponent(store.id)}` }],
+      asOf: services.runtime.data.asOf, context: { topic: "forecast", search: item.sku, branchId: store.id }, source: "records",
+    };
+  }
+  const previous = input.previous && ChatIntentSchema.strip().parse(input.previous);
+  const { intent: proposed, source } = await interpret({ ...input, previous }, model, user, stores.map((store) => store.name));
   const intent = { ...proposed, branchId: branch };
   const reply = (
     summary: string,
@@ -186,20 +218,27 @@ export async function answerStockQuestion(
     return reply(glossaryAnswer(input.question));
   const ids = stores.map((store) => store.id);
   if (intent.topic === "sales") {
+    if (!stores.length) return reply("There are no active stores in your selected scope.");
     const totals = await reportedDailySales(ids, today, services.repositoryKind() === "mongo");
     const units = totals.reduce((sum, row) => sum + row.units, 0);
+    const reporting = new Set(totals.map((row) => row._id));
+    const missing = stores.filter((store) => !reporting.has(store.id));
     if (!totals.length)
-      return reply("No sales entries have been submitted for today in this scope.");
-    return reply(
-      `Stores reported ${units} units sold today across ${totals.length} reporting ${totals.length === 1 ? "store" : "stores"}.`,
-      totals
-        .sort((a, b) => b.units - a.units || a._id.localeCompare(b._id))
-        .map((row) => ({
-          id: row._id,
-          label: stores.find((store) => store.id === row._id)!.name,
-          value: `${row.units} ${row.units === 1 ? "unit" : "units"} · ${row.entries} ${row.entries === 1 ? "entry" : "entries"}`,
-        })),
-    );
+      return reply(stores.length === 1 ? `${stores[0]!.name} hasn’t submitted any sales entries today.` :
+        `No sales entries have been submitted today by the ${stores.length} stores in your scope.`);
+    const facts = totals
+      .sort((a, b) => b.units - a.units || a._id.localeCompare(b._id))
+      .map((row) => ({
+        id: row._id,
+        label: stores.find((store) => store.id === row._id)!.name,
+        value: `${row.units} ${row.units === 1 ? "unit" : "units"} · ${row.entries} ${row.entries === 1 ? "entry" : "entries"}`,
+      }));
+    if (missing.length) facts.push({
+      id: "awaiting_reports", label: "Still to report", value: missing.map((store) => store.name).join(", "),
+    });
+    const sold = `${units} ${units === 1 ? "unit" : "units"} sold today`;
+    return reply(stores.length === 1 ? `${stores[0]!.name} reported ${sold}.` :
+      `${sold}, based on entries from ${totals.length} of ${stores.length} stores.`, facts);
   }
   if (intent.topic === "catalog")
     return { ...readChatCatalog(services.runtime, user, ids, intent, today), context: intent, source };
@@ -282,7 +321,7 @@ export async function answerStockQuestion(
       ? /^(shortage_|shelf_check_)/.test(f.id)
       : f.id === "transfer_awaiting_release",
   );
-  return reply(
+  const answer = reply(
     intent.topic === "shortages"
       ? facts.length
         ? "These products have the shortest stock cover in this scope."
@@ -293,4 +332,6 @@ export async function answerStockQuestion(
     facts,
     records.asOf,
   );
+  if (intent.topic === "shortages") answer.context.firstItem = facts[0]?.position;
+  return answer;
 }

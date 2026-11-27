@@ -47,13 +47,20 @@ export const ChatIntentSchema = z.strictObject({
   search: z.string().trim().max(100),
   catalog: CatalogLookupSchema.nullish(),
 });
+const ChatContextSchema = ChatIntentSchema.extend({
+  firstItem: z.strictObject({
+    sku: z.string().min(1).max(100),
+    branchId: z.string().min(1).max(100),
+  }).optional(),
+});
 export const ChatRequestSchema = z.strictObject({
   question: z.string().trim().min(1).max(500),
   branchId: z.string().min(1).max(100).optional(),
   productSku: z.string().trim().min(1).max(100).optional(),
-  previous: ChatIntentSchema.optional(),
+  page: z.literal("sales").optional(),
+  previous: ChatContextSchema.optional(),
 });
-export const ChatResponseSchema = BriefResponseSchema.extend({ context: ChatIntentSchema });
+export const ChatResponseSchema = BriefResponseSchema.extend({ context: ChatContextSchema });
 export type ChatRequest = z.infer<typeof ChatRequestSchema>;
 export type ChatIntent = z.infer<typeof ChatIntentSchema>;
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;

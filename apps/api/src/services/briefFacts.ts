@@ -11,7 +11,9 @@ import { latestSubmissionDates } from "../db.js";
 import { BranchNotFoundError, DecisionForbiddenError, OrderNotFoundError } from "./errors.js";
 import type { StockServices } from "./index.js";
 
-export type BriefRecords = Omit<BriefResponse, "source">;
+export type BriefRecords = Omit<BriefResponse, "source" | "facts"> & {
+  facts: (BriefResponse["facts"][number] & { position?: { sku: string; branchId: string } })[];
+};
 const currency = (value: number) => `BD ${value.toFixed(3)}`;
 const shelfCheck = LocationInventoryItemSchema.pick({ sku: true, name: true, onHand: true });
 
@@ -106,6 +108,7 @@ async function storeRecords(
       },
       ...checks.map((item, index) => ({
         id: `shelf_check_${index + 1}`,
+        position: { sku: item.sku, branchId: branch },
         label: `Check ${item.name}`,
         value: `${item.onHand} units on hand`,
         href: `/products/${encodeURIComponent(item.sku)}?location=${encodeURIComponent(branch)}`,
@@ -166,6 +169,7 @@ export async function collectBriefRecords(
   for (const [index, item] of (live.shortages ?? []).slice(0, 2).entries()) {
     facts.push({
       id: `shortage_${index + 1}`,
+      position: { sku: item.sku, branchId: item.branchId },
       label: `${item.name} · ${item.branchName}`,
       value: `${item.coverDays.toFixed(1)} days of cover`,
       href: `/products/${encodeURIComponent(item.sku)}?branch=${encodeURIComponent(item.branchId)}`,

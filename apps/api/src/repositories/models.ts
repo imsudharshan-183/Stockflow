@@ -209,6 +209,8 @@ const salesEntrySchema = new Schema(
     sku: { type: String, required: true, trim: true },
     date: { type: String, required: true, trim: true },
     source: { type: String, enum: ["sample", "reported"] },
+    simulationDay: String,
+    simulationAnchor: Boolean,
     unitsSold: { type: Number, required: true, min: 0 },
     onHand: { type: Number, required: true, min: 0 },
     updatedAt: { type: Date, required: true, default: () => new Date() },

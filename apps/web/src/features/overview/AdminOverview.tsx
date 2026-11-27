@@ -1,4 +1,5 @@
 import { StockBrief } from "@/components/shared/StockBrief";
+import { DailySalesSimulation } from "@/components/shared/DailySalesSimulation";
 import { OverviewViews, QueueSummary } from "./OverviewViews";
 import { TabsContent } from "@/components/ui/tabs";
 import { Boxes, CircleDollarSign, TriangleAlert } from "lucide-react";
@@ -251,6 +252,7 @@ export function AdminOverview({
 
       <OverviewViews>
         <TabsContent value="daily" className="space-y-5">
+          <DailySalesSimulation />
           <QueueSummary count={pendingCount} gain={pendingGain} />
           <StockBrief branchId={selectedLocation ?? undefined} />
           <TransferHandoffs items={live?.handoffs} />

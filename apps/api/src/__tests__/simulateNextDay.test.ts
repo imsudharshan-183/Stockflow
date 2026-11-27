@@ -23,6 +23,48 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe.each(["memory", "mongo-memory"] as const)("sales simulation (%s)", kind => {
+  it("fills today's gaps once and lets staff submit before and after generation", async () => {
+    const { repo, cleanup } = await createDualRepo(kind, smallSeededDataset());
+    const { app, services } = await buildTestApp(repo, { ALLOW_SYNTHETIC_DATA: true });
+    const todayUrl = "/api/catalog/simulate-today";
+    try {
+      services.setClock(() => Date.parse("2026-11-26T21:30:00Z"));
+      const day = "2026-11-27";
+      const admin = await createUser(repo, "admin", []);
+      const staff = await createUser(repo, "staff", ["BR-001"]);
+      const headers = bearer(tokenFor(app, admin.user));
+      const staffHeaders = bearer(tokenFor(app, staff.user));
+      const report = (sku: string, unitsSold: number) => app.inject({ method: "POST", url: "/api/sales-entries", headers: staffHeaders,
+        payload: { date: day, branchId: "BR-001", sku, unitsSold, onHand: 45 } });
+      expect((await report("SKU-90001", 14)).statusCode).toBe(201);
+      expect((await app.inject({ method: "POST", url: todayUrl, headers: staffHeaders })).statusCode).toBe(403);
+      const status = () => app.inject({ method: "GET", url: todayUrl, headers });
+      expect((await status()).json()).toEqual({ day, result: null });
+      const run = () => app.inject({ method: "POST", url: todayUrl, headers });
+      const responses = await Promise.all([run(), run()]);
+      expect(responses.map(r => r.statusCode).sort()).toEqual([200, 429]);
+      const receipt = { targetDate: day, branches: 3, rows: 8 };
+      expect(responses.find(r => r.statusCode === 200)!.json()).toEqual(receipt);
+      expect((await status()).json()).toEqual({ day, result: receipt });
+      expect((await app.inject({ method: "POST", url, headers })).statusCode).toBe(429);
+      expect((await report("SKU-90002", 19)).statusCode).toBe(201);
+      expect((await run()).statusCode).toBe(429);
+      const entries = await listSalesEntries({ from: day, to: day, page: 1, limit: 20 }, kind === "mongo-memory");
+      expect(entries.total).toBe(9);
+      for (const [sku, units] of [["SKU-90001", 14], ["SKU-90002", 19]] as const) {
+        expect(entries.entries.find(r => r.sku === sku && r.branchId === "BR-001")?.unitsSold).toBe(units);
+      }
+      expect(services.runtime.data.sales[0]![0]!.at(-1)).toBe(14);
+      expect(services.runtime.data.sales[1]![0]!.at(-1)).toBe(19);
+      services.setClock(() => Date.parse("2026-11-27T21:00:00Z"));
+      expect((await status()).json()).toEqual({ day: "2026-11-28", result: null });
+      expect((await run()).json()).toEqual({ ...receipt, targetDate: "2026-11-28", rows: 9 });
+    } finally {
+      await app.close();
+      await cleanup();
+    }
+  }, 60_000);
+
   it("advances one dataset day per Bahrain day and publishes one batch per click", async () => {
     const data = smallSeededDataset();
     const { repo, cleanup } = await createDualRepo(kind, data);

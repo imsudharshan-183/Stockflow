@@ -11,6 +11,11 @@ export function localCatalogIntent(question: string, previous?: ChatIntent): Cha
   const q = question.toLowerCase().trim().replace(/[?!.]+$/, "");
   const prior = previous?.topic === "catalog" ? previous.catalog : undefined;
   const make = (catalog: CatalogLookup, search = ""): ChatIntent => ({ topic: "catalog", search, catalog });
+  if (/^(?:see|show)(?: me)? (?:the )?highest[- ]priced products$/.test(q))
+    return make({ ...baseQuery, metric: "price", sort: "descending", view: "list" });
+  const cutoff = q.match(/^(?:(?:what about|how about|and)\s+)?(?:bh?d\s*)?(\d+(?:\.\d{1,3})?)(?:\s*bh?d)?$/);
+  if (prior && prior.operator !== "any" && cutoff && (!/bh?d/.test(q) || prior.metric === "price"))
+    return make({ ...prior, amount: Number(cutoff[1]) }, previous!.search);
   if (prior && /^(?:which (?:ones|products)|(?:list|show)(?: me)? (?:them|those|the products))$/.test(q))
     return make({ ...prior, view: "list" }, previous!.search);
   const prefix = /^(how many|count|list|show(?: me)?) (?:active |distinct )?(?:products|skus|items)(?: do (?:i|we) have)?\b/;
@@ -66,11 +71,19 @@ export function readChatCatalog(runtime: StockRuntimeState, user: User, storeIds
   const scope = storeIds.length === 1 ? data.branches[branches[0]!]!.name : `the ${branches.length} selected stores`;
   const description = query.metric === "onHand" ? `${condition} on hand across ${scope}` :
     query.metric === "price" && condition ? ` priced${condition} in the shared catalog` : " in the shared catalog";
-  const summary = `${rows.length} active ${rows.length === 1 ? "product" : "products"}${intent.search ? ` matching “${intent.search}”` : ""}${description}.`;
+  const filterLabel = intent.search ? ` matching “${intent.search}”` : "";
+  const summary = !rows.length && query.metric === "price" && condition
+    ? `No active products${filterLabel} in the shared catalog are priced${condition}.`
+    : `${rows.length || "No"} active ${rows.length === 1 ? "product" : "products"}${filterLabel}${description}.`;
   const limit = 10;
   const facts = query.view === "count" ? [] : rows.slice(0, limit).map(({ product, value }) => ({
     id: product.sku, label: product.name, value: query.metric === "sku" ? product.sku : format(value),
     href: `/products/${encodeURIComponent(product.sku)}${storeIds.length === 1 ? "?location=" + encodeURIComponent(storeIds[0]!) : ""}`,
   }));
-  return { summary: summary + (facts.length && rows.length > limit ? ` Showing the first ${limit}.` : ""), facts, asOf: query.metric === "onHand" ? data.asOf : today };
+  const rankedPrices = query.view === "list" && query.metric === "price" && query.sort === "descending" && rows.length > 0;
+  return {
+    summary: rankedPrices ? `Showing ${facts.length} of ${rows.length} matching products, highest price first.` :
+      summary + (facts.length && rows.length > limit ? ` Showing the first ${limit}.` : ""),
+    facts, asOf: query.metric === "onHand" ? data.asOf : today,
+  };
 }

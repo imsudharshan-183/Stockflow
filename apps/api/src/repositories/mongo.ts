@@ -183,6 +183,7 @@ export class MongoRepository implements StockRepository {
         dropIfExists(UserModel),
         dropCollectionByName("products"),
         dropCollectionByName("sales_entries"),
+        dropCollectionByName("sales_simulation_runs"),
         dropCollectionByName("import_log"),
         dropCollectionByName("stock_alerts"),
         dropCollectionByName("replenishment_orders"),

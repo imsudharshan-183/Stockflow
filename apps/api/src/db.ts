@@ -51,6 +51,47 @@ export interface ImportLogEntry {
 const memorySalesEntries = new Map<string, SalesEntryRecord>();
 const memorySalesEntryAudits: SalesEntryAuditRecord[] = [];
 const memoryImportLogs: ImportLogEntry[] = [];
+interface SimulationClaim {
+  _id: string;
+  targetDate: string;
+  token: string;
+  expiresAt: Date;
+}
+const memorySimulationClaims = new Map<string, SimulationClaim>();
+
+// The day is the unique key across API instances and both simulation entry points.
+// A lease permits recovery after a process stops. Retries reuse the original target.
+export async function claimSimulationDay(day: string, targetDate: string, token: string, mongo: boolean) {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 15 * 60_000);
+  if (mongo) {
+    try {
+      return await mongoose.connection.collection<SimulationClaim>("sales_simulation_runs").findOneAndUpdate(
+        { _id: day, expiresAt: { $lte: now } },
+        { $set: { token, expiresAt }, $setOnInsert: { targetDate } },
+        { upsert: true, returnDocument: "after" },
+      );
+    } catch (err) {
+      if ((err as { code?: number }).code === 11000) return null;
+      throw err;
+    }
+  }
+  const previous = memorySimulationClaims.get(day);
+  if (previous && previous.expiresAt > now) return null;
+  const claim = { _id: day, targetDate: previous?.targetDate ?? targetDate, token, expiresAt };
+  memorySimulationClaims.set(day, claim);
+  return claim;
+}
+
+export async function releaseSimulationDay(day: string, token: string, mongo: boolean) {
+  if (mongo) {
+    await mongoose.connection.collection<SimulationClaim>("sales_simulation_runs")
+      .updateOne({ _id: day, token }, { $set: { expiresAt: new Date(0) } });
+  } else {
+    const claim = memorySimulationClaims.get(day);
+    if (claim?.token === token) claim.expiresAt = new Date(0);
+  }
+}
 
 function mapSalesEntryDoc(
   doc: {
@@ -81,6 +122,7 @@ export function clearMemorySalesEntries(): void {
   memorySalesEntries.clear();
   memorySalesEntryAudits.length = 0;
   memoryImportLogs.length = 0;
+  memorySimulationClaims.clear();
 }
 
 function makeEntryKey(branchId: string, sku: string, date: string): string {
@@ -88,6 +130,32 @@ function makeEntryKey(branchId: string, sku: string, date: string): string {
 }
 
 type DailyObservation = Pick<SalesEntryRecord, "branchId" | "sku" | "date" | "unitsSold" | "onHand">;
+
+export async function fillMissingSampleSales(rows: DailyObservation[], mongo: boolean, applyInMemory: (row: DailyObservation) => void, firstRowOn?: string) {
+  const updatedAt = new Date();
+  const anchor = firstRowOn ? { simulationDay: firstRowOn, simulationAnchor: true } : {};
+  if (mongo) {
+    const result = await SalesEntryModel.bulkWrite(rows.map((row, index) => ({
+      updateOne: {
+        filter: { branchId: row.branchId, sku: row.sku, date: row.date },
+        update: { $setOnInsert: { ...row, updatedAt, source: "sample", ...(index === 0 && anchor) } },
+        upsert: true,
+      },
+    })));
+    return result.upsertedCount;
+  }
+  let inserted = 0;
+  for (const row of rows) {
+    const key = makeEntryKey(row.branchId, row.sku, row.date);
+    const existing = memorySalesEntries.get(key);
+    if (!existing) {
+      memorySalesEntries.set(key, { ...row, id: key, updatedAt, source: "sample", ...(row === rows[0] && anchor) });
+      inserted++;
+    }
+    applyInMemory(existing ?? row);
+  }
+  return inserted;
+}
 
 export async function previewSalesImport(rows: DailyObservation[], mongo: boolean) {
   const keys = new Set(rows.map((r) => makeEntryKey(r.branchId, r.sku, r.date)));
@@ -433,15 +501,19 @@ export async function recordImportLog(entry: ImportLogEntry, mongo: boolean): Pr
 
 export async function listImportLogs(filter: {
   id?: string;
+  simulationOn?: string;
   userId?: string;
   limit?: number;
 }, mongo: boolean): Promise<ImportLogEntry[]> {
   const limit = Math.min(50, Math.max(1, filter.limit ?? 10));
+  const start = filter.simulationOn ? new Date(filter.simulationOn + "T00:00:00+03:00").toISOString() : undefined;
+  const end = start ? new Date(Date.parse(start) + 86_400_000).toISOString() : undefined;
 
   if (mongo) {
     const query = {
       ...(filter.userId && { "user.userId": filter.userId }),
       ...(filter.id && { id: filter.id }),
+      ...(start && { id: /^synthetic-sales-/, importedAt: { $gte: start, $lt: end } }),
     };
     const rows = await ImportLogModel.find(query)
       .sort({ importedAt: -1 })
@@ -466,6 +538,7 @@ export async function listImportLogs(filter: {
   }
 
   return [...memoryImportLogs]
+    .filter(item => !start || (item.id.startsWith("synthetic-sales-") && item.importedAt >= start && item.importedAt < end!))
     .filter((item) => !filter.id || item.id === filter.id)
     .filter((item) => (!filter.userId ? true : item.user.userId === filter.userId))
     .sort((a, b) => b.importedAt.localeCompare(a.importedAt))

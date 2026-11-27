@@ -184,11 +184,15 @@ function withQuery(path: string, query: Record<string, unknown>): string {
   return text.length > 0 ? `${path}?${text}` : path;
 }
 
+const SalesSimulationResult = z.object({ targetDate: z.string(), branches: z.number().int(), rows: z.number().int() });
+
 export const api = {
   health: () => request("/api/health", HealthSchema),
-  simulateNextDay: () => request("/api/catalog/simulate-next-day", z.object({
-    targetDate: z.string(), branches: z.number().int(), rows: z.number().int(),
-  }), { method: "POST" }),
+  simulateNextDay: () => request("/api/catalog/simulate-next-day", SalesSimulationResult, { method: "POST" }),
+  simulateToday: () => request("/api/catalog/simulate-today", SalesSimulationResult, { method: "POST" }),
+  simulationStatus: () => request("/api/catalog/simulate-today", z.object({
+    day: z.string(), result: SalesSimulationResult.nullable(),
+  })),
   chat: (input: ChatRequest) => request("/api/ai/chat", ChatResponseSchema, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
   }),
